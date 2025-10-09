@@ -23,7 +23,8 @@ class Img2img_Control_Ip_adapter:
         controlnet = ControlNetModel.from_pretrained('lllyasviel/control_v11f1p_sd15_depth', torch_dtype=torch.float16,
                                                      variant="fp16", use_safetensors=True)
         pipe = StableDiffusionControlNetPipeline.from_pretrained(
-            'runwayml/stable-diffusion-v1-5', controlnet=controlnet, torch_dtype=torch.float16, use_safetensors=True
+            'runwayml/stable-diffusion-v1-5', controlnet=controlnet, dtype=torch.float16, use_safetensors=True,
+            low_cpu_mem_usage=False, offload_state_dict=False
         )
         pipe.load_ip_adapter('h94/IP-Adapter', subfolder="models", weight_name="ip-adapter-plus_sd15.safetensors")
         pipe.set_ip_adapter_scale(0.7)
@@ -78,10 +79,12 @@ class HesModel:
         )
         self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
             'stabilityai/stable-diffusion-xl-base-1.0',
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             variant="fp16",
             controlnet=controlnet_depth,
             use_safetensors=True,
+            low_cpu_mem_usage=False,
+            offload_state_dict=False,
         )
         self.pipe.vae = AutoencoderKL.from_pretrained(
             'madebyollin/sdxl-vae-fp16-fix',
