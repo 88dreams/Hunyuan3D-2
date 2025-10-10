@@ -60,8 +60,13 @@ def _ensure_pipelines(
     if use_texture:
         if _paint_pipeline is None or _current_dtype != requested_dtype:
             print(f"Loading texture pipeline (dtype={'fp16' if use_fp16 else 'fp32'})...")
-            # Create without kwargs for widest compatibility; dtype applied via _apply_memory_savers
-            _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(PAINT_REPO)
+            # Load with only supported parameters
+            _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(
+                'tencent/Hunyuan3D-2',
+                subfolder='hunyuan3d-paint-v2-0-turbo'
+            )
+
+            # Note: Hunyuan3DPaintPipeline doesn't support .to() method like shape pipeline
         _apply_memory_savers(_paint_pipeline, attention_slicing, cpu_offload, requested_dtype)
 
     return requested_dtype
