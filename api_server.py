@@ -38,7 +38,12 @@ from fastapi.responses import JSONResponse, FileResponse
 from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline, FloaterRemover, DegenerateFaceRemover, FaceReducer, \
     MeshSimplifier
-from hy3dgen.texgen import Hunyuan3DPaintPipeline
+try:
+    from hy3dgen.texgen import Hunyuan3DPaintPipeline
+    TEXGEN_AVAILABLE = True
+except ImportError:
+    TEXGEN_AVAILABLE = False
+    print("Warning: texgen module not available, texture generation will be disabled")
 from hy3dgen.text2image import HunyuanDiTPipeline
 
 LOGDIR = '.'
@@ -168,7 +173,11 @@ class ModelWorker:
         #     device=device
         # )
         if enable_tex:
-            self.pipeline_tex = Hunyuan3DPaintPipeline.from_pretrained(tex_model_path)
+            if TEXGEN_AVAILABLE:
+                self.pipeline_tex = Hunyuan3DPaintPipeline.from_pretrained(tex_model_path)
+            else:
+                logger.warning("Texture generation requested but texgen module not available")
+                self.pipeline_tex = None
 
     def get_queue_length(self):
         if model_semaphore is None:
@@ -216,7 +225,10 @@ class ModelWorker:
             mesh = FloaterRemover()(mesh)
             mesh = DegenerateFaceRemover()(mesh)
             mesh = FaceReducer()(mesh, max_facenum=params.get('face_count', 40000))
-            mesh = self.pipeline_tex(mesh, image)
+            if self.pipeline_tex is not None:
+                mesh = self.pipeline_tex(mesh, image)
+            else:
+                logger.warning("Texture generation requested but texture pipeline not available")
 
         type = params.get('type', 'glb')
         with tempfile.NamedTemporaryFile(suffix=f'.{type}', delete=False) as temp_file:
@@ -308,6 +320,11 @@ if __name__ == "__main__":
     parser.add_argument('--enable_tex', action='store_true')
     args = parser.parse_args()
     logger.info(f"args: {args}")
+
+    # Disable texture generation if texgen module is not available
+    if args.enable_tex and not TEXGEN_AVAILABLE:
+        logger.warning("Texture generation requested but texgen module not available, disabling texture generation")
+        args.enable_tex = False
 
     model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
 

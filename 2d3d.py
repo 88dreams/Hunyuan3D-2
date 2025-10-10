@@ -9,18 +9,16 @@ import torch
 from PIL import Image
 
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
-from hy3dgen.texgen import Hunyuan3DPaintPipeline
 
 
 # Repositories and cache configuration
-SHAPE_REPO = "tencent/Hunyuan3D-2"
-PAINT_REPO = "tencent/Hunyuan3D-2"
-CACHE_DIR = "./weights"
+SHAPE_REPO = "tencent/Hunyuan3D-2mini"
+CACHE_DIR = "/home/arkrunr/.cache/huggingface/hub"
 
 
 _shape_pipeline: Optional[Hunyuan3DDiTFlowMatchingPipeline] = None
-_paint_pipeline: Optional[Hunyuan3DPaintPipeline] = None
 _current_dtype: Optional[torch.dtype] = None
+_current_model: Optional[str] = None
 
 
 def _apply_memory_savers(pipeline: object, attention_slicing: bool, cpu_offload: bool, dtype: torch.dtype) -> None:
@@ -34,40 +32,39 @@ def _apply_memory_savers(pipeline: object, attention_slicing: bool, cpu_offload:
 
 
 def _ensure_pipelines(
-    use_texture: bool,
+    model_choice: str,
     use_fp16: bool,
     attention_slicing: bool,
     cpu_offload: bool,
 ) -> torch.dtype:
-    """Load and cache the pipelines if needed, configure dtype and memory options."""
-    global _shape_pipeline, _paint_pipeline, _current_dtype
+    """Load and cache the shape pipeline if needed, configure dtype and memory options."""
+    global _shape_pipeline, _current_dtype
 
     requested_dtype = torch.float16 if use_fp16 else torch.float32
 
-    # Load or reload shape pipeline when dtype changes or not initialized
-    if _shape_pipeline is None or _current_dtype != requested_dtype:
-        print(f"Loading shape pipeline (dtype={'fp16' if use_fp16 else 'fp32'})...")
+    # Determine which model to use
+    global _current_model
+    selected_model = "tencent/Hunyuan3D-2" if "Full Model" in model_choice else "tencent/Hunyuan3D-2mini"
+
+    # Load or reload shape pipeline when model or dtype changes
+    if _shape_pipeline is None or _current_dtype != requested_dtype or _current_model != selected_model:
+        print(f"Loading shape pipeline (model={selected_model}, dtype={'fp16' if use_fp16 else 'fp32'})...")
+
+        # Determine subfolder based on model
+        subfolder = None
+        if "mini" in selected_model:
+            subfolder = "hunyuan3d-dit-v2-mini-turbo"
+
         _shape_pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
-            SHAPE_REPO,
+            selected_model,
+            subfolder=subfolder,
             cache_dir=CACHE_DIR,
             torch_dtype=requested_dtype,
         )
         _current_dtype = requested_dtype
+        _current_model = selected_model
 
     _apply_memory_savers(_shape_pipeline, attention_slicing, cpu_offload, requested_dtype)
-
-    # Texture pipeline only if requested
-    if use_texture:
-        if _paint_pipeline is None or _current_dtype != requested_dtype:
-            print(f"Loading texture pipeline (dtype={'fp16' if use_fp16 else 'fp32'})...")
-            # Load with only supported parameters
-            _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(
-                'tencent/Hunyuan3D-2',
-                subfolder='hunyuan3d-paint-v2-0-turbo'
-            )
-
-            # Note: Hunyuan3DPaintPipeline doesn't support .to() method like shape pipeline
-        _apply_memory_savers(_paint_pipeline, attention_slicing, cpu_offload, requested_dtype)
 
     return requested_dtype
 
@@ -79,20 +76,19 @@ def _load_image(image_path: str) -> Image.Image:
 
 def run(
     image_path: Union[str, None],
-    mode: str,
     guidance_scale: float,
     steps: int,
     seed: Optional[int],
+    model_choice: str,
     use_fp16: bool,
     attention_slicing: bool,
     cpu_offload: bool,
     output_name: str,
     save_location: str,
 ) -> Tuple[str, str]:
-    """Main generation entrypoint. Returns (output_file_path, logs)."""
+    """Shape generation entrypoint. Returns (output_file_path, logs)."""
     import time
-    # Explicitly declare global variables
-    global _shape_pipeline, _paint_pipeline
+
     if not image_path:
         raise gr.Error("Please provide an image.")
     if not os.path.exists(image_path):
@@ -113,8 +109,7 @@ def run(
 
     # Normalize names
     base_out = os.path.splitext(output_name)[0]
-    shape_out_path = os.path.join(save_dir, f"{base_out}_shape.glb")
-    final_out_path = os.path.join(save_dir, f"{base_out}.glb")
+    output_path = os.path.join(save_dir, f"{base_out}_shape.glb")
 
     # Optional determinism
     if seed is not None and str(seed).strip() != "":
@@ -123,20 +118,15 @@ def run(
         except Exception:
             pass
 
-    use_texture = mode == "Shape + Texture"
-
-    _ensure_pipelines(use_texture, use_fp16, attention_slicing, cpu_offload)
+    _ensure_pipelines(model_choice, use_fp16, attention_slicing, cpu_offload)
 
     img = _load_image(image_path)
 
     logs = []
-    result = None
     mesh = None
-    painted = None
-    textured_mesh = None
 
-    # Set timeout (8 minutes for texture generation, 4 for shape only)
-    timeout_duration = 480 if use_texture else 240
+    # Set timeout (10 minutes for shape generation to handle complex models)
+    timeout_duration = 600
     start_time = time.time()
 
     try:
@@ -145,12 +135,8 @@ def run(
             if time.time() - start_time > timeout_duration:
                 raise gr.Error(f"Generation timed out after {timeout_duration} seconds. Try reducing steps or enabling memory optimizations.")
 
-        logs.append("Generating shape...")
+        logs.append("Generating 3D shape...")
         check_timeout()
-
-        # Ensure shape pipeline is available
-        if _shape_pipeline is None or _current_dtype != (torch.float16 if use_fp16 else torch.float32):
-            _ensure_pipelines(use_texture=False, use_fp16=use_fp16, attention_slicing=attention_slicing, cpu_offload=cpu_offload)
 
         result = _shape_pipeline(
             image=img,
@@ -158,69 +144,20 @@ def run(
             num_inference_steps=int(steps),
         )
         mesh = result[0] if isinstance(result, (list, tuple)) else result
-        mesh.export(shape_out_path)
-        logs.append(f"Saved shape: {shape_out_path}")
+        mesh.export(output_path)
+        logs.append(f"Saved shape: {output_path}")
         check_timeout()
 
-        if use_texture:
-            logs.append("Applying texture...")
-            check_timeout()
-
-            # Ensure texture pipeline is available
-            if _paint_pipeline is None or _current_dtype != (torch.float16 if use_fp16 else torch.float32):
-                _ensure_pipelines(use_texture=True, use_fp16=use_fp16, attention_slicing=attention_slicing, cpu_offload=cpu_offload)
-
-            # Note: We keep the shape pipeline loaded for texture generation
-            # The memory clearing happens after successful completion
-
-            painted = _paint_pipeline(
-                mesh=mesh,
-                image=img,
-            )
-            textured_mesh = painted[0] if isinstance(painted, (list, tuple)) else painted
-            textured_mesh.export(final_out_path)
-            logs.append(f"Saved textured model: {final_out_path}")
-            check_timeout()
-
-            # Clear shape pipeline from memory after successful texture generation
-            if _shape_pipeline is not None:
-                try:
-                    del _shape_pipeline
-                    _shape_pipeline = None
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except Exception:
-                    pass
-
-            # Update the output file component to point to the new location
-        output_file_path = final_out_path if use_texture else shape_out_path
-        return output_file_path, "\n".join(logs)
-
-        # Update the output file component to point to the new location
-        output_file_path = shape_out_path
-        return output_file_path, "\n".join(logs)
+        return output_path, "\n".join(logs)
 
     except RuntimeError as e:
         if "out of memory" in str(e).lower():
             raise gr.Error("Out of GPU memory. Enable CPU offload / FP16 / attention slicing, or reduce steps.")
         raise
     finally:
-        # Proactively release GPU memory between runs
-        try:
-            del textured_mesh
-        except Exception:
-            pass
-        try:
-            del painted
-        except Exception:
-            pass
+        # Proactively release GPU memory
         try:
             del mesh
-        except Exception:
-            pass
-        try:
-            del result
         except Exception:
             pass
         gc.collect()
@@ -238,16 +175,20 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
     with gr.Row():
         image = gr.Image(type="filepath", label="Input image")
         with gr.Column():
-            mode = gr.Radio(choices=["Shape only", "Shape + Texture"], value="Shape only", label="Pipeline")
             guidance_scale = gr.Slider(1.0, 15.0, value=7.5, step=0.5, label="Guidance scale")
-            steps = gr.Slider(10, 100, value=50, step=1, label="Inference steps")
+            steps = gr.Slider(10, 100, value=30, step=1, label="Inference steps")
             seed = gr.Number(value=42, precision=0, label="Seed (optional)")
+            model_choice = gr.Radio(
+                choices=["Mini Model (Faster)", "Full Model (Higher Quality)"],
+                value="Mini Model (Faster)",
+                label="Model Selection"
+            )
             use_fp16 = gr.Checkbox(value=True, label="Use FP16 (half precision)")
             attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")
-            cpu_offload = gr.Checkbox(value=False, label="Enable CPU offload")
+            cpu_offload = gr.Checkbox(value=True, label="Enable CPU offload")
             output_name = gr.Textbox(value="output_model", label="Output name (no extension)")
             save_location = gr.Textbox(value="", label="Save location (optional - leave empty for current directory)", placeholder="/path/to/save/directory")
-            run_btn = gr.Button("Generate", variant="primary")
+            run_btn = gr.Button("Generate 3D Shape", variant="primary")
 
     with gr.Row():
         output_file = gr.File(label="Output GLB")
@@ -258,13 +199,12 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
 
     run_btn.click(
         fn=run,
-        inputs=[image, mode, guidance_scale, steps, seed, use_fp16, attention_slicing, cpu_offload, output_name, save_location],
+        inputs=[image, guidance_scale, steps, seed, model_choice, use_fp16, attention_slicing, cpu_offload, output_name, save_location],
         outputs=[output_file, logs_box],
     )
 
 
 if __name__ == "__main__":
-    # Default to port 8080 to match your note; change if needed
     # Enable queuing to avoid overlapping runs consuming VRAM
     # (no args for compatibility with your Gradio version)
     demo.queue()

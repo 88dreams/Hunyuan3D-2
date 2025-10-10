@@ -1052,7 +1052,7 @@ python test_installation.py
 ```
 - If you’re in another terminal/IDE, you must activate/select `hunyuan3d` there too (or run with the absolute interpreter):
 ```bash
-~/minoconda3/envs/hunyuan3d/bin/python test_installation.py
+~/miniconda3/envs/hunyuan3d/bin/python test_installation.py
 ```
 - If you compiled any C++/pybind components earlier, recompile them after activating `hunyuan3d` so they link against this Python.
 
@@ -1065,7 +1065,7 @@ python test_installation.py
 ```
 
 ```shellscript
-~/minoconda3/envs/hunyuan3d/bin/python test_installation.py
+~/miniconda3/envs/hunyuan3d/bin/python test_installation.py
 ```
 
 ---
@@ -1954,7 +1954,7 @@ export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
-source /home/arkrunr/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -1967,7 +1967,7 @@ chmod +x /home/arkrunr/Hunyuan3D-2/run_2d3d.sh
 Alternative (persistent):
 - Add the exports to your shell profile or to a conda activation hook:
   - ~/.bashrc
-  - or create /home/arkrunr/minoconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh with the same exports.
+  - or create /home/arkrunr/miniconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh with the same exports.
 
 If you prefer setting it in Python, I can adjust `2d3d.py` to set os.environ before importing torch, but the wrapper is the safer approach.
 
@@ -1978,7 +1978,7 @@ export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
-source /home/arkrunr/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -2344,7 +2344,7 @@ which python
 - Easiest: call the env’s python directly, skip conda.sh:
 ```bash
 # replace with your actual env path
-/ home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/ home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 - Or fix the script to source the right conda.sh (adjust path):
 ```bash
@@ -2354,7 +2354,7 @@ export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
-source /home/arkrunr/opt/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/opt/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -2371,7 +2371,7 @@ which python
 
 ```shellscript
 # replace with your actual env path
-/ home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/ home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
@@ -2381,7 +2381,7 @@ export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
-source /home/arkrunr/opt/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/opt/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -2409,11 +2409,11 @@ conda activate hunyuan3d
 - Avoid activation in scripts (most robust):
 Use the env’s Python directly (adjust path if needed):
 ```bash
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 Or, if you prefer activate inside the script, source the correct conda.sh first:
 ```bash
-source /home/arkrunr/opt/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/opt/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -2425,11 +2425,11 @@ conda activate hunyuan3d
 ```
 
 ```shellscript
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
-source /home/arkrunr/opt/minoconda3/etc/profile.d/conda.sh
+source /home/arkrunr/opt/miniconda3/etc/profile.d/conda.sh
 conda activate hunyuan3d
 python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
@@ -2456,7 +2456,7 @@ export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
 # Call the hunyuan3d env's Python directly
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 Then:
@@ -2480,7 +2480,7 @@ export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
 
 # Call the hunyuan3d env's Python directly
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
@@ -2731,7 +2731,7 @@ conda install -n hunyuan3d -c conda-forge libstdcxx-ng>=12
 ```
 - Verify:
 ```bash
-strings /home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK
+strings /home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK
 ```
 - If you still have issues, you can temporarily avoid ONNX by switching texture to CPU OR using a diffusers path that doesn’t require onnxruntime. Quick workaround to unblock texture:
 ```bash
@@ -2741,12 +2741,12 @@ pip install onnxruntime  # CPU-only; will be slower but should import without RO
 
 Re-run:
 ```bash
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 If errors persist, paste the new onnxruntime provider list:
 ```bash
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python -c \"import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())\"
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python -c \"import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())\"
 ```
 
 ```shellscript
@@ -2757,7 +2757,7 @@ conda install -n hunyuan3d -c conda-forge libstdcxx-ng>=12
 ```
 
 ```shellscript
-strings /home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK
+strings /home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK
 ```
 
 ```shellscript
@@ -2766,11 +2766,11 @@ pip install onnxruntime  # CPU-only; will be slower but should import without RO
 ```
 
 ```shellscript
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python -c \"import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())\"
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python -c \"import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())\"
 ```
 
 ---
@@ -2846,7 +2846,7 @@ exec $SHELL -l  # restart your shell to load the new conda
 conda install -n hunyuan3d -c conda-forge "libstdcxx-ng>=13" "libgcc-ng>=13"
 
 # find the library path in the env
-CONDA_PREFIX=/home/arkrunr/opt/minoconda3/envs/hunyuan3d
+CONDA_PREFIX=/home/arkrunr/opt/miniconda3/envs/hunyuan3d
 find $CONDA_PREFIX/lib -name 'libstdc++.so*'
 
 # verify the required symbol exists
@@ -2855,8 +2855,8 @@ strings $CONDA_PREFIX/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK || ech
 
 If you’re running without conda activate (using the env’s python directly), also add the env’s lib to LD_LIBRARY_PATH in your run script so onnxruntime finds the right libstdc++:
 ```bash
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
@@ -2869,7 +2869,7 @@ exec $SHELL -l  # restart your shell to load the new conda
 conda install -n hunyuan3d -c conda-forge "libstdcxx-ng>=13" "libgcc-ng>=13"
 
 # find the library path in the env
-CONDA_PREFIX=/home/arkrunr/opt/minoconda3/envs/hunyuan3d
+CONDA_PREFIX=/home/arkrunr/opt/miniconda3/envs/hunyuan3d
 find $CONDA_PREFIX/lib -name 'libstdc++.so*'
 
 # verify the required symbol exists
@@ -2877,8 +2877,8 @@ strings $CONDA_PREFIX/lib/libstdc++.so.6 | grep GLIBCXX_3.4.30 && echo OK || ech
 ```
 
 ```shellscript
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -2903,20 +2903,20 @@ set -euo pipefail
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
 
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 Alternative: make it persistent via a conda activation hook (recommended if you often use the env).
 - Create `activate.d/env.sh` in the `hunyuan3d` env:
 ```bash
-mkdir -p /home/arkrunr/opt/minoconda3/envs/hunyuan3d/etc/conda/activate.d
-cat > /home/arkrunr/opt/minoconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh <<'EOF'
+mkdir -p /home/arkrunr/opt/miniconda3/envs/hunyuan3d/etc/conda/activate.d
+cat > /home/arkrunr/opt/miniconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh <<'EOF'
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
 EOF
 ```
 Now `conda activate hunyuan3d` sets them automatically.
@@ -2928,18 +2928,18 @@ set -euo pipefail
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
 
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ```shellscript
-mkdir -p /home/arkrunr/opt/minoconda3/envs/hunyuan3d/etc/conda/activate.d
-cat > /home/arkrunr/opt/minoconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh <<'EOF'
+mkdir -p /home/arkrunr/opt/miniconda3/envs/hunyuan3d/etc/conda/activate.d
+cat > /home/arkrunr/opt/miniconda3/envs/hunyuan3d/etc/conda/activate.d/env.sh <<'EOF'
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
 export HIP_VISIBLE_DEVICES="0"
 export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256"
-export LD_LIBRARY_PATH="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/lib:${LD_LIBRARY_PATH:-}"
 EOF
 ```
 
@@ -3056,7 +3056,7 @@ Example run2d3d.sh:
 set -euo pipefail
 
 # Set your env's Python path (adjust if different)
-ENVPY="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python"
+ENVPY="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python"
 CONDA_PREFIX="$(dirname "$(dirname "$ENVPY")")"
 
 # ROCm + PyTorch allocator tuning
@@ -3083,7 +3083,7 @@ Adjust ENVPY if your env path differs.
 set -euo pipefail
 
 # Set your env's Python path (adjust if different)
-ENVPY="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python"
+ENVPY="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python"
 CONDA_PREFIX="$(dirname "$(dirname "$ENVPY")")"
 
 # ROCm + PyTorch allocator tuning
@@ -3106,19 +3106,19 @@ chmod +x /home/arkrunr/Hunyuan3D-2/run2d3d.sh
 
 **User**
 
-the directory is minoconda3 not minoconda3.
+the directory is miniconda3 not miniconda3.
 
 ---
 
 **Cursor**
 
-Got it—use minoconda3. Here’s the corrected wrapper:
+Got it—use miniconda3. Here’s the corrected wrapper:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENVPY="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python"
+ENVPY="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python"
 CONDA_PREFIX="$(dirname "$(dirname "$ENVPY")")"
 
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
@@ -3138,7 +3138,7 @@ which python
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENVPY="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python"
+ENVPY="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python"
 CONDA_PREFIX="$(dirname "$(dirname "$ENVPY")")"
 
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
@@ -3180,7 +3180,7 @@ pip install --upgrade "transformers==4.45.2" "diffusers==0.30.3" "accelerate==0.
 Then fully restart the app process and try again:
 ```bash
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 If it still fails, paste the printed transformers/diffusers versions and the new traceback.
@@ -3198,7 +3198,7 @@ pip install --upgrade "transformers==4.45.2" "diffusers==0.30.3" "accelerate==0.
 
 ```shellscript
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3217,14 +3217,14 @@ Fix in the hunyuan3d env, then restart the app:
 ```bash
 pip install --upgrade "transformers==4.45.2" "diffusers==0.30.3" "accelerate==0.34.2" "safetensors==0.4.5" "huggingface_hub==0.25.2"
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 If you then hit an onnxruntime/GLIBCXX error, install newer C++ runtime in the env and export LD_LIBRARY_PATH in your wrapper as we discussed.
 
 ```shellscript
 pip install --upgrade "transformers==4.45.2" "diffusers==0.30.3" "accelerate==0.34.2" "safetensors==0.4.5" "huggingface_hub==0.25.2"
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3248,7 +3248,7 @@ python -c "import transformers, diffusers; print('transformers:', transformers._
 pip install --upgrade "transformers>=4.46,<4.48" "diffusers>=0.30,<0.31" "accelerate>=0.34" "safetensors>=0.4" "huggingface_hub>=0.25"
 
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 If it still errors, quick workaround (no version change):
@@ -3262,7 +3262,7 @@ python -c "import transformers, diffusers; print('transformers:', transformers._
 pip install --upgrade "transformers>=4.46,<4.48" "diffusers>=0.30,<0.31" "accelerate>=0.34" "safetensors>=0.4" "huggingface_hub>=0.25"
 
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3286,7 +3286,7 @@ pip install --upgrade \
   "huggingface_hub==0.25.2"
 
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 Alternative (avoid downgrades): edit `hy3dgen/texgen/utils/dehighlight_utils.py` and add `low_cpu_mem_usage=False` in the call to `StableDiffusionInstructPix2PixPipeline.from_pretrained(...)`, then restart the app.
@@ -3300,7 +3300,7 @@ pip install --upgrade \
   "huggingface_hub==0.25.2"
 
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3437,14 +3437,14 @@ class Light_Shadow_Remover():
 Restart and try Shape + Texture again:
 ```bash
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 If it still fails, we can also apply the same flag to any other SD pipeline loads in the texture path.
 
 ```shellscript
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3580,7 +3580,7 @@ class Light_Shadow_Remover():
 Restart and try Shape + Texture again:
 ```bash
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 If the error persists, your installed `diffusers==0.35.1` may still internally pass `offload_state_dict` for other submodules; the reliable fix is aligning versions:
@@ -3589,7 +3589,7 @@ If the error persists, your installed `diffusers==0.35.1` may still internally p
 
 ```shellscript
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3925,7 +3925,7 @@ The fixes are now in place. Run this to test:
 
 ```bash
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 I systematically patched **all 3 SD pipeline loads** in the Hunyuan3D-2 codebase:
@@ -3944,7 +3944,7 @@ This should resolve the version mismatch. If you still see the error, it means t
 
 ```shellscript
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -3964,7 +3964,7 @@ The error persists because **transformers 4.57.0** doesn't support `offload_stat
 **Run this in your hunyuan3d environment:**
 ```bash
 cd /home/arkrunr/Hunyuan3D-2
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/pip install --upgrade \
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/pip install --upgrade \
   "transformers==4.45.2" \
   "diffusers==0.30.3" \
   "accelerate==0.34.2" \
@@ -3975,14 +3975,14 @@ cd /home/arkrunr/Hunyuan3D-2
 **Then restart the app:**
 ```bash
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 This pins to versions that are compatible and should eliminate the `offload_state_dict` error. The version pins are stable and widely used together in ML workflows.
 
 ```shellscript
 cd /home/arkrunr/Hunyuan3D-2
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/pip install --upgrade \
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/pip install --upgrade \
   "transformers==4.45.2" \
   "diffusers==0.30.3" \
   "accelerate==0.34.2" \
@@ -3992,7 +3992,7 @@ cd /home/arkrunr/Hunyuan3D-2
 
 ```shellscript
 pkill -f "2d3d.py" || true
-/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
+/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python /home/arkrunr/Hunyuan3D-2/2d3d.py
 ```
 
 ---
@@ -7646,7 +7646,7 @@ rm -rf /home/arkrunr/.cache/chromium
 
 ### **5. Keep These (Essential)**
 - ❌ **`Hunyuan3D-2/weights/`** - your downloaded models (can redownload if needed)
-- ❌ **`opt/minoconda3`** - your Python environment
+- ❌ **`opt/miniconda3`** - your Python environment
 - ❌ **Your generated GLB outputs** in main directories
 
 ## **Quick Cleanup Command**
@@ -7745,7 +7745,7 @@ rm /home/arkrunr/Downloads/output_model_shape.glb
 - Includes all necessary model weights
 - Has your modifications (2d3d.py, etc.)
 
-#### **✅ opt/minoconda3 (19G)** - **KEEP**  
+#### **✅ opt/miniconda3 (19G)** - **KEEP**  
 - Your Python environment with all packages
 - Required for running Hunyuan3D
 
