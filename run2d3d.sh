@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Set your env's Python path (adjust if different)
-ENVPY="/home/arkrunr/opt/minoconda3/envs/hunyuan3d/bin/python"
+ENVPY="/home/arkrunr/opt/miniconda3/envs/hunyuan3d/bin/python"
 CONDA_PREFIX="$(dirname "$(dirname "$ENVPY")")"
 
 export HSA_OVERRIDE_GFX_VERSION="10.3.0"
