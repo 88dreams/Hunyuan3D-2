@@ -87,6 +87,7 @@ def run(
     attention_slicing: bool,
     cpu_offload: bool,
     output_name: str,
+    save_location: str,
 ) -> Tuple[str, str]:
     """Main generation entrypoint. Returns (output_file_path, logs)."""
     import time
@@ -100,10 +101,20 @@ def run(
     if not output_name:
         output_name = "output_model"
 
+    # Handle save location
+    if save_location and save_location.strip():
+        # Ensure save location exists
+        os.makedirs(save_location, exist_ok=True)
+        # Use absolute path for save location
+        save_dir = os.path.abspath(save_location)
+    else:
+        # Default to current directory
+        save_dir = os.getcwd()
+
     # Normalize names
     base_out = os.path.splitext(output_name)[0]
-    shape_out_path = f"{base_out}_shape.glb"
-    final_out_path = f"{base_out}.glb"
+    shape_out_path = os.path.join(save_dir, f"{base_out}_shape.glb")
+    final_out_path = os.path.join(save_dir, f"{base_out}.glb")
 
     # Optional determinism
     if seed is not None and str(seed).strip() != "":
@@ -182,9 +193,13 @@ def run(
                 except Exception:
                     pass
 
-            return final_out_path, "\n".join(logs)
+            # Update the output file component to point to the new location
+        output_file_path = final_out_path if use_texture else shape_out_path
+        return output_file_path, "\n".join(logs)
 
-        return shape_out_path, "\n".join(logs)
+        # Update the output file component to point to the new location
+        output_file_path = shape_out_path
+        return output_file_path, "\n".join(logs)
 
     except RuntimeError as e:
         if "out of memory" in str(e).lower():
@@ -231,6 +246,7 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
             attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")
             cpu_offload = gr.Checkbox(value=False, label="Enable CPU offload")
             output_name = gr.Textbox(value="output_model", label="Output name (no extension)")
+            save_location = gr.Textbox(value="", label="Save location (optional - leave empty for current directory)", placeholder="/path/to/save/directory")
             run_btn = gr.Button("Generate", variant="primary")
 
     with gr.Row():
@@ -242,7 +258,7 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
 
     run_btn.click(
         fn=run,
-        inputs=[image, mode, guidance_scale, steps, seed, use_fp16, attention_slicing, cpu_offload, output_name],
+        inputs=[image, mode, guidance_scale, steps, seed, use_fp16, attention_slicing, cpu_offload, output_name, save_location],
         outputs=[output_file, logs_box],
     )
 
@@ -252,6 +268,5 @@ if __name__ == "__main__":
     # Enable queuing to avoid overlapping runs consuming VRAM
     # (no args for compatibility with your Gradio version)
     demo.queue()
-    demo.launch(server_port=8080, share=False)
-
-
+    demo.launch(server_port=7860, share=False)
+    
