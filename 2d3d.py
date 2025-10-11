@@ -193,11 +193,18 @@ def run(
         except Exception:
             pass
 
+    # Aggressive GPU memory cleanup before starting
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        gc.collect()
+
     _ensure_pipelines(model_choice, use_fp16, attention_slicing, cpu_offload)
 
     img = _load_image(image_path)
 
     logs = []
+    logs.append("GPU memory cleared and synchronized")
 
     # Apply background removal if requested
     if remove_background:
@@ -231,17 +238,29 @@ def run(
         # Capture progress output
         progress_status = "🔄 Stage 1/3: Diffusion sampling (~40s)..."
         logs.append(progress_status)
-        logs.append(f"Resolution: {320}, Chunks: {8000}, Steps: {int(steps)}, Guidance: {float(guidance_scale)}")
+        # This will be updated below with actual values
         
         # Run the pipeline (this includes diffusion + volume decoding)
         logs.append("Running diffusion and volume decoding (this will take ~20-25 minutes)...")
+        
+        # Adaptive resolution based on model for maximum quality
+        if "Mini Model" in model_choice:
+            octree_res = 380  # Maximum quality for mini model
+            chunks = 6000     # Optimized for resolution 380
+            logs.append("Using maximum quality settings for Mini Model (resolution=380)")
+        else:  # Full Model
+            octree_res = 360  # Higher quality with smaller chunks
+            chunks = 5000     # Smaller chunks allow higher resolution
+            logs.append("Using high quality settings for Full Model (resolution=360, chunks=5000)")
+        
+        logs.append(f"Using octree_resolution={octree_res}, num_chunks={chunks} for {model_choice}")
         
         result = _shape_pipeline(
             image=img,
             guidance_scale=float(guidance_scale),
             num_inference_steps=int(steps),
-            octree_resolution=320,
-            num_chunks=8000,
+            octree_resolution=octree_res,
+            num_chunks=chunks,
         )
         
         progress_status = "🔄 Stage 3/3: Extracting surface mesh (5-7 minutes, CPU-intensive)..."
@@ -249,6 +268,13 @@ def run(
         logs.append(progress_status)
         logs.append("Note: Surface extraction runs on CPU and has no progress bar")
         logs.append("Please wait patiently - this is normal and will complete...")
+        
+        # Clear GPU memory before surface extraction
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            gc.collect()
+            logs.append("GPU memory cleared before surface extraction")
         
         mesh = result[0] if isinstance(result, (list, tuple)) else result
         
@@ -315,12 +341,13 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
         # Right column - Controls
         with gr.Column(scale=1):
             guidance_scale = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance scale")
-            steps = gr.Slider(10, 100, value=25, step=1, label="Inference steps")
+            steps = gr.Slider(10, 100, value=40, step=1, label="Inference steps")
             seed = gr.Number(value=42, precision=0, label="Seed (optional)")
             model_choice = gr.Radio(
                 choices=["Mini Model (Faster)", "Full Model (Higher Quality)"],
                 value="Mini Model (Faster)",
-                label="Model Selection"
+                label="Model Selection",
+                info="Note: Full model may occasionally have GPU memory issues. If it hangs, use Mini model."
             )
             use_fp16 = gr.Checkbox(value=True, label="Use FP16 (half precision)")
             attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")

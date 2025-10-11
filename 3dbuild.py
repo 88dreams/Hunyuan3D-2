@@ -28,12 +28,12 @@ def main():
     parser.add_argument('--texture-model',
                        choices=['mini', 'full'],
                        help='Texture generation model (optional, uses shape model if not specified)')
-    parser.add_argument('--steps', type=int, default=25,
-                       help='Number of inference steps (default: 25 - optimized for architecture)')
+    parser.add_argument('--steps', type=int, default=40,
+                       help='Number of inference steps (default: 40 - maximum quality)')
     parser.add_argument('--guidance-scale', type=float, default=9.0,
-                       help='Guidance scale (default: 9.0 - higher for geometric accuracy)')
-    parser.add_argument('--octree-resolution', type=int, default=320,
-                       help='Octree resolution (default: 320 - optimized for sharp edges)')
+                       help='Guidance scale (default: 9.0 - optimal for geometric accuracy)')
+    parser.add_argument('--octree-resolution', type=int, default=380,
+                       help='Octree resolution (default: 380 - maximum quality for mini model)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed (default: 42)')
     parser.add_argument('--fp16', action='store_true',
@@ -134,12 +134,15 @@ def main():
     start_time = time.time()
 
     try:
+        # Use consistent 6000 chunks for better memory management
+        chunks = 6000
+        
         mesh = pipeline(
             image=image,
             guidance_scale=args.guidance_scale,
             num_inference_steps=args.steps,
             octree_resolution=args.octree_resolution,
-            num_chunks=8000,
+            num_chunks=chunks,
             generator=torch.Generator().manual_seed(args.seed) if args.seed else None,
         )[0]
 
