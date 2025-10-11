@@ -10,6 +10,7 @@ import os
 
 from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
+from rembg import remove
 try:
     from hy3dgen.texgen import Hunyuan3DPaintPipeline
     TEXGEN_AVAILABLE = True
@@ -27,18 +28,20 @@ def main():
     parser.add_argument('--texture-model',
                        choices=['mini', 'full'],
                        help='Texture generation model (optional, uses shape model if not specified)')
-    parser.add_argument('--steps', type=int, default=30,
-                       help='Number of inference steps (default: 30)')
-    parser.add_argument('--guidance-scale', type=float, default=7.5,
-                       help='Guidance scale (default: 7.5)')
-    parser.add_argument('--octree-resolution', type=int, default=256,
-                       help='Octree resolution (default: 256)')
+    parser.add_argument('--steps', type=int, default=25,
+                       help='Number of inference steps (default: 25 - optimized for architecture)')
+    parser.add_argument('--guidance-scale', type=float, default=9.0,
+                       help='Guidance scale (default: 9.0 - higher for geometric accuracy)')
+    parser.add_argument('--octree-resolution', type=int, default=320,
+                       help='Octree resolution (default: 320 - optimized for sharp edges)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed (default: 42)')
     parser.add_argument('--fp16', action='store_true',
                        help='Use FP16 precision')
-    parser.add_argument('--no-rembg', action='store_true',
-                       help='Skip background removal')
+    parser.add_argument('--rembg', action='store_true',
+                       help='Remove background automatically (disabled by default for speed)')
+    parser.add_argument('--no-rembg', action='store_true', default=True,
+                       help='Skip background removal (default)')
     parser.add_argument('--texture', action='store_true',
                        help='Generate texture (requires texture model)')
 
@@ -61,10 +64,22 @@ def main():
     # Load and preprocess image
     image = Image.open(args.image_path).convert("RGBA")
 
-    if not args.no_rembg and image.mode == 'RGBA':
+    # Apply background removal if requested (default: disabled for speed)
+    do_rembg = args.rembg and not args.no_rembg
+    if do_rembg:
         print("Removing background...")
-        rembg = BackgroundRemover()
-        image = rembg(image.convert("RGB")).convert("RGBA")
+        try:
+            # Use CPU-only for reliability and speed
+            from rembg import new_session
+            session = new_session(providers=['CPUExecutionProvider'])
+            image_array = remove(image.convert("RGB"), session=session, bgcolor=[255, 255, 255, 0])
+            image = Image.fromarray(image_array).convert("RGBA")
+            print("Background removed using CPU")
+        except Exception as e:
+            print(f"Background removal failed: {e}")
+            print("Continuing without background removal")
+    else:
+        print("Skipping background removal (disabled for speed)")
 
     # Load shape pipeline
     print(f"Loading shape model: {shape_model}")
@@ -73,6 +88,8 @@ def main():
     subfolder = None
     if "mini" in shape_model:
         subfolder = "hunyuan3d-dit-v2-mini-turbo"
+    elif "tencent/Hunyuan3D-2" in shape_model:
+        subfolder = "hunyuan3d-dit-v2-0"
 
     pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
         shape_model,
@@ -91,6 +108,8 @@ def main():
             tex_subfolder = None
             if "mini" in tex_model:
                 tex_subfolder = "hunyuan3d-dit-v2-mini-turbo"
+            elif "tencent/Hunyuan3D-2" in tex_model:
+                tex_subfolder = "hunyuan3d-dit-v2-0"
 
             texture_pipeline = Hunyuan3DPaintPipeline.from_pretrained(
                 tex_model,
@@ -105,17 +124,31 @@ def main():
     if args.seed is not None:
         torch.manual_seed(args.seed)
 
+    # Enable memory optimizations for faster generation
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()  # Clear GPU cache
+        print("GPU memory cleared")
+
     # Generate 3D model
     print(f"Generating 3D model with {args.steps} steps...")
     start_time = time.time()
 
-    mesh = pipeline(
-        image=image,
-        guidance_scale=args.guidance_scale,
-        num_inference_steps=args.steps,
-        octree_resolution=args.octree_resolution,
-        generator=torch.Generator().manual_seed(args.seed) if args.seed else None,
-    )[0]
+    try:
+        mesh = pipeline(
+            image=image,
+            guidance_scale=args.guidance_scale,
+            num_inference_steps=args.steps,
+            octree_resolution=args.octree_resolution,
+            num_chunks=8000,
+            generator=torch.Generator().manual_seed(args.seed) if args.seed else None,
+        )[0]
+
+        gen_time = time.time() - start_time
+        print(f"Generation completed in {gen_time:.2f} seconds")
+    except Exception as e:
+        print(f"Generation failed: {e}")
+        print("This might be due to memory issues or GPU problems")
+        raise
 
     # Apply texture if requested
     if args.texture and texture_pipeline:

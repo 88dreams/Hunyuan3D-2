@@ -18,8 +18,18 @@ from rembg import remove, new_session
 
 class BackgroundRemover():
     def __init__(self):
-        self.session = new_session()
+        # Use CPU only for reliability and speed - avoid GPU provider issues
+        try:
+            self.session = new_session(providers=['CPUExecutionProvider'])
+            print("Background removal using: CPUExecutionProvider")
+        except Exception as e:
+            print(f"Failed to initialize background removal: {e}")
+            self.session = None
 
     def __call__(self, image: Image.Image):
+        if self.session is None:
+            print("Background removal not available, returning original image")
+            return image
+
         output = remove(image, session=self.session, bgcolor=[255, 255, 255, 0])
         return output

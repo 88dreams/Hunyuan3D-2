@@ -7,6 +7,10 @@ from typing import Optional, Tuple, Union
 import gradio as gr
 import torch
 from PIL import Image
+import psutil
+import time
+import threading
+import subprocess
 
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
@@ -19,6 +23,75 @@ CACHE_DIR = "/home/arkrunr/.cache/huggingface/hub"
 _shape_pipeline: Optional[Hunyuan3DDiTFlowMatchingPipeline] = None
 _current_dtype: Optional[torch.dtype] = None
 _current_model: Optional[str] = None
+
+# System monitoring
+_system_metrics = {
+    "cpu_percent": 0.0,
+    "memory_percent": 0.0,
+    "gpu_percent": 0.0,
+    "gpu_memory_percent": 0.0,
+    "last_update": 0.0
+}
+
+def _update_system_metrics():
+    """Update system metrics every 2 seconds"""
+    while True:
+        try:
+            _system_metrics["cpu_percent"] = psutil.cpu_percent(interval=1)
+            _system_metrics["memory_percent"] = psutil.virtual_memory().percent
+            _system_metrics["gpu_percent"] = 0.0
+            _system_metrics["gpu_memory_percent"] = 0.0
+
+            # Try ROCm/AMD GPU monitoring
+            try:
+                import subprocess
+                result = subprocess.run(['rocm-smi', '--showuse'], capture_output=True, text=True, timeout=2)
+                if result.returncode == 0:
+                    lines = result.stdout.split('\n')
+                    for line in lines:
+                        if 'GPU use' in line:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                try:
+                                    _system_metrics["gpu_percent"] = float(parts[-1].rstrip('%'))
+                                except:
+                                    pass
+            except:
+                pass
+
+            _system_metrics["last_update"] = time.time()
+        except Exception:
+            pass
+
+        time.sleep(2.0)
+
+def get_system_metrics():
+    """Get current system metrics for display"""
+    return _system_metrics
+
+def _format_system_metrics(metrics):
+    """Format system metrics for display"""
+    cpu = metrics.get("cpu_percent", 0)
+    mem = metrics.get("memory_percent", 0)
+    gpu = metrics.get("gpu_percent", 0)
+    gpu_mem = metrics.get("gpu_memory_percent", 0)
+
+    def color_code(value, thresholds=[50, 80]):
+        if value >= thresholds[1]:
+            return f"🔴 {value:.1f}%"
+        elif value >= thresholds[0]:
+            return f"🟡 {value:.1f}%"
+        else:
+            return f"🟢 {value:.1f}%"
+
+    lines = [
+        f"CPU: {color_code(cpu)} | Memory: {color_code(mem)}",
+        f"GPU: {color_code(gpu)} | GPU Memory: {color_code(gpu_mem)}"
+    ]
+    return "\n".join(lines)
+
+# Background monitoring thread (initialized later)
+_monitor_thread = None
 
 
 def _apply_memory_savers(pipeline: object, attention_slicing: bool, cpu_offload: bool, dtype: torch.dtype) -> None:
@@ -51,9 +124,10 @@ def _ensure_pipelines(
         print(f"Loading shape pipeline (model={selected_model}, dtype={'fp16' if use_fp16 else 'fp32'})...")
 
         # Determine subfolder based on model
-        subfolder = None
         if "mini" in selected_model:
             subfolder = "hunyuan3d-dit-v2-mini-turbo"
+        else:
+            subfolder = "hunyuan3d-dit-v2-0"
 
         _shape_pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             selected_model,
@@ -83,9 +157,10 @@ def run(
     use_fp16: bool,
     attention_slicing: bool,
     cpu_offload: bool,
+    remove_background: bool,
     output_name: str,
     save_location: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str]:
     """Shape generation entrypoint. Returns (output_file_path, logs)."""
     import time
 
@@ -123,10 +198,22 @@ def run(
     img = _load_image(image_path)
 
     logs = []
+
+    # Apply background removal if requested
+    if remove_background:
+        logs.append("Removing background...")
+        from hy3dgen.rembg import BackgroundRemover
+        rembg = BackgroundRemover()
+        img = rembg(img.convert("RGB")).convert("RGBA")
+        logs.append("Background removed")
+
+        # Clear memory after background removal
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     mesh = None
 
-    # Set timeout (10 minutes for shape generation to handle complex models)
-    timeout_duration = 600
+    # Set timeout (45 minutes for shape generation to handle complex architectural models at high resolution)
+    timeout_duration = 2700
     start_time = time.time()
 
     try:
@@ -138,22 +225,54 @@ def run(
         logs.append("Generating 3D shape...")
         check_timeout()
 
+        import sys
+        from io import StringIO
+        
+        # Capture progress output
+        progress_status = "🔄 Stage 1/3: Diffusion sampling (~40s)..."
+        logs.append(progress_status)
+        logs.append(f"Resolution: {320}, Chunks: {8000}, Steps: {int(steps)}, Guidance: {float(guidance_scale)}")
+        
+        # Run the pipeline (this includes diffusion + volume decoding)
+        logs.append("Running diffusion and volume decoding (this will take ~20-25 minutes)...")
+        
         result = _shape_pipeline(
             image=img,
             guidance_scale=float(guidance_scale),
             num_inference_steps=int(steps),
+            octree_resolution=320,
+            num_chunks=8000,
         )
+        
+        progress_status = "🔄 Stage 3/3: Extracting surface mesh (5-7 minutes, CPU-intensive)..."
+        logs.append("Volume decoding complete!")
+        logs.append(progress_status)
+        logs.append("Note: Surface extraction runs on CPU and has no progress bar")
+        logs.append("Please wait patiently - this is normal and will complete...")
+        
         mesh = result[0] if isinstance(result, (list, tuple)) else result
+        
+        progress_status = "💾 Exporting GLB file..."
+        logs.append("Surface extraction complete!")
+        logs.append(progress_status)
+        
         mesh.export(output_path)
-        logs.append(f"Saved shape: {output_path}")
+        logs.append(f"✅ Saved shape: {output_path}")
+        
+        progress_status = "✅ Generation complete!"
         check_timeout()
 
-        return output_path, "\n".join(logs)
+        return output_path, "\n".join(logs), progress_status
 
     except RuntimeError as e:
-        if "out of memory" in str(e).lower():
-            raise gr.Error("Out of GPU memory. Enable CPU offload / FP16 / attention slicing, or reduce steps.")
-        raise
+        error_msg = str(e)
+        if "out of memory" in error_msg.lower():
+            return None, f"❌ Error: Out of GPU memory. Enable CPU offload / FP16 / attention slicing, or reduce steps.\n\n{error_msg}", "❌ Failed: Out of memory"
+        return None, f"❌ Error: {error_msg}", "❌ Generation failed"
+    except gr.Error:
+        raise  # Re-raise Gradio errors (like timeout)
+    except Exception as e:
+        return None, f"❌ Unexpected error: {str(e)}", "❌ Generation failed"
     finally:
         # Proactively release GPU memory
         try:
@@ -173,10 +292,30 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
     gr.Markdown("## Hunyuan3D 2D→3D\nUpload an image, set options, and generate a GLB.")
 
     with gr.Row():
-        image = gr.Image(type="filepath", label="Input image")
-        with gr.Column():
-            guidance_scale = gr.Slider(1.0, 15.0, value=7.5, step=0.5, label="Guidance scale")
-            steps = gr.Slider(10, 100, value=30, step=1, label="Inference steps")
+        # Left column - Image and system metrics
+        with gr.Column(scale=1):
+            image = gr.Image(type="filepath", label="Input image")
+
+            # System monitoring display (under image)
+            system_metrics = gr.Textbox(
+                label="System Resources (updates every 2s)",
+                value="Loading system metrics...",
+                interactive=False,
+                lines=2
+            )
+
+            # Progress display (shows generation stages)
+            progress_display = gr.Textbox(
+                label="Generation Progress",
+                value="Ready to generate...",
+                interactive=False,
+                lines=1
+            )
+
+        # Right column - Controls
+        with gr.Column(scale=1):
+            guidance_scale = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance scale")
+            steps = gr.Slider(10, 100, value=25, step=1, label="Inference steps")
             seed = gr.Number(value=42, precision=0, label="Seed (optional)")
             model_choice = gr.Radio(
                 choices=["Mini Model (Faster)", "Full Model (Higher Quality)"],
@@ -186,6 +325,7 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
             use_fp16 = gr.Checkbox(value=True, label="Use FP16 (half precision)")
             attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")
             cpu_offload = gr.Checkbox(value=True, label="Enable CPU offload")
+            remove_background = gr.Checkbox(value=False, label="Remove background automatically")
             output_name = gr.Textbox(value="output_model", label="Output name (no extension)")
             save_location = gr.Textbox(value="", label="Save location (optional - leave empty for current directory)", placeholder="/path/to/save/directory")
             run_btn = gr.Button("Generate 3D Shape", variant="primary")
@@ -199,12 +339,25 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
 
     run_btn.click(
         fn=run,
-        inputs=[image, guidance_scale, steps, seed, model_choice, use_fp16, attention_slicing, cpu_offload, output_name, save_location],
-        outputs=[output_file, logs_box],
+        inputs=[image, guidance_scale, steps, seed, model_choice, use_fp16, attention_slicing, cpu_offload, remove_background, output_name, save_location],
+        outputs=[output_file, logs_box, progress_display],
     )
 
+    # Timer to update system metrics every 2 seconds
+    def update_metrics():
+        return _format_system_metrics(get_system_metrics())
+
+    timer = gr.Timer(2.0)
+    timer.tick(fn=update_metrics, outputs=[system_metrics])
 
 if __name__ == "__main__":
+    # Start monitoring thread when Gradio launches
+    _monitor_thread = threading.Thread(target=_update_system_metrics, daemon=True)
+    _monitor_thread.start()
+    
+    # Give monitoring thread time to start
+    time.sleep(0.5)
+
     # Enable queuing to avoid overlapping runs consuming VRAM
     # (no args for compatibility with your Gradio version)
     demo.queue()
