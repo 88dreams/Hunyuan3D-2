@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-
+# pyright: reportMissingImports=false
+print("DEBUG: STARTING NEW VERSION OF 2D3D.PY (Port 5683)")
 import os
 import gc
+import tempfile
 from typing import Optional, Tuple, Union
 
-import gradio as gr
-import torch
+import gradio as gr  # type: ignore
+import torch  # type: ignore
 from PIL import Image
-import psutil
+import psutil  # type: ignore
 import time
 import threading
 import subprocess
 
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
-
 # Repositories and cache configuration
 SHAPE_REPO = "tencent/Hunyuan3D-2mini"
 CACHE_DIR = "/home/arkrunr/.cache/huggingface/hub"
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+GEN3C_SCRIPT = os.path.join(PROJECT_ROOT, "scripts", "run_gen3c.sh")
+GEN3C_DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "assets", "gen3c_outputs")
+GEN3C_DEFAULT_CHECKPOINT = "/home/arkrunr/GEN3C/checkpoints"
+HUNYUAN_DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "assets", "hunyuan_outputs")
 
 
 _shape_pipeline: Optional[Hunyuan3DDiTFlowMatchingPipeline] = None
@@ -92,6 +99,79 @@ def _format_system_metrics(metrics):
 
 # Background monitoring thread (initialized later)
 _monitor_thread = None
+def _clamp_scale_value(value: Union[float, int, None]) -> float:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return min(1.0, max(0.25, val))
+
+
+def _get_image_dimensions(image_path: Optional[str]) -> Tuple[Optional[int], Optional[int]]:
+    if not image_path or not os.path.exists(image_path):
+        return None, None
+    try:
+        with Image.open(image_path) as img:
+            return img.width, img.height
+    except Exception:
+        return None, None
+
+
+def _format_resize_text(
+    width: Optional[int],
+    height: Optional[int],
+    scale: Union[float, int, None],
+) -> str:
+    if width is None or height is None:
+        return "No image loaded."
+    scale = _clamp_scale_value(scale)
+    target_w = max(64, int(round(width * scale)))
+    target_h = max(64, int(round(height * scale)))
+    percent = int(round(scale * 100))
+    return f"Original: {width}×{height}\nTarget ({percent}%): {target_w}×{target_h}"
+
+
+def update_image_info_display(image_path: Optional[str], scale: Union[float, int, None]):
+    width, height = _get_image_dimensions(image_path)
+    return _format_resize_text(width, height, scale or 1.0)
+
+
+def _safe_preview_update(image_path: Optional[str] = None, scale: Union[float, int, None] = None):
+    return update_image_info_display(image_path, scale or 1.0)
+
+
+def poll_image_preview(*args, **kwargs):
+    image_path = None
+    scale = 1.0
+    if args:
+        image_path = args[0]
+    if len(args) > 1:
+        scale = args[1]
+    scale = kwargs.get("scale", scale)
+    return update_image_info_display(image_path, scale), (None, None), None
+
+
+def _maybe_downscale_image(image_path: Optional[str], scale: Union[float, int, None]) -> Tuple[Optional[str], Optional[str]]:
+    scale = _clamp_scale_value(scale)
+    if not image_path or scale >= 0.999:
+        return image_path, None
+    try:
+        with Image.open(image_path) as img:
+            target_w = max(64, int(round(img.width * scale)))
+            target_h = max(64, int(round(img.height * scale)))
+            if target_w == img.width and target_h == img.height:
+                return image_path, None
+            resample_attr = getattr(Image, "Resampling", None)
+            resample_filter = resample_attr.LANCZOS if resample_attr else Image.LANCZOS
+            resized = img.resize((target_w, target_h), resample_filter)
+            suffix = os.path.splitext(image_path)[1] or ".png"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            resized.save(tmp.name)
+            tmp_path = tmp.name
+            tmp.close()
+            return tmp_path, tmp_path
+    except Exception:
+        return image_path, None
 
 
 def _apply_memory_savers(pipeline: object, attention_slicing: bool, cpu_offload: bool, dtype: torch.dtype) -> None:
@@ -148,7 +228,22 @@ def _load_image(image_path: str) -> Image.Image:
     return img.convert("RGB")
 
 
-def run(
+def _resolve_directory_preference(text_value: str, explorer_value: Union[str, list, None], default_path: str) -> str:
+    """Return a normalized directory path based on textbox fallback and file explorer selection."""
+    candidate: Optional[str] = None
+    if explorer_value:
+        if isinstance(explorer_value, list):
+            explorer_value = explorer_value[0] if explorer_value else None
+        candidate = explorer_value
+    elif text_value and text_value.strip():
+        candidate = text_value.strip()
+    else:
+        candidate = default_path
+    candidate = os.path.abspath(os.path.expanduser(candidate))
+    return candidate
+
+
+def run_hunyuan(
     image_path: Union[str, None],
     guidance_scale: float,
     steps: int,
@@ -174,13 +269,10 @@ def run(
 
     # Handle save location
     if save_location and save_location.strip():
-        # Ensure save location exists
-        os.makedirs(save_location, exist_ok=True)
-        # Use absolute path for save location
-        save_dir = os.path.abspath(save_location)
+        save_dir = os.path.abspath(os.path.expanduser(save_location.strip()))
     else:
-        # Default to current directory
-        save_dir = os.getcwd()
+        save_dir = HUNYUAN_DEFAULT_OUTPUT_DIR
+    os.makedirs(save_dir, exist_ok=True)
 
     # Normalize names
     base_out = os.path.splitext(output_name)[0]
@@ -314,6 +406,162 @@ def run(
                 pass
 
 
+def run_gen3c_backend(
+    image_path: Union[str, None],
+    guidance: float,
+    frames: Union[str, int, None],
+    video_name: str,
+    checkpoint_dir: str,
+    output_dir: str,
+    extra_args: str,
+) -> Tuple[Optional[str], str, str]:
+    """Launch GEN3C via the wrapper script and return the generated video."""
+    if not image_path:
+        raise gr.Error("Please provide an image.")
+    if not os.path.exists(image_path):
+        raise gr.Error("Provided image path does not exist.")
+    if not os.path.isfile(GEN3C_SCRIPT):
+        raise gr.Error(f"GEN3C launcher script not found at {GEN3C_SCRIPT}")
+
+    video_name = video_name.strip() or "gen3c_video"
+    resolved_checkpoint = checkpoint_dir.strip() or GEN3C_DEFAULT_CHECKPOINT
+    resolved_output_dir = output_dir.strip() or GEN3C_DEFAULT_OUTPUT_DIR
+    resolved_checkpoint = os.path.abspath(os.path.expanduser(resolved_checkpoint))
+    resolved_output_dir = os.path.abspath(os.path.expanduser(resolved_output_dir))
+    os.makedirs(resolved_output_dir, exist_ok=True)
+
+    cmd = [
+        "bash",
+        GEN3C_SCRIPT,
+        "--input",
+        image_path,
+        "--video-name",
+        video_name,
+        "--guidance",
+        str(guidance),
+        "--checkpoint-dir",
+        resolved_checkpoint,
+        "--output-dir",
+        resolved_output_dir,
+    ]
+
+    if frames not in (None, "", "None"):
+        try:
+            frames_int = int(frames)
+            cmd.extend(["--frames", str(frames_int)])
+        except Exception:
+            raise gr.Error("GEN3C frames must be an integer (e.g., 121, 241, 361).")
+
+    if extra_args and extra_args.strip():
+        cmd.extend(["--extra", extra_args.strip()])
+
+    launch_msg = f"Launching GEN3C CLI:\n{' '.join(cmd)}"
+    print(launch_msg, flush=True)
+    logs = [launch_msg]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise gr.Error(f"Failed to run GEN3C launcher: {exc}")
+
+    if result.stdout:
+        logs.append("STDOUT:\n" + result.stdout.strip())
+    if result.stderr:
+        logs.append("STDERR:\n" + result.stderr.strip())
+
+    if result.returncode != 0:
+        logs.append(f"❌ GEN3C exited with status {result.returncode}")
+        failure_message = "\n\n".join(logs)
+        return None, failure_message, "❌ GEN3C generation failed"
+
+    video_path = os.path.join(resolved_output_dir, f"{video_name}.mp4")
+    if not os.path.exists(video_path):
+        raise gr.Error(f"GEN3C reported success but video not found at {video_path}")
+
+    return video_path, "\n\n".join(logs), "✅ GEN3C video generated"
+
+
+def handle_generation(
+    backend_choice: str,
+    image_path: Union[str, None],
+    image_scale: Union[float, int],
+    guidance_scale: float,
+    steps: int,
+    seed: Optional[int],
+    model_choice: str,
+    use_fp16: bool,
+    attention_slicing: bool,
+    cpu_offload: bool,
+    remove_background: bool,
+    output_name: str,
+    save_location: str,
+    save_location_selection: Union[str, list, None],
+    gen3c_guidance: float,
+    gen3c_frames: Union[str, int, None],
+    gen3c_video_name: str,
+    gen3c_checkpoint_dir: str,
+    gen3c_output_dir: str,
+    gen3c_dir_selection: Union[str, list, None],
+    gen3c_extra_args: str,
+) -> Tuple[Optional[str], str, str]:
+    resolved_hunyuan_dir = _resolve_directory_preference(
+        save_location, save_location_selection, HUNYUAN_DEFAULT_OUTPUT_DIR
+    )
+    resolved_gen3c_dir = _resolve_directory_preference(
+        gen3c_output_dir, gen3c_dir_selection, GEN3C_DEFAULT_OUTPUT_DIR
+    )
+    scale_value = _clamp_scale_value(image_scale)
+    scaled_path, temp_scaled = _maybe_downscale_image(image_path, scale_value)
+    effective_image_path = scaled_path or image_path
+
+    try:
+        if backend_choice == "GEN3C Video":
+            return run_gen3c_backend(
+                image_path=effective_image_path,
+                guidance=gen3c_guidance,
+                frames=gen3c_frames,
+                video_name=gen3c_video_name,
+                checkpoint_dir=gen3c_checkpoint_dir,
+                output_dir=resolved_gen3c_dir,
+                extra_args=gen3c_extra_args,
+            )
+        return run_hunyuan(
+            image_path=effective_image_path,
+            guidance_scale=guidance_scale,
+            steps=steps,
+            seed=seed,
+            model_choice=model_choice,
+            use_fp16=use_fp16,
+            attention_slicing=attention_slicing,
+            cpu_offload=cpu_offload,
+            remove_background=remove_background,
+            output_name=output_name,
+            save_location=resolved_hunyuan_dir,
+        )
+    finally:
+        if temp_scaled and os.path.exists(temp_scaled):
+            try:
+                os.remove(temp_scaled)
+            except Exception:
+                pass
+
+
+def _backend_ui_state(choice: str):
+    """Toggle control groups depending on the selected backend."""
+    is_hunyuan = choice != "GEN3C Video"
+    run_label = "Generate Hunyuan GLB" if is_hunyuan else "Generate GEN3C Video"
+    progress_hint = (
+        "Ready to generate a GLB mesh..."
+        if is_hunyuan
+        else "Ready to generate a GEN3C video..."
+    )
+    return (
+        gr.update(visible=is_hunyuan),
+        gr.update(visible=not is_hunyuan),
+        gr.update(value=run_label),
+        gr.update(value=progress_hint),
+    )
+
+
 with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
     gr.Markdown("## Hunyuan3D 2D→3D\nUpload an image, set options, and generate a GLB.")
 
@@ -321,6 +569,22 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
         # Left column - Image and system metrics
         with gr.Column(scale=1):
             image = gr.Image(type="filepath", label="Input image")
+            with gr.Group():
+                image_resolution_display = gr.Textbox(
+                    label="Input Resolution",
+                    value="No image loaded.",
+                    interactive=False,
+                    lines=2,
+                )
+                image_scale_slider = gr.Slider(
+                    minimum=0.25,
+                    maximum=1.0,
+                    value=1.0,
+                    step=0.05,
+                    label="Scale Before Generation",
+                    info="Downscale large images before running Hunyuan or GEN3C.",
+                )
+                preview_button = gr.Button("Refresh Resolution Preview", variant="secondary")
 
             # System monitoring display (under image)
             system_metrics = gr.Textbox(
@@ -333,41 +597,128 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
             # Progress display (shows generation stages)
             progress_display = gr.Textbox(
                 label="Generation Progress",
-                value="Ready to generate...",
+                value="Ready to generate a GLB mesh...",
                 interactive=False,
                 lines=1
             )
 
         # Right column - Controls
         with gr.Column(scale=1):
-            guidance_scale = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance scale")
-            steps = gr.Slider(10, 100, value=40, step=1, label="Inference steps")
-            seed = gr.Number(value=42, precision=0, label="Seed (optional)")
-            model_choice = gr.Radio(
-                choices=["Mini Model (Faster)", "Full Model (Higher Quality)"],
-                value="Mini Model (Faster)",
-                label="Model Selection",
-                info="Note: Full model may occasionally have GPU memory issues. If it hangs, use Mini model."
+            backend_choice = gr.Radio(
+                choices=["Hunyuan GLB", "GEN3C Video"],
+                value="Hunyuan GLB",
+                label="Backend Selection",
+                info="Choose Hunyuan for GLB meshes or GEN3C for video outputs."
             )
-            use_fp16 = gr.Checkbox(value=True, label="Use FP16 (half precision)")
-            attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")
-            cpu_offload = gr.Checkbox(value=True, label="Enable CPU offload")
-            remove_background = gr.Checkbox(value=False, label="Remove background automatically")
-            output_name = gr.Textbox(value="output_model", label="Output name (no extension)")
-            save_location = gr.Textbox(value="", label="Save location (optional - leave empty for current directory)", placeholder="/path/to/save/directory")
-            run_btn = gr.Button("Generate 3D Shape", variant="primary")
+            with gr.Group(visible=True) as hunyuan_controls:
+                guidance_scale = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance scale")
+                steps = gr.Slider(10, 100, value=40, step=1, label="Inference steps")
+                seed = gr.Number(value=42, precision=0, label="Seed (optional)")
+                model_choice = gr.Radio(
+                    choices=["Mini Model (Faster)", "Full Model (Higher Quality)"],
+                    value="Mini Model (Faster)",
+                    label="Model Selection",
+                    info="Note: Full model may occasionally have GPU memory issues. If it hangs, use Mini model."
+                )
+                use_fp16 = gr.Checkbox(value=True, label="Use FP16 (half precision)")
+                attention_slicing = gr.Checkbox(value=True, label="Enable attention slicing")
+                cpu_offload = gr.Checkbox(value=True, label="Enable CPU offload")
+                remove_background = gr.Checkbox(value=False, label="Remove background automatically")
+                output_name = gr.Textbox(value="output_model", label="Output name (no extension)")
+                save_location = gr.Textbox(
+                    value=HUNYUAN_DEFAULT_OUTPUT_DIR,
+                    label="Save Location",
+                    info="Defaults to assets/hunyuan_outputs unless changed below."
+                )
+                save_location_picker = gr.FileExplorer(
+                    value=None,
+                    label="Browse Save Location",
+                    file_count="single",
+                    root_dir=PROJECT_ROOT,
+                    height=150,
+                )
+
+            with gr.Accordion("GEN3C Options", open=False, visible=False) as gen3c_options:
+                gen3c_guidance = gr.Slider(0.5, 5.0, value=1.0, step=0.1, label="GEN3C Guidance")
+                gen3c_frames = gr.Dropdown(
+                    choices=["121", "242", "363", "484"],
+                    value="121",
+                    label="GEN3C Frames",
+                    info="GEN3C currently supports frame counts that are multiples of 121."
+                )
+                gen3c_video_name = gr.Textbox(value="gen3c_video", label="GEN3C Video Name")
+                gen3c_checkpoint_dir = gr.Textbox(
+                    value=GEN3C_DEFAULT_CHECKPOINT,
+                    label="GEN3C Checkpoint Directory"
+                )
+                gen3c_output_dir = gr.Textbox(
+                    value=GEN3C_DEFAULT_OUTPUT_DIR,
+                    label="Save Location",
+                    info="Defaults to assets/gen3c_outputs unless changed below."
+                )
+                gen3c_dir_picker = gr.FileExplorer(
+                    value=None,
+                    label="Browse Save Location",
+                    file_count="single",
+                    root_dir=PROJECT_ROOT,
+                    height=150,
+                )
+                gen3c_extra_args = gr.Textbox(
+                    value="--trajectory left --foreground_masking",
+                    label="Additional GEN3C Arguments"
+                )
+
+            run_btn = gr.Button("Generate Hunyuan GLB", variant="primary")
 
     with gr.Row():
-        output_file = gr.File(label="Output GLB")
+        output_file = gr.File(label="Output (GLB or MP4)")
         logs_box = gr.Textbox(label="Logs", lines=8)
 
     # Add progress indicator
     progress_bar = gr.Progress()
 
     run_btn.click(
-        fn=run,
-        inputs=[image, guidance_scale, steps, seed, model_choice, use_fp16, attention_slicing, cpu_offload, remove_background, output_name, save_location],
+        fn=handle_generation,
+        inputs=[
+            backend_choice,
+            image,
+            image_scale_slider,
+            guidance_scale,
+            steps,
+            seed,
+            model_choice,
+            use_fp16,
+            attention_slicing,
+            cpu_offload,
+            remove_background,
+            output_name,
+            save_location,
+            save_location_picker,
+            gen3c_guidance,
+            gen3c_frames,
+            gen3c_video_name,
+            gen3c_checkpoint_dir,
+            gen3c_output_dir,
+            gen3c_dir_picker,
+            gen3c_extra_args,
+        ],
         outputs=[output_file, logs_box, progress_display],
+    )
+
+    backend_choice.change(
+        fn=_backend_ui_state,
+        inputs=[backend_choice],
+        outputs=[hunyuan_controls, gen3c_options, run_btn, progress_display],
+    )
+
+    def _dummy_handler(*args):
+        pass
+
+    preview_button.click(
+        fn=_safe_preview_update,
+        inputs=[image, image_scale_slider],
+        outputs=[image_resolution_display],
+        queue=False,
     )
 
     # Timer to update system metrics every 2 seconds
@@ -385,8 +736,5 @@ if __name__ == "__main__":
     # Give monitoring thread time to start
     time.sleep(0.5)
 
-    # Enable queuing to avoid overlapping runs consuming VRAM
-    # (no args for compatibility with your Gradio version)
-    demo.queue()
-    demo.launch(server_port=7860, share=False)
+    demo.launch(server_port=5683, share=False)
     
