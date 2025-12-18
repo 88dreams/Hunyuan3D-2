@@ -1,0 +1,79 @@
+# =============================================================================
+# GEN3C Inference Docker Image for RunPod (FAST BUILD)
+# =============================================================================
+# Uses pre-built wheels where possible to speed up build time
+# =============================================================================
+
+FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# =============================================================================
+# SYSTEM DEPENDENCIES
+# =============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    wget \
+    curl \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && git lfs install
+
+WORKDIR /workspace
+
+# =============================================================================
+# CLONE GEN3C REPOSITORY
+# =============================================================================
+RUN git clone https://github.com/nv-tlabs/GEN3C.git /workspace/GEN3C
+
+# =============================================================================
+# PYTHON DEPENDENCIES
+# =============================================================================
+RUN pip install --upgrade pip setuptools wheel
+
+# Install GEN3C requirements
+COPY requirements-gen3c.txt /workspace/requirements-gen3c.txt
+RUN pip install --no-cache-dir -r /workspace/requirements-gen3c.txt
+
+# =============================================================================
+# APEX - Use pip install (no CUDA extensions, but faster)
+# GEN3C only needs apex.multi_tensor_apply which works without CUDA extensions
+# =============================================================================
+RUN pip install --no-cache-dir packaging ninja
+RUN pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation \
+    --global-option="--cpp_ext" apex || \
+    pip install --no-cache-dir apex
+
+# =============================================================================
+# MOGE + WARP + HF CLI
+# =============================================================================
+RUN pip install --no-cache-dir git+https://github.com/microsoft/MoGe.git
+RUN pip install --no-cache-dir warp-lang
+RUN pip install --no-cache-dir huggingface_hub[cli]
+
+# =============================================================================
+# COPY SERVER SCRIPTS
+# =============================================================================
+COPY server.py /workspace/server.py
+COPY handler.py /workspace/handler.py
+COPY start.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# =============================================================================
+# ENVIRONMENT
+# =============================================================================
+ENV PYTHONPATH="/workspace/GEN3C"
+ENV CUDA_HOME="/usr/local/cuda"
+ENV GEN3C_CHECKPOINT_DIR="/workspace/checkpoints/Gen3C-Cosmos-7B"
+
+EXPOSE 8000
+
+CMD ["/workspace/start.sh"]
+

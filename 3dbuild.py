@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 CLI tool for Hunyuan3D generation with customizable parameters
+
+Multi-System Configuration:
+    Paths are loaded from config/multi_system.yaml when available.
+    Falls back to NFS shared paths at /srv/searidge_share for the
+    searidge cluster (searidge01, searidge02, searidge03).
 """
 import argparse
 import time
@@ -16,6 +21,13 @@ try:
     TEXGEN_AVAILABLE = True
 except ImportError:
     TEXGEN_AVAILABLE = False
+
+# Load configuration for cache directory
+try:
+    from config import get_path
+    HF_CACHE_DIR = get_path('hf_cache_dir')
+except ImportError:
+    HF_CACHE_DIR = "/srv/searidge_share/checkpoints/huggingface"
 
 def main():
     parser = argparse.ArgumentParser(description='Generate 3D models from images using Hunyuan3D')
@@ -94,6 +106,7 @@ def main():
     pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
         shape_model,
         subfolder=subfolder,
+        cache_dir=HF_CACHE_DIR,
         torch_dtype=torch.float16 if args.fp16 else torch.float32,
     )
 
@@ -114,6 +127,7 @@ def main():
             texture_pipeline = Hunyuan3DPaintPipeline.from_pretrained(
                 tex_model,
                 subfolder=tex_subfolder,
+                cache_dir=HF_CACHE_DIR,
                 torch_dtype=torch.float16 if args.fp16 else torch.float32,
             )
         else:

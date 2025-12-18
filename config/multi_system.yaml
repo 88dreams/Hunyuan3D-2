@@ -1,0 +1,194 @@
+# Multi-System Configuration for Hunyuan3D-2-Fork + GEN3C
+# LocalAI Distributed Architecture
+# 
+# This configuration defines paths and settings for the 3-node cluster:
+#   - searidge02 (CORE): Ray head node, NFS server, primary UI host
+#   - searidge01 (WORKER01): Ray worker node
+#   - searidge03 (WORKER02): Ray worker node
+
+# =============================================================================
+# CLUSTER NODES
+# =============================================================================
+cluster:
+  head_node:
+    hostname: searidge02
+    ip: 192.168.88.18
+    user: arkrunr02
+    role: core  # Ray head, NFS server, web UI
+  
+  workers:
+    - hostname: searidge01
+      ip: 192.168.88.17
+      user: arkrunr01
+      role: worker
+    
+    - hostname: searidge03
+      ip: 192.168.88.19
+      user: arkrunr03
+      role: worker
+
+# =============================================================================
+# SHARED STORAGE (NFS)
+# =============================================================================
+# All paths under shared_root are accessible from all nodes via NFS
+shared_storage:
+  root: /srv/searidge_share
+  
+  # Project directories
+  projects_dir: /srv/searidge_share/projects
+  hunyuan_dir: /srv/searidge_share/projects/Hunyuan3D-2-Fork
+  gen3c_dir: /srv/searidge_share/projects/GEN3C
+  
+  # Model checkpoints and caches
+  checkpoints_dir: /srv/searidge_share/checkpoints
+  hf_cache_dir: /srv/searidge_share/checkpoints/huggingface
+  gen3c_checkpoints: /srv/searidge_share/checkpoints/Gen3C-Cosmos-7B
+  
+  # Input/Output directories
+  inputs_dir: /srv/searidge_share/inputs
+  outputs_dir: /srv/searidge_share/outputs
+  
+  # Specific output subdirectories
+  hunyuan_outputs: /srv/searidge_share/outputs/hunyuan
+  gen3c_outputs: /srv/searidge_share/outputs/gen3c
+  gradio_cache: /srv/searidge_share/outputs/gradio_cache
+
+# =============================================================================
+# LOCAL PATHS (per-node, not shared)
+# =============================================================================
+local:
+  # Mambaforge installation (each node has its own)
+  mambaforge_base: ~/mambaforge
+  
+  # Conda environment name (same on all nodes)
+  # gen3c-rocm uses Python 3.12 (has apex-rocm properly built)
+  # gen3c-rocm310 uses Python 3.10
+  conda_env: gen3c-rocm
+  python_version: "3.12"
+  
+  # Alternative hunyuan environment (if separate from gen3c)
+  hunyuan_conda_env: hunyuan3d
+
+# =============================================================================
+# RAY CLUSTER CONFIGURATION
+# =============================================================================
+ray:
+  # Enable/disable Ray distributed execution
+  # When false, all jobs run locally on the current system
+  enabled: true
+  
+  # Auto-connect to cluster on startup
+  auto_connect: true
+  
+  head_address: "searidge02:6380"
+  head_port: 6380
+  dashboard_host: "0.0.0.0"
+  dashboard_port: 8265
+  num_gpus_per_node: 1
+  
+  # Metrics export port (same on all nodes for Prometheus scraping)
+  metrics_export_port: 8080
+  
+  # Resource labels for job scheduling
+  resources:
+    gpu_memory_gb: 16
+    gpu_type: "AMD_RX_6900_XT"
+
+# =============================================================================
+# MONITORING CONFIGURATION (Prometheus + Grafana)
+# =============================================================================
+monitoring:
+  # Enable metrics collection
+  enabled: true
+  
+  # Prometheus configuration
+  prometheus:
+    host: "0.0.0.0"
+    port: 9090
+    # Scrape interval for Ray metrics
+    scrape_interval: "15s"
+    # Data retention
+    retention_days: 15
+    # Storage path
+    data_dir: /srv/searidge_share/monitoring/prometheus
+  
+  # Grafana configuration  
+  grafana:
+    host: "0.0.0.0"
+    port: 3000
+    # Admin credentials (change in production!)
+    admin_user: admin
+    admin_password: searidge_admin
+    # Data path
+    data_dir: /srv/searidge_share/monitoring/grafana
+
+# =============================================================================
+# ROCM / GPU CONFIGURATION
+# =============================================================================
+rocm:
+  # Default GPU device (0 = first GPU on each node)
+  hip_visible_devices: "0"
+  
+  # Memory allocation settings
+  pytorch_alloc_conf: "max_split_size_mb:512"
+  
+  # GFX version override (may vary by GPU model)
+  # RX 6900 XT = gfx1030 (10.3.0)
+  hsa_override_gfx_version: "10.3.0"
+  
+  # ROCm installation path
+  rocm_home: /opt/rocm
+
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+models:
+  # Hunyuan3D models (from HuggingFace)
+  hunyuan:
+    shape_model_mini: tencent/Hunyuan3D-2mini
+    shape_model_full: tencent/Hunyuan3D-2
+    texture_model: tencent/Hunyuan3D-2
+    
+    # Subfolders for different model variants
+    subfolders:
+      mini_turbo: hunyuan3d-dit-v2-mini-turbo
+      mini_fast: hunyuan3d-dit-v2-mini-fast
+      mini_standard: hunyuan3d-dit-v2-mini
+      full_turbo: hunyuan3d-dit-v2-0-turbo
+      full_fast: hunyuan3d-dit-v2-0-fast
+      full_standard: hunyuan3d-dit-v2-0
+  
+  # GEN3C models
+  gen3c:
+    checkpoint_dir: /srv/searidge_share/checkpoints/Gen3C-Cosmos-7B
+    model_name: Gen3C-Cosmos-7B
+
+# =============================================================================
+# WEB UI CONFIGURATION
+# =============================================================================
+webui:
+  # Gradio server settings
+  gradio:
+    host: "0.0.0.0"
+    port: 5683
+    share: false
+  
+  # API server settings
+  api:
+    host: "0.0.0.0"
+    port: 8080
+  
+  # Timeouts (seconds)
+  generation_timeout: 2700  # 45 minutes
+  
+  # Cache settings
+  max_cache_folders: 200
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  level: INFO
+  log_dir: /srv/searidge_share/logs
+  rotate_days: 7
+

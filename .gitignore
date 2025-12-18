@@ -174,3 +174,5 @@ weights/
 *.bin
 *.ckpt
 *.safetensors
+assets/stages/
+inputs/

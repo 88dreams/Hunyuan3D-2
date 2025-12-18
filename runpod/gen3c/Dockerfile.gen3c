@@ -1,0 +1,116 @@
+# =============================================================================
+# GEN3C Inference Docker Image for RunPod
+# Based on official GEN3C Dockerfile from NVIDIA
+# =============================================================================
+# 
+# This Dockerfile builds a complete GEN3C inference environment for RunPod.
+# It includes all dependencies, the API server, and automatic setup scripts.
+#
+# Build: docker build -f Dockerfile.gen3c -t 88dreams/gen3c-runpod:v2 .
+# Push:  docker push 88dreams/gen3c-runpod:v2
+#
+# =============================================================================
+
+# Use NVIDIA PyTorch container as base image (same as GEN3C official)
+FROM nvcr.io/nvidia/pytorch:24.10-py3
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# =============================================================================
+# System Dependencies
+# =============================================================================
+RUN apt-get update && apt-get install -y \
+    git \
+    tree \
+    ffmpeg \
+    wget \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fix shell and CUDA library links
+RUN rm /bin/sh && ln -s /bin/bash /bin/sh && \
+    ln -sf /lib64/libcuda.so.1 /lib64/libcuda.so
+
+WORKDIR /workspace
+
+# =============================================================================
+# Clone GEN3C Repository
+# =============================================================================
+RUN git clone https://github.com/nv-tlabs/GEN3C.git /workspace/GEN3C
+
+# =============================================================================
+# Install GEN3C Dependencies
+# =============================================================================
+# Use Miniforge (conda-forge) to avoid Anaconda TOS issues in Docker
+RUN echo "Installing Miniforge and GEN3C dependencies..." && \
+    mkdir -p ~/miniforge3 && \
+    wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge3/miniforge.sh && \
+    bash ~/miniforge3/miniforge.sh -b -u -p ~/miniforge3 && \
+    rm ~/miniforge3/miniforge.sh && \
+    source ~/miniforge3/bin/activate && \
+    conda env create --file /workspace/GEN3C/cosmos-predict1.yaml && \
+    conda activate cosmos-predict1 && \
+    pip install --no-cache-dir -r /workspace/GEN3C/requirements.txt && \
+    # Link NVIDIA includes for compilation
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/ 2>/dev/null || true && \
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/python3.10 2>/dev/null || true && \
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/triton/backends/nvidia/include/* $CONDA_PREFIX/include/ 2>/dev/null || true && \
+    # Install transformer-engine
+    pip install transformer-engine[pytorch]==1.12.0 && \
+    # Install Apex (CUDA extensions)
+    git clone https://github.com/NVIDIA/apex /tmp/apex && \
+    cd /tmp/apex && \
+    CUDA_HOME=$CONDA_PREFIX pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation \
+        --config-settings "--build-option=--cpp_ext" \
+        --config-settings "--build-option=--cuda_ext" . && \
+    cd /workspace && rm -rf /tmp/apex && \
+    # Install MoGe (depth estimation)
+    pip install git+https://github.com/microsoft/MoGe.git && \
+    # CRITICAL FIX: Downgrade huggingface-hub for transformers compatibility
+    pip install "huggingface-hub>=0.26.0,<1.0" && \
+    echo "✓ GEN3C environment setup complete"
+
+# =============================================================================
+# Install API Server Dependencies
+# =============================================================================
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    pip install --no-cache-dir \
+        fastapi \
+        uvicorn \
+        python-multipart \
+        runpod
+
+# =============================================================================
+# Copy Server Scripts
+# =============================================================================
+COPY server.py /workspace/server.py
+COPY handler.py /workspace/handler.py
+COPY start.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+ENV PYTHONPATH="/workspace/GEN3C"
+# CRITICAL: Checkpoint dir should be parent - GEN3C appends model name internally
+ENV GEN3C_CHECKPOINT_DIR="/workspace/checkpoints"
+ENV CONDA_DEFAULT_ENV="cosmos-predict1"
+ENV TRANSFORMERS_CACHE="/workspace/checkpoints/huggingface"
+ENV HF_HOME="/workspace/checkpoints/huggingface"
+
+# =============================================================================
+# Expose Ports
+# =============================================================================
+EXPOSE 8000
+
+# =============================================================================
+# Health Check
+# =============================================================================
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# =============================================================================
+# Startup Command
+# =============================================================================
+CMD ["/workspace/start.sh"]

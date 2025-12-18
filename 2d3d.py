@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 # pyright: reportMissingImports=false
-print("DEBUG: STARTING NEW VERSION OF 2D3D.PY (Port 5683)")
+"""
+Hunyuan3D 2D→3D Gradio Interface
+
+This module provides the primary web interface for both Hunyuan3D shape generation
+and GEN3C video generation backends.
+
+Multi-System Configuration:
+    All paths are loaded from config/multi_system.yaml to support distributed
+    deployment across the searidge cluster (searidge01, searidge02, searidge03).
+
+Execution Modes:
+    - Distributed (Ray): Jobs are submitted to the Ray cluster and executed on
+      any available node with GPU resources.
+    - Local (Single-System): Jobs run directly on the current machine.
+    
+    The mode is controlled by config.ray.enabled and can be toggled in the UI.
+"""
+print("DEBUG: STARTING NEW VERSION OF 2D3D.PY (Port 5683) - Ray Integration")
 import os
 import gc
 import tempfile
@@ -16,15 +33,192 @@ import subprocess
 
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
-# Repositories and cache configuration
-SHAPE_REPO = "tencent/Hunyuan3D-2mini"
-CACHE_DIR = "/home/arkrunr/.cache/huggingface/hub"
+# =============================================================================
+# RUNPOD CLIENT
+# =============================================================================
+_runpod_client = None
+_runpod_available = False
 
+try:
+    from runpod.runpod_client import (
+        RunPodGEN3CClient, 
+        RunPodServerlessClient,
+        RunPodJobResult, 
+        get_runpod_client, 
+        set_runpod_url,
+        get_serverless_client,
+        set_serverless_config
+    )
+    _runpod_available = True
+    print("[RUNPOD] RunPod client module loaded successfully")
+except ImportError as e:
+    print(f"[RUNPOD] Warning: RunPod client not available ({e})")
+    RunPodGEN3CClient = None
+    RunPodServerlessClient = None
+    RunPodJobResult = None
+
+# Default RunPod URLs/IDs (update with your pod ID)
+DEFAULT_RUNPOD_URL = "https://iv94zuokozefxc-8000.proxy.runpod.net"
+
+# =============================================================================
+# PERSISTENT RUNPOD CONFIG
+# =============================================================================
+# Store RunPod credentials in a local file so they persist across sessions
+import json
+
+RUNPOD_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".runpod_config.json")
+
+def _load_runpod_config() -> dict:
+    """Load RunPod config from local file."""
+    if os.path.exists(RUNPOD_CONFIG_FILE):
+        try:
+            with open(RUNPOD_CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_runpod_config(config: dict) -> None:
+    """Save RunPod config to local file."""
+    try:
+        with open(RUNPOD_CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        print(f"[CONFIG] Warning: Could not save RunPod config: {e}")
+
+def save_serverless_credentials(endpoint_id: str, api_key: str) -> str:
+    """Save serverless credentials to config file."""
+    config = _load_runpod_config()
+    config["serverless_endpoint_id"] = endpoint_id.strip() if endpoint_id else ""
+    config["serverless_api_key"] = api_key.strip() if api_key else ""
+    _save_runpod_config(config)
+    return "✅ Credentials saved"
+
+def save_pod_url(pod_url: str) -> str:
+    """Save pod URL to config file."""
+    config = _load_runpod_config()
+    config["pod_url"] = pod_url.strip() if pod_url else ""
+    _save_runpod_config(config)
+    return "✅ Pod URL saved"
+
+# Load saved config
+_runpod_config = _load_runpod_config()
+DEFAULT_SERVERLESS_ENDPOINT = _runpod_config.get("serverless_endpoint_id", "")
+DEFAULT_SERVERLESS_API_KEY = _runpod_config.get("serverless_api_key", "")
+if _runpod_config.get("pod_url"):
+    DEFAULT_RUNPOD_URL = _runpod_config.get("pod_url")
+
+print(f"[CONFIG] Loaded RunPod config: endpoint={'set' if DEFAULT_SERVERLESS_ENDPOINT else 'not set'}, api_key={'set' if DEFAULT_SERVERLESS_API_KEY else 'not set'}")
+
+# =============================================================================
+# CLUSTER / JOB MANAGER
+# =============================================================================
+# Try to import cluster module for distributed execution
+_job_manager = None
+_cluster_available = False
+
+try:
+    from cluster import JobManager, JobStatus, JobResult, get_cluster_status
+    _cluster_available = True
+    print("[CLUSTER] Cluster module loaded successfully")
+except ImportError as e:
+    print(f"[CLUSTER] Warning: Cluster module not available ({e}), using local execution only")
+    JobStatus = None
+    JobResult = None
+    get_cluster_status = lambda: {"available": False, "mode": "local", "message": "Cluster module not installed"}
+
+# =============================================================================
+# CONFIGURATION - Load from multi_system.yaml
+# =============================================================================
+# Try to load from config module, fall back to defaults if not available
+try:
+    from config import Config, get_path
+    _cfg = Config()
+    
+    # Paths from configuration
+    CACHE_DIR = _cfg.hf_cache_dir
+    GEN3C_DEFAULT_CHECKPOINT = _cfg.gen3c_checkpoints
+    GEN3C_DEFAULT_OUTPUT_DIR = _cfg.gen3c_outputs
+    HUNYUAN_DEFAULT_OUTPUT_DIR = _cfg.hunyuan_outputs
+    
+    print(f"[CONFIG] Loaded configuration from multi_system.yaml")
+    print(f"[CONFIG] HF Cache: {CACHE_DIR}")
+    print(f"[CONFIG] GEN3C Checkpoints: {GEN3C_DEFAULT_CHECKPOINT}")
+    print(f"[CONFIG] GEN3C Outputs: {GEN3C_DEFAULT_OUTPUT_DIR}")
+    print(f"[CONFIG] Hunyuan Outputs: {HUNYUAN_DEFAULT_OUTPUT_DIR}")
+    
+except ImportError as e:
+    print(f"[CONFIG] Warning: Could not load config module ({e}), using fallback paths")
+    # Fallback to NFS shared paths (multi-system defaults)
+    CACHE_DIR = "/srv/searidge_share/checkpoints/huggingface"
+    GEN3C_DEFAULT_CHECKPOINT = "/srv/searidge_share/checkpoints/gen3c"
+    GEN3C_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/gen3c"
+    HUNYUAN_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/hunyuan"
+
+# Model repositories (from HuggingFace)
+SHAPE_REPO = "tencent/Hunyuan3D-2mini"
+
+# Project paths (relative to this file)
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 GEN3C_SCRIPT = os.path.join(PROJECT_ROOT, "scripts", "run_gen3c.sh")
-GEN3C_DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "assets", "gen3c_outputs")
-GEN3C_DEFAULT_CHECKPOINT = "/home/arkrunr/GEN3C/checkpoints"
-HUNYUAN_DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "assets", "hunyuan_outputs")
+
+# Ensure output directories exist
+os.makedirs(HUNYUAN_DEFAULT_OUTPUT_DIR, exist_ok=True)
+os.makedirs(GEN3C_DEFAULT_OUTPUT_DIR, exist_ok=True)
+
+
+# =============================================================================
+# JOB MANAGER INITIALIZATION
+# =============================================================================
+def _init_job_manager(use_ray: Optional[bool] = None) -> Optional['JobManager']:
+    """Initialize the job manager with optional Ray support."""
+    global _job_manager
+    
+    if not _cluster_available:
+        print("[CLUSTER] Job manager not available (cluster module not installed)")
+        return None
+    
+    try:
+        # Check config for Ray enabled setting
+        if use_ray is None:
+            try:
+                from config import is_ray_enabled, should_auto_connect_ray
+                use_ray = is_ray_enabled() and should_auto_connect_ray()
+            except ImportError:
+                use_ray = True  # Default to trying Ray
+        
+        _job_manager = JobManager(use_ray=use_ray)
+        print(f"[CLUSTER] Job manager initialized in {_job_manager.mode} mode")
+        return _job_manager
+    except Exception as e:
+        print(f"[CLUSTER] Failed to initialize job manager: {e}")
+        return None
+
+
+def get_job_manager() -> Optional['JobManager']:
+    """Get the current job manager instance."""
+    global _job_manager
+    return _job_manager
+
+
+def format_cluster_status() -> str:
+    """Format cluster status for display in UI."""
+    if not _cluster_available:
+        return "🔴 Cluster module not installed - Local mode only"
+    
+    if _job_manager is None:
+        return "🟡 Job manager not initialized"
+    
+    status = _job_manager.cluster_status
+    
+    if status.get("available"):
+        mode = status.get("mode", "unknown")
+        gpus = status.get("gpus", 0)
+        nodes = len(status.get("nodes", []))
+        return f"🟢 {mode.title()} Mode | {nodes} nodes | {gpus} GPUs available"
+    else:
+        message = status.get("message", "Not connected")
+        return f"🟡 Local Mode | {message}"
 
 
 _shape_pipeline: Optional[Hunyuan3DDiTFlowMatchingPipeline] = None
@@ -406,6 +600,89 @@ def run_hunyuan(
                 pass
 
 
+def run_gen3c_runpod(
+    image_path: Union[str, None],
+    runpod_url: str,
+    guidance: float,
+    frames: Union[str, int],
+    trajectory: str,
+    foreground_masking: bool,
+    video_name: str,
+    seed: Optional[int],
+    output_dir: str,
+) -> Tuple[Optional[str], str, str]:
+    """Run GEN3C on RunPod cloud GPU and return the generated video."""
+    if not image_path:
+        raise gr.Error("Please provide an image.")
+    if not os.path.exists(image_path):
+        raise gr.Error("Provided image path does not exist.")
+    if not _runpod_available:
+        raise gr.Error("RunPod client not available. Check installation.")
+    
+    # Parse frames
+    try:
+        frames_int = int(frames)
+    except (ValueError, TypeError):
+        frames_int = 121
+    
+    video_name = video_name.strip() or "gen3c_video"
+    resolved_output_dir = output_dir.strip() or GEN3C_DEFAULT_OUTPUT_DIR
+    resolved_output_dir = os.path.abspath(os.path.expanduser(resolved_output_dir))
+    os.makedirs(resolved_output_dir, exist_ok=True)
+    
+    logs = []
+    logs.append(f"🚀 Starting RunPod GEN3C generation")
+    logs.append(f"   API URL: {runpod_url}")
+    logs.append(f"   Frames: {frames_int}, Trajectory: {trajectory}")
+    logs.append(f"   Guidance: {guidance}, Foreground Mask: {foreground_masking}")
+    
+    # Create client
+    client = RunPodGEN3CClient(runpod_url)
+    
+    # Check health
+    health = client.health_check()
+    if health.get("status") != "healthy":
+        error_msg = health.get("error", "Unknown error")
+        logs.append(f"❌ RunPod not ready: {error_msg}")
+        return None, "\n".join(logs), "❌ RunPod not ready"
+    
+    logs.append(f"✓ RunPod ready: GPU={health.get('gpu', 'unknown')}")
+    
+    # Progress callback for UI updates
+    def progress_callback(status: str, elapsed: float):
+        elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        print(f"[RunPod] {elapsed_str}: {status}")
+    
+    # Run generation
+    try:
+        result = client.generate_sync(
+            image_path=image_path,
+            output_dir=resolved_output_dir,
+            video_name=video_name,
+            num_frames=frames_int,
+            trajectory=trajectory,
+            guidance=guidance,
+            foreground_masking=foreground_masking,
+            seed=seed if seed and seed > 0 else None,
+            poll_interval=30,
+            max_wait=3600,
+            progress_callback=progress_callback
+        )
+    except Exception as e:
+        logs.append(f"❌ Error: {e}")
+        return None, "\n".join(logs), f"❌ RunPod error: {e}"
+    
+    logs.append(result.logs)
+    
+    if result.success:
+        logs.append(f"✅ Video generated in {result.duration_seconds:.1f}s")
+        logs.append(f"   Saved to: {result.output_path}")
+        return result.output_path, "\n".join(logs), f"✅ RunPod GEN3C complete ({result.duration_seconds:.0f}s)"
+    else:
+        logs.append(f"❌ Generation failed: {result.error}")
+        return None, "\n".join(logs), "❌ RunPod GEN3C failed"
+
+
 def run_gen3c_backend(
     image_path: Union[str, None],
     guidance: float,
@@ -415,7 +692,7 @@ def run_gen3c_backend(
     output_dir: str,
     extra_args: str,
 ) -> Tuple[Optional[str], str, str]:
-    """Launch GEN3C via the wrapper script and return the generated video."""
+    """Launch GEN3C via the wrapper script and return the generated video (local execution)."""
     if not image_path:
         raise gr.Error("Please provide an image.")
     if not os.path.exists(image_path):
@@ -480,6 +757,258 @@ def run_gen3c_backend(
     return video_path, "\n\n".join(logs), "✅ GEN3C video generated"
 
 
+def check_runpod_status(runpod_url: str) -> str:
+    """Check RunPod Pod API status and return formatted string."""
+    if not _runpod_available:
+        return "❌ RunPod client not installed"
+    
+    if not runpod_url or not runpod_url.strip():
+        return "⚠️ Please enter a RunPod URL"
+    
+    try:
+        client = RunPodGEN3CClient(runpod_url.strip())
+        health = client.health_check()
+        
+        if health.get("status") == "healthy":
+            gpu = health.get("gpu", "unknown")
+            model_ok = "✓" if health.get("model_exists") else "✗"
+            tokenizer_ok = "✓" if health.get("tokenizer_exists") else "✗"
+            return f"✅ Connected | GPU: {gpu} | Model: {model_ok} | Tokenizer: {tokenizer_ok}"
+        else:
+            error = health.get("error", "Unknown error")
+            return f"❌ Not ready: {error}"
+    except Exception as e:
+        return f"❌ Connection failed: {e}"
+
+
+def check_serverless_status(endpoint_id: str, api_key: str) -> str:
+    """Check RunPod Serverless endpoint status and return formatted string."""
+    if not _runpod_available:
+        return "❌ RunPod client not installed"
+    
+    if not endpoint_id or not endpoint_id.strip():
+        return "⚠️ Please enter an Endpoint ID"
+    
+    if not api_key or not api_key.strip():
+        return "⚠️ Please enter your RunPod API Key"
+    
+    try:
+        client = RunPodServerlessClient(endpoint_id.strip(), api_key.strip())
+        health = client.health_check()
+        
+        if health.get("status") == "healthy":
+            workers = health.get("workers", {})
+            ready = workers.get("ready", 0)
+            running = workers.get("running", 0)
+            return f"✅ Endpoint OK | Workers: {ready} ready, {running} running"
+        else:
+            error = health.get("error", "Unknown error")
+            return f"❌ Error: {error}"
+    except Exception as e:
+        return f"❌ Connection failed: {e}"
+
+
+def cancel_serverless_job(endpoint_id: str, api_key: str, job_id: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Cancel a running serverless job."""
+    if not job_id:
+        return "⚠️ No active job to cancel", None
+    
+    if not _runpod_available:
+        return "❌ RunPod client not installed", job_id
+    
+    if not endpoint_id or not api_key:
+        return "⚠️ Missing endpoint ID or API key", job_id
+    
+    try:
+        client = RunPodServerlessClient(endpoint_id.strip(), api_key.strip())
+        result = client.cancel_job(job_id)
+        
+        if result.get("success"):
+            return f"✅ Job {job_id} cancelled", None
+        else:
+            return f"❌ Cancel failed: {result.get('error', 'Unknown error')}", job_id
+    except Exception as e:
+        return f"❌ Cancel failed: {e}", job_id
+
+
+def run_gen3c_serverless(
+    image_path: Union[str, None],
+    endpoint_id: str,
+    api_key: str,
+    guidance: float,
+    frames: Union[str, int],
+    trajectory: str,
+    foreground_masking: bool,
+    video_name: str,
+    seed: Optional[int],
+    output_dir: str,
+) -> Tuple[Optional[str], str, str]:
+    """Run GEN3C on RunPod Serverless and return the generated video."""
+    if not image_path:
+        raise gr.Error("Please provide an image.")
+    if not os.path.exists(image_path):
+        raise gr.Error("Provided image path does not exist.")
+    if not _runpod_available:
+        raise gr.Error("RunPod client not available. Check installation.")
+    if not endpoint_id or not endpoint_id.strip():
+        raise gr.Error("Please enter your Serverless Endpoint ID.")
+    if not api_key or not api_key.strip():
+        raise gr.Error("Please enter your RunPod API Key.")
+    
+    # Parse frames
+    try:
+        frames_int = int(frames)
+    except (ValueError, TypeError):
+        frames_int = 121
+    
+    video_name = video_name.strip() or "gen3c_video"
+    resolved_output_dir = output_dir.strip() or GEN3C_DEFAULT_OUTPUT_DIR
+    resolved_output_dir = os.path.abspath(os.path.expanduser(resolved_output_dir))
+    os.makedirs(resolved_output_dir, exist_ok=True)
+    
+    logs = []
+    logs.append(f"🚀 Starting RunPod Serverless GEN3C generation")
+    logs.append(f"   Endpoint: {endpoint_id}")
+    logs.append(f"   Frames: {frames_int}, Trajectory: {trajectory}")
+    logs.append(f"   Guidance: {guidance}, Foreground Mask: {foreground_masking}")
+    
+    # Create client
+    client = RunPodServerlessClient(endpoint_id.strip(), api_key.strip())
+    
+    # Check health
+    health = client.health_check()
+    if health.get("status") != "healthy":
+        error_msg = health.get("error", "Unknown error")
+        logs.append(f"⚠️ Serverless status: {error_msg}")
+        # Don't fail - serverless may spin up workers on demand
+    else:
+        workers = health.get("workers", {})
+        logs.append(f"✓ Endpoint ready: {workers.get('ready', 0)} workers ready")
+    
+    # Progress callback for UI updates
+    def progress_callback(status: str, elapsed: float):
+        elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        print(f"[Serverless] {elapsed_str}: {status}")
+    
+    # Run generation
+    try:
+        result = client.generate_sync(
+            image_path=image_path,
+            output_dir=resolved_output_dir,
+            video_name=video_name,
+            num_frames=frames_int,
+            trajectory=trajectory,
+            guidance=guidance,
+            foreground_masking=foreground_masking,
+            seed=seed if seed and seed > 0 else None,
+            poll_interval=30,
+            max_wait=3600,
+            progress_callback=progress_callback
+        )
+    except Exception as e:
+        logs.append(f"❌ Error: {e}")
+        return None, "\n".join(logs), f"❌ Serverless error: {e}"
+    
+    logs.append(result.logs)
+    
+    if result.success:
+        logs.append(f"✅ Video generated in {result.duration_seconds:.1f}s")
+        logs.append(f"   Saved to: {result.output_path}")
+        return result.output_path, "\n".join(logs), f"✅ Serverless GEN3C complete ({result.duration_seconds:.0f}s)"
+    else:
+        logs.append(f"❌ Generation failed: {result.error}")
+        return None, "\n".join(logs), "❌ Serverless GEN3C failed"
+
+
+def handle_generation_distributed(
+    backend_choice: str,
+    image_path: Union[str, None],
+    image_scale: Union[float, int],
+    guidance_scale: float,
+    steps: int,
+    seed: Optional[int],
+    model_choice: str,
+    use_fp16: bool,
+    attention_slicing: bool,
+    cpu_offload: bool,
+    remove_background: bool,
+    output_name: str,
+    save_location: str,
+    gen3c_guidance: float,
+    gen3c_frames: Union[str, int, None],
+    gen3c_video_name: str,
+    gen3c_checkpoint_dir: str,
+    gen3c_output_dir: str,
+    gen3c_extra_args: str,
+    use_cluster: bool,
+) -> Tuple[Optional[str], str, str]:
+    """
+    Handle generation using the JobManager (supports both Ray and local execution).
+    
+    This is the preferred method when the cluster module is available.
+    """
+    manager = get_job_manager()
+    
+    if manager is None or not use_cluster:
+        # Fall back to direct execution
+        return None, "", "Job manager not available"
+    
+    scale_value = _clamp_scale_value(image_scale)
+    scaled_path, temp_scaled = _maybe_downscale_image(image_path, scale_value)
+    effective_image_path = scaled_path or image_path
+    
+    try:
+        if backend_choice == "GEN3C Video":
+            # Parse frames
+            frames_int = 121
+            if gen3c_frames not in (None, "", "None"):
+                try:
+                    frames_int = int(gen3c_frames)
+                except ValueError:
+                    pass
+            
+            # Submit job
+            result = manager.run_gen3c_sync(
+                image_path=effective_image_path,
+                guidance=gen3c_guidance,
+                frames=frames_int,
+                video_name=gen3c_video_name.strip() or "gen3c_video",
+                checkpoint_dir=gen3c_checkpoint_dir.strip() or GEN3C_DEFAULT_CHECKPOINT,
+                output_dir=gen3c_output_dir.strip() or GEN3C_DEFAULT_OUTPUT_DIR,
+                extra_args=gen3c_extra_args,
+            )
+        else:
+            # Hunyuan job
+            result = manager.run_hunyuan_sync(
+                image_path=effective_image_path,
+                guidance_scale=guidance_scale,
+                steps=steps,
+                seed=seed,
+                model_choice=model_choice,
+                use_fp16=use_fp16,
+                attention_slicing=attention_slicing,
+                cpu_offload=cpu_offload,
+                remove_background=remove_background,
+                output_name=output_name.strip() or "output_model",
+                output_dir=save_location.strip() or HUNYUAN_DEFAULT_OUTPUT_DIR,
+            )
+        
+        # Format result
+        if result.success:
+            status = f"✅ Complete on {result.node} ({result.duration_seconds:.1f}s)"
+            return result.output_path, result.logs, status
+        else:
+            status = f"❌ Failed on {result.node}"
+            return None, result.logs + f"\n\nError: {result.error}", status
+            
+    finally:
+        if temp_scaled and os.path.exists(temp_scaled):
+            try:
+                os.remove(temp_scaled)
+            except Exception:
+                pass
+
+
 def handle_generation(
     backend_choice: str,
     image_path: Union[str, None],
@@ -495,35 +1024,137 @@ def handle_generation(
     output_name: str,
     save_location: str,
     save_location_selection: Union[str, list, None],
+    gen3c_mode: str,
+    runpod_url: str,
+    serverless_endpoint_id: str,
+    serverless_api_key: str,
     gen3c_guidance: float,
     gen3c_frames: Union[str, int, None],
+    gen3c_trajectory: str,
+    gen3c_foreground_mask: bool,
     gen3c_video_name: str,
+    gen3c_seed: Optional[int],
     gen3c_checkpoint_dir: str,
     gen3c_output_dir: str,
     gen3c_dir_selection: Union[str, list, None],
     gen3c_extra_args: str,
+    use_cluster: bool = False,
 ) -> Tuple[Optional[str], str, str]:
+    """
+    Main generation handler - routes to RunPod Pod, RunPod Serverless, distributed, or local execution.
+    """
     resolved_hunyuan_dir = _resolve_directory_preference(
         save_location, save_location_selection, HUNYUAN_DEFAULT_OUTPUT_DIR
     )
     resolved_gen3c_dir = _resolve_directory_preference(
         gen3c_output_dir, gen3c_dir_selection, GEN3C_DEFAULT_OUTPUT_DIR
     )
+    
+    # Scale image if needed
     scale_value = _clamp_scale_value(image_scale)
     scaled_path, temp_scaled = _maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
 
     try:
         if backend_choice == "GEN3C Video":
-            return run_gen3c_backend(
+            # Route based on execution mode
+            if gen3c_mode == "RunPod Pod":
+                return run_gen3c_runpod(
+                    image_path=effective_image_path,
+                    runpod_url=runpod_url,
+                    guidance=gen3c_guidance,
+                    frames=gen3c_frames,
+                    trajectory=gen3c_trajectory,
+                    foreground_masking=gen3c_foreground_mask,
+                    video_name=gen3c_video_name,
+                    seed=gen3c_seed,
+                    output_dir=resolved_gen3c_dir,
+                )
+            elif gen3c_mode == "RunPod Serverless":
+                return run_gen3c_serverless(
+                    image_path=effective_image_path,
+                    endpoint_id=serverless_endpoint_id,
+                    api_key=serverless_api_key,
+                    guidance=gen3c_guidance,
+                    frames=gen3c_frames,
+                    trajectory=gen3c_trajectory,
+                    foreground_masking=gen3c_foreground_mask,
+                    video_name=gen3c_video_name,
+                    seed=gen3c_seed,
+                    output_dir=resolved_gen3c_dir,
+                )
+            else:
+                # Local execution - build extra_args from UI selections
+                extra_args_parts = []
+                if gen3c_trajectory:
+                    extra_args_parts.append(f"--trajectory {gen3c_trajectory}")
+                if gen3c_foreground_mask:
+                    extra_args_parts.append("--foreground_masking")
+                if gen3c_extra_args and gen3c_extra_args.strip():
+                    extra_args_parts.append(gen3c_extra_args.strip())
+                
+                combined_extra_args = " ".join(extra_args_parts)
+                
+                # Try distributed execution if cluster is available and enabled
+                if use_cluster and _cluster_available and _job_manager is not None:
+                    return handle_generation_distributed(
+                        backend_choice=backend_choice,
+                        image_path=effective_image_path,
+                        image_scale=1.0,  # Already scaled
+                        guidance_scale=guidance_scale,
+                        steps=steps,
+                        seed=seed,
+                        model_choice=model_choice,
+                        use_fp16=use_fp16,
+                        attention_slicing=attention_slicing,
+                        cpu_offload=cpu_offload,
+                        remove_background=remove_background,
+                        output_name=output_name,
+                        save_location=resolved_hunyuan_dir,
+                        gen3c_guidance=gen3c_guidance,
+                        gen3c_frames=gen3c_frames,
+                        gen3c_video_name=gen3c_video_name,
+                        gen3c_checkpoint_dir=gen3c_checkpoint_dir,
+                        gen3c_output_dir=resolved_gen3c_dir,
+                        gen3c_extra_args=combined_extra_args,
+                        use_cluster=use_cluster,
+                    )
+                
+                return run_gen3c_backend(
+                    image_path=effective_image_path,
+                    guidance=gen3c_guidance,
+                    frames=gen3c_frames,
+                    video_name=gen3c_video_name,
+                    checkpoint_dir=gen3c_checkpoint_dir,
+                    output_dir=resolved_gen3c_dir,
+                    extra_args=combined_extra_args,
+                )
+        
+        # Hunyuan execution
+        if use_cluster and _cluster_available and _job_manager is not None:
+            return handle_generation_distributed(
+                backend_choice=backend_choice,
                 image_path=effective_image_path,
-                guidance=gen3c_guidance,
-                frames=gen3c_frames,
-                video_name=gen3c_video_name,
-                checkpoint_dir=gen3c_checkpoint_dir,
-                output_dir=resolved_gen3c_dir,
-                extra_args=gen3c_extra_args,
+                image_scale=1.0,  # Already scaled
+                guidance_scale=guidance_scale,
+                steps=steps,
+                seed=seed,
+                model_choice=model_choice,
+                use_fp16=use_fp16,
+                attention_slicing=attention_slicing,
+                cpu_offload=cpu_offload,
+                remove_background=remove_background,
+                output_name=output_name,
+                save_location=resolved_hunyuan_dir,
+                gen3c_guidance=gen3c_guidance,
+                gen3c_frames=gen3c_frames,
+                gen3c_video_name=gen3c_video_name,
+                gen3c_checkpoint_dir=gen3c_checkpoint_dir,
+                gen3c_output_dir=resolved_gen3c_dir,
+                gen3c_extra_args="",
+                use_cluster=use_cluster,
             )
+        
         return run_hunyuan(
             image_path=effective_image_path,
             guidance_scale=guidance_scale,
@@ -586,6 +1217,14 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
                 )
                 preview_button = gr.Button("Refresh Resolution Preview", variant="secondary")
 
+            # Cluster status display
+            cluster_status_display = gr.Textbox(
+                label="Cluster Status",
+                value=format_cluster_status(),
+                interactive=False,
+                lines=1
+            )
+            
             # System monitoring display (under image)
             system_metrics = gr.Textbox(
                 label="System Resources (updates every 2s)",
@@ -604,6 +1243,14 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
 
         # Right column - Controls
         with gr.Column(scale=1):
+            # Cluster mode toggle
+            use_cluster = gr.Checkbox(
+                value=_cluster_available and _job_manager is not None,
+                label="Use Cluster (Ray)",
+                info="Enable distributed execution across cluster nodes. Disable for local-only execution.",
+                interactive=_cluster_available,
+            )
+            
             backend_choice = gr.Radio(
                 choices=["Hunyuan GLB", "GEN3C Video"],
                 value="Hunyuan GLB",
@@ -639,36 +1286,156 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
                 )
 
             with gr.Accordion("GEN3C Options", open=False, visible=False) as gen3c_options:
-                gen3c_guidance = gr.Slider(0.5, 5.0, value=1.0, step=0.1, label="GEN3C Guidance")
+                # Execution mode selection - 3 options
+                gen3c_mode = gr.Radio(
+                    choices=["RunPod Pod", "RunPod Serverless", "Local (searidge cluster)"],
+                    value="RunPod Pod",
+                    label="Execution Mode",
+                    info="Pod: Dedicated GPU (~$2/hr). Serverless: On-demand (pay per job). Local: Uses searidge cluster."
+                )
+                
+                # RunPod Pod settings
+                with gr.Group(visible=True) as runpod_pod_settings:
+                    gr.Markdown("### RunPod Pod Settings")
+                    runpod_url = gr.Textbox(
+                        value=DEFAULT_RUNPOD_URL,
+                        label="Pod API URL",
+                        info="Your RunPod pod URL (e.g., https://xxx-8000.proxy.runpod.net)"
+                    )
+                    runpod_status = gr.Textbox(
+                        value="Click 'Check Status' to verify connection",
+                        label="Pod Status",
+                        interactive=False
+                    )
+                    with gr.Row():
+                        check_runpod_btn = gr.Button("Check Pod Status", variant="secondary")
+                        save_pod_btn = gr.Button("Save URL", variant="secondary", scale=0)
+                
+                # RunPod Serverless settings
+                with gr.Group(visible=False) as runpod_serverless_settings:
+                    gr.Markdown("### RunPod Serverless Settings")
+                    serverless_endpoint_id = gr.Textbox(
+                        value=DEFAULT_SERVERLESS_ENDPOINT,
+                        label="Endpoint ID",
+                        info="Your serverless endpoint ID from RunPod console"
+                    )
+                    serverless_api_key = gr.Textbox(
+                        value=DEFAULT_SERVERLESS_API_KEY,
+                        label="API Key",
+                        type="password",
+                        info="Your RunPod API key (starts with 'rp_')"
+                    )
+                    serverless_status = gr.Textbox(
+                        value="Click 'Check Status' to verify connection",
+                        label="Serverless Status",
+                        interactive=False
+                    )
+                    with gr.Row():
+                        check_serverless_btn = gr.Button("Check Status", variant="secondary")
+                        save_serverless_btn = gr.Button("Save Credentials", variant="secondary", scale=0)
+                        cancel_serverless_btn = gr.Button("Cancel Job", variant="stop", scale=0)
+                    
+                    # Hidden state for tracking current job
+                    current_job_id = gr.State(value=None)
+                
+                # Common GEN3C settings
+                gen3c_guidance = gr.Slider(0.5, 3.0, value=1.0, step=0.1, label="Guidance Scale")
                 gen3c_frames = gr.Dropdown(
-                    choices=["121", "242", "363", "484"],
+                    choices=["121", "241", "361", "481"],
                     value="121",
-                    label="GEN3C Frames",
-                    info="GEN3C currently supports frame counts that are multiples of 121."
+                    label="Number of Frames",
+                    info="121=5s, 241=10s, 361=15s, 481=20s at 24fps"
                 )
-                gen3c_video_name = gr.Textbox(value="gen3c_video", label="GEN3C Video Name")
-                gen3c_checkpoint_dir = gr.Textbox(
-                    value=GEN3C_DEFAULT_CHECKPOINT,
-                    label="GEN3C Checkpoint Directory"
+                gen3c_trajectory = gr.Dropdown(
+                    choices=["left", "right", "up", "down", "zoom_in", "zoom_out", "clockwise", "counterclockwise", "none"],
+                    value="left",
+                    label="Camera Trajectory",
+                    info="Direction of camera movement in the generated video"
                 )
-                gen3c_output_dir = gr.Textbox(
-                    value=GEN3C_DEFAULT_OUTPUT_DIR,
-                    label="Save Location",
-                    info="Defaults to assets/gen3c_outputs unless changed below."
+                gen3c_foreground_mask = gr.Checkbox(
+                    value=True,
+                    label="Foreground Masking",
+                    info="Focus on the main subject"
                 )
-                gen3c_dir_picker = gr.FileExplorer(
-                    value=None,
-                    label="Browse Save Location",
-                    file_count="single",
-                    root_dir=PROJECT_ROOT,
-                    height=150,
-                )
-                gen3c_extra_args = gr.Textbox(
-                    value="--trajectory left --foreground_masking",
-                    label="Additional GEN3C Arguments"
-                )
+                gen3c_video_name = gr.Textbox(value="gen3c_video", label="Output Video Name")
+                gen3c_seed = gr.Number(value=None, precision=0, label="Seed (optional, leave empty for random)")
+                
+                # Local-only settings (hidden when using RunPod)
+                with gr.Accordion("Local Execution Settings", open=False) as local_settings:
+                    gen3c_checkpoint_dir = gr.Textbox(
+                        value=GEN3C_DEFAULT_CHECKPOINT,
+                        label="Checkpoint Directory"
+                    )
+                    gen3c_output_dir = gr.Textbox(
+                        value=GEN3C_DEFAULT_OUTPUT_DIR,
+                        label="Output Directory"
+                    )
+                    gen3c_dir_picker = gr.FileExplorer(
+                        value=None,
+                        label="Browse Output Location",
+                        file_count="single",
+                        root_dir=PROJECT_ROOT,
+                        height=150,
+                    )
+                    gen3c_extra_args = gr.Textbox(
+                        value="",
+                        label="Additional Arguments (advanced)"
+                    )
 
             run_btn = gr.Button("Generate Hunyuan GLB", variant="primary")
+
+    # RunPod Pod status check button handler
+    check_runpod_btn.click(
+        fn=check_runpod_status,
+        inputs=[runpod_url],
+        outputs=[runpod_status]
+    )
+    
+    # Save Pod URL button handler
+    save_pod_btn.click(
+        fn=save_pod_url,
+        inputs=[runpod_url],
+        outputs=[runpod_status]
+    )
+    
+    # RunPod Serverless status check button handler
+    check_serverless_btn.click(
+        fn=check_serverless_status,
+        inputs=[serverless_endpoint_id, serverless_api_key],
+        outputs=[serverless_status]
+    )
+    
+    # Save serverless credentials button handler
+    save_serverless_btn.click(
+        fn=save_serverless_credentials,
+        inputs=[serverless_endpoint_id, serverless_api_key],
+        outputs=[serverless_status]
+    )
+    
+    # Cancel serverless job button handler
+    cancel_serverless_btn.click(
+        fn=cancel_serverless_job,
+        inputs=[serverless_endpoint_id, serverless_api_key, current_job_id],
+        outputs=[serverless_status, current_job_id]
+    )
+    
+    # Toggle visibility of RunPod settings based on execution mode
+    def _gen3c_mode_change(mode: str):
+        """Show/hide settings based on GEN3C execution mode."""
+        show_pod = mode == "RunPod Pod"
+        show_serverless = mode == "RunPod Serverless"
+        show_local = mode == "Local (searidge cluster)"
+        return (
+            gr.update(visible=show_pod),       # runpod_pod_settings
+            gr.update(visible=show_serverless), # runpod_serverless_settings
+            gr.update(visible=show_local),      # local_settings accordion
+        )
+    
+    gen3c_mode.change(
+        fn=_gen3c_mode_change,
+        inputs=[gen3c_mode],
+        outputs=[runpod_pod_settings, runpod_serverless_settings, local_settings]
+    )
 
     with gr.Row():
         output_file = gr.File(label="Output (GLB or MP4)")
@@ -694,13 +1461,21 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
             output_name,
             save_location,
             save_location_picker,
+            gen3c_mode,
+            runpod_url,
+            serverless_endpoint_id,
+            serverless_api_key,
             gen3c_guidance,
             gen3c_frames,
+            gen3c_trajectory,
+            gen3c_foreground_mask,
             gen3c_video_name,
+            gen3c_seed,
             gen3c_checkpoint_dir,
             gen3c_output_dir,
             gen3c_dir_picker,
             gen3c_extra_args,
+            use_cluster,
         ],
         outputs=[output_file, logs_box, progress_display],
     )
@@ -724,17 +1499,31 @@ with gr.Blocks(title="Hunyuan3D 2D→3D") as demo:
     # Timer to update system metrics every 2 seconds
     def update_metrics():
         return _format_system_metrics(get_system_metrics())
+    
+    def update_cluster_status():
+        return format_cluster_status()
 
     timer = gr.Timer(2.0)
     timer.tick(fn=update_metrics, outputs=[system_metrics])
+    
+    # Update cluster status every 5 seconds
+    cluster_timer = gr.Timer(5.0)
+    cluster_timer.tick(fn=update_cluster_status, outputs=[cluster_status_display])
 
 if __name__ == "__main__":
+    # Initialize job manager for distributed execution
+    print("[STARTUP] Initializing job manager...")
+    _init_job_manager()
+    
     # Start monitoring thread when Gradio launches
     _monitor_thread = threading.Thread(target=_update_system_metrics, daemon=True)
     _monitor_thread.start()
     
     # Give monitoring thread time to start
     time.sleep(0.5)
+    
+    # Print startup status
+    print(f"[STARTUP] Cluster status: {format_cluster_status()}")
 
     demo.launch(server_port=5683, share=False)
     

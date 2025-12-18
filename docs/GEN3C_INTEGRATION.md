@@ -6,8 +6,10 @@ This document explains how to install NVIDIA TLabs' GEN3C repository locally and
 
 ## 1. Clone the Repository
 
+For multi-system deployment, clone to the shared NFS storage:
+
 ```bash
-cd /home/arkrunr
+cd /srv/searidge_share/projects
 git clone https://github.com/nv-tlabs/GEN3C.git
 cd GEN3C
 ```
@@ -129,27 +131,27 @@ NVIDIA TLabs only documents CUDA builds, but our production hardware relies on A
 
 1. **Run the ROCm setup script**
    ```bash
-   cd /home/arkrunr/Hunyuan3D-2-Fork
+   cd /srv/searidge_share/projects/Hunyuan3D-2-Fork
    ./scripts/setup_gen3c_rocm.sh
    ```
-   - Creates (or updates) the `gen3c-rocm` Conda env with Python 3.10.
+   - Creates (or updates) the `gen3c-rocm310` Conda env with Python 3.10.
    - Installs ROCm PyTorch wheels (`torch==2.4.1+rocm6.1`, `torchvision==0.19.1+rocm6.1`).
    - Installs the rest of GEN3C’s dependencies, excluding CUDA-only wheels (`torch`, `torchvision`, `triton`, `warp-lang`, `nvidia-*`).
    - Clones and builds the ROCm fork of Apex from `ROCmSoftwarePlatform/apex`.
-   - Installs the Python `amdsmi` bindings so PyTorch can query GPU metadata without crashing on ROCm (match the version to your installed ROCm stack, e.g. `conda run -n gen3c-rocm pip install --force-reinstall "amdsmi==6.4.4"` for ROCm 6.4).
+   - Installs the Python `amdsmi` bindings so PyTorch can query GPU metadata without crashing on ROCm (match the version to your installed ROCm stack, e.g. `conda run -n gen3c-rocm310 pip install --force-reinstall "amdsmi==6.4.4"` for ROCm 6.4).
    - **IMPORTANT:** Because Transformer Engine and NVIDIA’s Apex `amp_C` extensions are CUDA-only, GEN3C’s prompt-uplevel/autoregressive stack must run with the PyTorch backend on ROCm. In `cosmos_predict1/autoregressive/configs/...` set `backend: pytorch` (or pass `--prompt_upsampler_backend pytorch`) to avoid TE-only modules.
 
 2. **ROCk/ROCm environment variables**  
    Before launching GEN3C on AMD hardware, export the same variables we rely on for Hunyuan3D:
    ```bash
    export HIP_VISIBLE_DEVICES=0          # pick the desired GPU
-   export HSA_OVERRIDE_GFX_VERSION=11.0.0
-   export PYTORCH_HIP_ALLOC_CONF=max_split_size_mb:512
+   export HSA_OVERRIDE_GFX_VERSION=10.3.0  # RX 6900 XT = gfx1030
+   export PYTORCH_ALLOC_CONF=max_split_size_mb:512
    ```
 
 3. **Validate the environment**
    ```bash
-   conda run -n gen3c-rocm python scripts/test_environment.py
+   conda run -n gen3c-rocm310 python scripts/test_environment.py
    ```
    Expect some functionality (Transformer Engine FP8 kernels, NVIDIA ModelOpt optimizations, `warp-lang`) to be unavailable on ROCm. The script will warn about missing `transformer_engine`, which is expected on AMD hardware; Megatron-Core, Diffusers, and ROCm Torch should still load successfully. If you need to capture this behavior in automation, treat a missing Transformer Engine import as informational whenever `torch.version.hip` is defined (see `scripts/test_environment.py` notes below).
 
@@ -161,18 +163,18 @@ NVIDIA TLabs only documents CUDA builds, but our production hardware relies on A
 Once the environment is ready, trigger GEN3C via the helper script added to this repo:
 
 ```bash
-cd /home/arkrunr/Hunyuan3D-2-Fork
+cd /srv/searidge_share/projects/Hunyuan3D-2-Fork
 ./scripts/run_gen3c.sh \
-  --input /path/to/image.png \
+  --input /srv/searidge_share/inputs/image.png \
   --video-name lobby_pan \
   --guidance 1 \
   --extra "--trajectory left --foreground_masking"
 ```
 
-- The script handles `conda run -n gen3c-rocm ...`, exports `HIP_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, and `PYTORCH_HIP_ALLOC_CONF`, then copies the generated video into `assets/gen3c_outputs/`.
+- The script handles `conda run -n gen3c-rocm310 ...`, exports `HIP_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, and `PYTORCH_ALLOC_CONF`, then copies the generated video into the shared outputs directory.
 - Override defaults with environment variables:
-  - `GEN3C_DIR` (default `/home/arkrunr/GEN3C`)
-  - `ENV_NAME` (default `gen3c-rocm`)
+  - `GEN3C_DIR` (default `/srv/searidge_share/projects/GEN3C`)
+  - `ENV_NAME` (default `gen3c-rocm310`)
   - `CUDA_HOME_OVERRIDE` (default `/opt/rocm`)
 - Pass additional GEN3C CLI flags via `--extra` or a trailing `--`, e.g. camera trajectories, `--foreground_masking`, or offloading options published in the GEN3C README.
 
@@ -205,18 +207,18 @@ Use this section as an operator cheat sheet when launching jobs from `2d3d.py`.
 - **Model Selection**: `Mini Model (Faster)` auto-sets octree resolution 380 / chunks 6000 for maximum detail that still fits into 16 GB VRAM. `Full Model (Higher Quality)` switches to the full DiT weights with octree 360 / chunks 5000; use it when you can tolerate longer CPU-bound meshing.
 - **Use FP16 / Attention slicing / CPU offload**: Memory safety toggles. Keep all three enabled on 16 GB cards. Disable sequentially only if you need to benchmark raw speed and know you have ample VRAM.
 - **Remove background automatically**: Calls `hy3dgen.rembg`. Useful when stage photos contain complex seating or rigging you want to drop before 3D reconstruction. Slightly increases preprocessing time; leave off if you already supply an alpha-matted render.
-- **Output name / Save Location**: Controls the final `*_shape.glb` filename and destination. By default we write to `assets/hunyuan_outputs`; use the embedded file explorer to browse to a different folder. The directory is created automatically if it doesn’t exist.
+- **Output name / Save Location**: Controls the final `*_shape.glb` filename and destination. By default we write to `/srv/searidge_share/outputs/hunyuan`; use the embedded file explorer to browse to a different folder. The directory is created automatically if it doesn't exist.
 
 ### GEN3C Controls (visible when `GEN3C Video` is selected)
 - **GEN3C Guidance (default 1.0)**: Maps to the `--guidance` flag in `gen3c_single_image.py`. Values between 0.8 and 1.2 gently steer the video toward the source image while keeping motion natural. Larger than 2.0 can introduce jitter.
-- **GEN3C Frames**: Dropdown that feeds `--num_video_frames`. Select one of the supported counts (121, 241, 361, 481). These satisfy NVIDIA’s constraint `(frames - 1) % 120 == 0`; higher values lengthen the clip but consume more memory and time.
-- **GEN3C Video Name**: Base name for the MP4 stored under `assets/gen3c_outputs/`. Avoid spaces; the UI appends `.mp4`.
-- **GEN3C Checkpoint Directory**: Defaults to `/home/arkrunr/GEN3C/checkpoints`. Override if you mirror checkpoints to another disk. Must contain the `Gen3C-Cosmos-7B`, tokenizer, guardrail, and T5 folders downloaded earlier.
-- **Save Location**: Destination for the copied MP4 after the launcher completes (defaults to `assets/gen3c_outputs`). Use the explorer widget to browse to any writable directory; the path will be created if necessary.
+- **GEN3C Frames**: Dropdown that feeds `--num_video_frames`. Select one of the supported counts (121, 241, 361, 481). These satisfy NVIDIA's constraint `(frames - 1) % 120 == 0`; higher values lengthen the clip but consume more memory and time.
+- **GEN3C Video Name**: Base name for the MP4 stored under `/srv/searidge_share/outputs/gen3c/`. Avoid spaces; the UI appends `.mp4`.
+- **GEN3C Checkpoint Directory**: Defaults to `/srv/searidge_share/checkpoints/gen3c`. Override if you mirror checkpoints to another disk. Must contain the `Gen3C-Cosmos-7B`, tokenizer, guardrail, and T5 folders downloaded earlier.
+- **Save Location**: Destination for the copied MP4 after the launcher completes (defaults to `/srv/searidge_share/outputs/gen3c`). Use the explorer widget to browse to any writable directory; the path will be created if necessary.
 - **Additional GEN3C Arguments**: Free-form string forwarded to the launcher’s `--extra`. Use it for camera motions (`--trajectory left/right/full_orbit`), masking flags (`--foreground_masking`), or any other CLI switches described in NVIDIA’s README. You can also append `--` in the textbox to manually pass multiple flags exactly as the upstream script expects.
 
 Tips:
-- Always verify the `gen3c-rocm` environment is active and the checkpoints exist before running the GEN3C backend; the UI does not re-install dependencies automatically.
+- Always verify the `gen3c-rocm310` environment is active and the checkpoints exist before running the GEN3C backend; the UI does not re-install dependencies automatically.
 - If GEN3C jobs fail silently, open the `Logs` box for the raw `stdout/stderr` captured from `scripts/run_gen3c.sh`.
 - For both backends, set the Gradio timeout high enough (currently 45 minutes) and avoid launching multiple runs concurrently to prevent VRAM exhaustion.
 
