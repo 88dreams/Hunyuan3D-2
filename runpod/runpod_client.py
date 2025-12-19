@@ -25,12 +25,14 @@ class JobStatus(Enum):
 
 @dataclass
 class RunPodJobResult:
-    """Result from a RunPod GEN3C job."""
+    """Result from a RunPod job (GEN3C or SHARP)."""
     success: bool
     job_id: str
     status: JobStatus
+    model: str = "gen3c"  # "gen3c" or "sharp"
     output_path: Optional[str] = None
     video_base64: Optional[str] = None
+    ply_base64: Optional[str] = None
     error: Optional[str] = None
     duration_seconds: float = 0.0
     logs: str = ""
@@ -732,4 +734,372 @@ def set_serverless_config(endpoint_id: str, api_key: str) -> RunPodServerlessCli
     global _default_serverless_client
     _default_serverless_client = RunPodServerlessClient(endpoint_id, api_key)
     return _default_serverless_client
+
+
+# =============================================================================
+# UNIFIED SERVERLESS CLIENT (Multi-Model Support)
+# =============================================================================
+
+class UnifiedServerlessClient:
+    """
+    Unified client for RunPod Serverless supporting multiple models.
+    
+    Supports:
+    - GEN3C: Image to video generation
+    - SHARP: Image to 3D Gaussian Splatting
+    """
+    
+    RUNPOD_API_BASE = "https://api.runpod.ai/v2"
+    
+    VALID_TRAJECTORIES = [
+        "left", "right", "up", "down", 
+        "zoom_in", "zoom_out", 
+        "clockwise", "counterclockwise", 
+        "none"
+    ]
+    VALID_FRAME_COUNTS = [121, 241, 361, 481]
+    
+    def __init__(self, endpoint_id: str, api_key: str, timeout: int = 30):
+        """
+        Initialize the unified serverless client.
+        
+        Args:
+            endpoint_id: Your serverless endpoint ID
+            api_key: Your RunPod API key
+            timeout: Request timeout in seconds
+        """
+        self.endpoint_id = endpoint_id
+        self.api_key = api_key
+        self.timeout = timeout
+        self.base_url = f"{self.RUNPOD_API_BASE}/{endpoint_id}"
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def health_check(self) -> Dict[str, Any]:
+        """Check endpoint health."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "status": "healthy",
+                    "workers": data.get("workers", {}),
+                    "jobs": data.get("jobs", {}),
+                    "endpoint_id": self.endpoint_id
+                }
+            else:
+                return {"status": "error", "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    def submit_gen3c_job(
+        self,
+        image_path: str,
+        video_name: str = "gen3c_output",
+        num_frames: int = 121,
+        trajectory: str = "left",
+        guidance: float = 1.0,
+        foreground_masking: bool = True,
+        seed: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Submit a GEN3C job."""
+        if num_frames not in self.VALID_FRAME_COUNTS:
+            raise ValueError(f"num_frames must be one of {self.VALID_FRAME_COUNTS}")
+        if trajectory not in self.VALID_TRAJECTORIES:
+            raise ValueError(f"trajectory must be one of {self.VALID_TRAJECTORIES}")
+        
+        with open(image_path, "rb") as f:
+            image_base64 = base64.b64encode(f.read()).decode()
+        
+        payload = {
+            "input": {
+                "model": "gen3c",
+                "image_base64": image_base64,
+                "output_name": video_name,
+                "num_frames": num_frames,
+                "trajectory": trajectory,
+                "guidance": guidance,
+                "foreground_masking": foreground_masking,
+                "return_base64": True
+            }
+        }
+        if seed is not None:
+            payload["input"]["seed"] = seed
+        
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return {
+            "job_id": result.get("id", ""),
+            "status": result.get("status", "unknown").lower(),
+            "model": "gen3c"
+        }
+    
+    def submit_sharp_job(
+        self,
+        image_path: str,
+        output_name: str = "sharp_output",
+        render_video: bool = False
+    ) -> Dict[str, Any]:
+        """Submit a SHARP job."""
+        with open(image_path, "rb") as f:
+            image_base64 = base64.b64encode(f.read()).decode()
+        
+        payload = {
+            "input": {
+                "model": "sharp",
+                "image_base64": image_base64,
+                "output_name": output_name,
+                "render_video": render_video,
+                "return_base64": True
+            }
+        }
+        
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return {
+            "job_id": result.get("id", ""),
+            "status": result.get("status", "unknown").lower(),
+            "model": "sharp"
+        }
+    
+    def get_status(self, job_id: str) -> Dict[str, Any]:
+        """Get job status."""
+        response = requests.get(
+            f"{self.base_url}/status/{job_id}",
+            headers=self._headers(),
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        runpod_status = result.get("status", "unknown").upper()
+        status_map = {
+            "IN_QUEUE": "pending",
+            "IN_PROGRESS": "running",
+            "COMPLETED": "completed",
+            "FAILED": "failed",
+            "CANCELLED": "failed"
+        }
+        
+        normalized = {
+            "job_id": job_id,
+            "status": status_map.get(runpod_status, "unknown"),
+            "runpod_status": runpod_status
+        }
+        
+        if "logs" in result:
+            normalized["logs"] = result["logs"]
+        
+        if runpod_status == "COMPLETED" and "output" in result:
+            output = result["output"]
+            if isinstance(output, dict):
+                normalized["model"] = output.get("model", "unknown")
+                # GEN3C outputs
+                if output.get("video_base64"):
+                    normalized["video_base64"] = output["video_base64"]
+                if output.get("video_path"):
+                    normalized["video_path"] = output["video_path"]
+                # SHARP outputs
+                if output.get("ply_base64"):
+                    normalized["ply_base64"] = output["ply_base64"]
+                if output.get("ply_path"):
+                    normalized["ply_path"] = output["ply_path"]
+                # Status
+                if output.get("status") == "error":
+                    normalized["status"] = "failed"
+                    normalized["error"] = output.get("message", "Unknown error")
+        
+        if runpod_status == "FAILED":
+            normalized["error"] = result.get("error", "Unknown error")
+        
+        return normalized
+    
+    def cancel_job(self, job_id: str) -> Dict[str, Any]:
+        """Cancel a job."""
+        try:
+            response = requests.post(
+                f"{self.base_url}/cancel/{job_id}",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return {"success": True, "message": f"Job {job_id} cancelled"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def wait_for_completion(
+        self,
+        job_id: str,
+        poll_interval: int = 30,
+        max_wait: int = 3600,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> Dict[str, Any]:
+        """Wait for job completion."""
+        start_time = time.time()
+        
+        while True:
+            elapsed = time.time() - start_time
+            
+            if elapsed > max_wait:
+                return {"job_id": job_id, "status": "failed", "error": f"Timeout after {max_wait}s"}
+            
+            try:
+                status = self.get_status(job_id)
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Status check failed: {e}", elapsed)
+                time.sleep(poll_interval)
+                continue
+            
+            if progress_callback:
+                progress_callback(status.get("status", "unknown"), elapsed)
+            
+            if status.get("status") in ["completed", "failed"]:
+                return status
+            
+            time.sleep(poll_interval)
+    
+    def generate_sharp_sync(
+        self,
+        image_path: str,
+        output_dir: str,
+        output_name: str = "sharp_output",
+        render_video: bool = False,
+        poll_interval: int = 10,
+        max_wait: int = 600,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> RunPodJobResult:
+        """
+        Submit SHARP job and wait for completion.
+        
+        Args:
+            image_path: Path to input image
+            output_dir: Directory to save output
+            output_name: Base name for output files
+            render_video: Whether to render video trajectory
+            poll_interval: Seconds between status checks
+            max_wait: Maximum wait time
+            progress_callback: Optional progress callback
+            
+        Returns:
+            RunPodJobResult with PLY (and optionally video) output
+        """
+        start_time = time.time()
+        logs = []
+        
+        logs.append(f"Submitting SHARP job to endpoint: {self.endpoint_id}")
+        
+        try:
+            submit_result = self.submit_sharp_job(
+                image_path=image_path,
+                output_name=output_name,
+                render_video=render_video
+            )
+        except Exception as e:
+            return RunPodJobResult(
+                success=False,
+                job_id="",
+                status=JobStatus.FAILED,
+                model="sharp",
+                error=f"Failed to submit job: {e}",
+                logs="\n".join(logs)
+            )
+        
+        job_id = submit_result.get("job_id", "")
+        logs.append(f"Job submitted: {job_id}")
+        
+        if progress_callback:
+            progress_callback("pending", 0)
+        
+        final_status = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        duration = time.time() - start_time
+        
+        if final_status.get("status") == "completed":
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = None
+            
+            # Save PLY
+            if final_status.get("ply_base64"):
+                output_path = os.path.join(output_dir, f"{output_name}.ply")
+                ply_data = base64.b64decode(final_status["ply_base64"])
+                with open(output_path, "wb") as f:
+                    f.write(ply_data)
+                logs.append(f"PLY saved: {output_path}")
+            
+            # Save video if rendered
+            video_path = None
+            if final_status.get("video_base64"):
+                video_path = os.path.join(output_dir, f"{output_name}.mp4")
+                video_data = base64.b64decode(final_status["video_base64"])
+                with open(video_path, "wb") as f:
+                    f.write(video_data)
+                logs.append(f"Video saved: {video_path}")
+            
+            return RunPodJobResult(
+                success=True,
+                job_id=job_id,
+                status=JobStatus.COMPLETED,
+                model="sharp",
+                output_path=output_path,
+                ply_base64=final_status.get("ply_base64"),
+                video_base64=final_status.get("video_base64"),
+                duration_seconds=duration,
+                logs="\n".join(logs)
+            )
+        else:
+            logs.append(f"Job failed: {final_status.get('error', 'Unknown error')}")
+            return RunPodJobResult(
+                success=False,
+                job_id=job_id,
+                status=JobStatus.FAILED,
+                model="sharp",
+                error=final_status.get("error", "Unknown error"),
+                duration_seconds=duration,
+                logs="\n".join(logs)
+            )
+
+
+# Default unified client
+_unified_client: Optional[UnifiedServerlessClient] = None
+
+
+def get_unified_client(
+    endpoint_id: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional[UnifiedServerlessClient]:
+    """Get or create the unified serverless client."""
+    global _unified_client
+    
+    if endpoint_id and api_key:
+        _unified_client = UnifiedServerlessClient(endpoint_id, api_key)
+    
+    return _unified_client
 

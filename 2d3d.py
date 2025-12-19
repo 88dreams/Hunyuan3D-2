@@ -52,6 +52,19 @@ from generators import (
     check_serverless_status,
     cancel_serverless_job,
     GEN3C_DEFAULT_OUTPUT_DIR,
+    # SHARP
+    run_sharp_local,
+    run_sharp_runpod,
+    check_sharp_installation,
+    SHARP_DEFAULT_OUTPUT_DIR,
+    # Lyra
+    run_lyra_runpod,
+    check_lyra_status,
+    LYRA_DEFAULT_OUTPUT_DIR,
+    # TRELLIS.2
+    run_trellis_runpod,
+    check_trellis_status,
+    TRELLIS_DEFAULT_OUTPUT_DIR,
 )
 
 from job_queue import (
@@ -307,6 +320,147 @@ def handle_gen3c_generation(
                 pass
 
 
+def handle_sharp_generation(
+    image_path: Union[str, None],
+    image_scale: Union[float, int],
+    exec_mode: str,
+    endpoint_id: str,
+    api_key: str,
+    render_video: bool,
+    output_name: str,
+    output_dir: str,
+) -> Tuple[Optional[str], str, str]:
+    """Handle SHARP generation based on execution mode."""
+    scale_value = clamp_scale_value(image_scale)
+    scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
+    effective_image_path = scaled_path or image_path
+    
+    try:
+        if "RunPod" in exec_mode:
+            return run_sharp_runpod(
+                image_path=effective_image_path,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                output_name=output_name,
+                output_dir=output_dir,
+                render_video=render_video,
+            )
+        else:
+            # Local mode - video rendering not supported without CUDA
+            if render_video:
+                return None, "⚠️ Video rendering requires RunPod (CUDA GPU). Generating PLY only.", "⚠️ Video rendering not available locally"
+            return run_sharp_local(
+                image_path=effective_image_path,
+                output_name=output_name,
+                output_dir=output_dir,
+                render_video=False,
+            )
+    finally:
+        if temp_scaled and os.path.exists(temp_scaled):
+            try:
+                os.remove(temp_scaled)
+            except Exception:
+                pass
+
+
+def handle_lyra_generation(
+    image_path: Union[str, None],
+    video_path: Union[str, None],
+    image_scale: Union[float, int],
+    exec_mode: str,
+    endpoint_id: str,
+    api_key: str,
+    generation_mode: str,
+    num_views: int,
+    camera_motion: float,
+    multi_trajectory: bool,
+    foreground_masking: bool,
+    num_gaussians: int,
+    seed: Optional[int],
+    output_name: str,
+    output_dir: str,
+    output_ply: bool,
+    output_video: bool,
+) -> Tuple[Optional[str], str, str]:
+    """Handle Lyra generation (RunPod only)."""
+    scale_value = clamp_scale_value(image_scale)
+    
+    # Lyra can use image or video depending on mode
+    is_static = "Static" in generation_mode
+    
+    if is_static:
+        scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
+        effective_image_path = scaled_path or image_path
+        effective_video_path = None
+    else:
+        effective_image_path = None
+        effective_video_path = video_path
+        temp_scaled = None
+    
+    try:
+        return run_lyra_runpod(
+            image_path=effective_image_path,
+            video_path=effective_video_path,
+            endpoint_id=endpoint_id,
+            api_key=api_key,
+            generation_mode=generation_mode,
+            num_views=num_views,
+            camera_motion=camera_motion,
+            multi_trajectory=multi_trajectory,
+            foreground_masking=foreground_masking,
+            num_gaussians=num_gaussians,
+            seed=int(seed) if seed else None,
+            output_name=output_name,
+            output_dir=output_dir,
+            output_ply=output_ply,
+            output_video=output_video,
+        )
+    finally:
+        if temp_scaled and os.path.exists(temp_scaled):
+            try:
+                os.remove(temp_scaled)
+            except Exception:
+                pass
+
+
+def handle_trellis_generation(
+    image_path: Union[str, None],
+    image_scale: Union[float, int],
+    exec_mode: str,
+    endpoint_id: str,
+    api_key: str,
+    resolution: str,
+    guidance_scale: float,
+    seed: Optional[int],
+    output_name: str,
+    output_dir: str,
+    output_format: str,
+) -> Tuple[Optional[str], str, str]:
+    """Handle TRELLIS.2 generation (RunPod only)."""
+    scale_value = clamp_scale_value(image_scale)
+    scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
+    effective_image_path = scaled_path or image_path
+    
+    try:
+        return run_trellis_runpod(
+            image_path=effective_image_path,
+            endpoint_id=endpoint_id,
+            api_key=api_key,
+            resolution=resolution,
+            guidance_scale=guidance_scale,
+            seed=int(seed) if seed else None,
+            output_name=output_name,
+            output_dir=output_dir,
+            output_format=output_format,
+        )
+    finally:
+        if temp_scaled and os.path.exists(temp_scaled):
+            try:
+                os.remove(temp_scaled)
+            except Exception:
+                pass
+
+
 # =============================================================================
 # GRADIO INTERFACE
 # =============================================================================
@@ -423,17 +577,26 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                         format_cluster_status_fn=format_cluster_status,
                     )
                 
-                # TAB 3: LYRA 3DGS (Coming Soon)
+                # TAB 3: LYRA 3DGS
                 with gr.TabItem("Lyra 3DGS", id="lyra"):
-                    lyra = create_lyra_tab()
+                    lyra = create_lyra_tab(
+                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
+                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                    )
                 
-                # TAB 4: SHARP (Coming Soon)
+                # TAB 4: SHARP
                 with gr.TabItem("SHARP", id="sharp"):
-                    sharp = create_sharp_tab()
+                    sharp = create_sharp_tab(
+                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
+                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                    )
                 
-                # TAB 5: TRELLIS.2 (Coming Soon)
+                # TAB 5: TRELLIS.2
                 with gr.TabItem("TRELLIS.2", id="trellis"):
-                    trellis = create_trellis_tab()
+                    trellis = create_trellis_tab(
+                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
+                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                    )
     
     # =========================================================================
     # EVENT HANDLERS
@@ -551,6 +714,119 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             gen3c["video_name"], gen3c["seed"], gen3c["checkpoint_dir"], gen3c["output_dir"], gen3c["extra_args"],
         ],
         outputs=[output_video_player, gen3c["logs_box"], gen3c["progress_display"]],
+    )
+    
+    # --- SHARP Mode Toggle ---
+    def sharp_mode_change(mode: str):
+        """Toggle visibility of SHARP execution mode settings."""
+        show_runpod = "RunPod" in mode
+        if show_runpod:
+            if DEFAULT_SERVERLESS_ENDPOINT and DEFAULT_SERVERLESS_API_KEY:
+                status = "✅ Credentials loaded - Click Check Connection"
+            else:
+                status = "⚠️ Enter RunPod credentials below"
+        else:
+            status = check_sharp_installation()
+        return gr.update(visible=show_runpod), status
+    
+    sharp["exec_mode"].change(
+        fn=sharp_mode_change,
+        inputs=[sharp["exec_mode"]],
+        outputs=[sharp["runpod_settings"], sharp["status"]],
+    )
+    
+    # --- SHARP Status Checks ---
+    sharp["check_btn"].click(
+        fn=check_sharp_installation,
+        outputs=[sharp["status"]],
+    )
+    
+    sharp["check_runpod_btn"].click(
+        fn=check_serverless_status,
+        inputs=[sharp["endpoint_id"], sharp["api_key"]],
+        outputs=[sharp["status"]],
+    )
+    
+    sharp["save_creds_btn"].click(
+        fn=save_serverless_credentials,
+        inputs=[sharp["endpoint_id"], sharp["api_key"]],
+        outputs=[sharp["status"], sharp["runpod_settings"]],
+    )
+    
+    # --- SHARP Generation ---
+    sharp["generate_btn"].click(
+        fn=handle_sharp_generation,
+        inputs=[
+            input_image, image_scale_slider, sharp["exec_mode"],
+            sharp["endpoint_id"], sharp["api_key"],
+            sharp["render_video"], sharp["output_name"], sharp["output_dir"],
+        ],
+        outputs=[output_model_viewer, sharp["logs_box"], sharp["progress_display"]],
+    )
+    
+    # --- Lyra Status Checks ---
+    lyra["check_btn"].click(
+        fn=lambda ep, key: check_lyra_status(ep, key),
+        inputs=[lyra["endpoint_id"], lyra["api_key"]],
+        outputs=[lyra["status"]],
+    )
+    
+    lyra["check_runpod_btn"].click(
+        fn=lambda ep, key: check_lyra_status(ep, key),
+        inputs=[lyra["endpoint_id"], lyra["api_key"]],
+        outputs=[lyra["status"]],
+    )
+    
+    lyra["save_creds_btn"].click(
+        fn=save_serverless_credentials,
+        inputs=[lyra["endpoint_id"], lyra["api_key"]],
+        outputs=[lyra["status"], lyra["runpod_settings"]],
+    )
+    
+    # --- Lyra Generation ---
+    lyra["generate_btn"].click(
+        fn=handle_lyra_generation,
+        inputs=[
+            input_image, input_video, image_scale_slider, lyra["exec_mode"],
+            lyra["endpoint_id"], lyra["api_key"],
+            lyra["generation_mode"], lyra["num_views"], lyra["camera_motion"],
+            lyra["multi_trajectory"], lyra["foreground_masking"],
+            lyra["num_gaussians"], lyra["seed"],
+            lyra["output_name"], lyra["output_dir"],
+            lyra["output_ply"], lyra["output_video"],
+        ],
+        outputs=[output_model_viewer, lyra["logs_box"], lyra["progress_display"]],
+    )
+    
+    # --- TRELLIS.2 Status Checks ---
+    trellis["check_btn"].click(
+        fn=lambda ep, key: check_trellis_status(ep, key),
+        inputs=[trellis["endpoint_id"], trellis["api_key"]],
+        outputs=[trellis["status"]],
+    )
+    
+    trellis["check_runpod_btn"].click(
+        fn=lambda ep, key: check_trellis_status(ep, key),
+        inputs=[trellis["endpoint_id"], trellis["api_key"]],
+        outputs=[trellis["status"]],
+    )
+    
+    trellis["save_creds_btn"].click(
+        fn=save_serverless_credentials,
+        inputs=[trellis["endpoint_id"], trellis["api_key"]],
+        outputs=[trellis["status"], trellis["runpod_settings"]],
+    )
+    
+    # --- TRELLIS.2 Generation ---
+    trellis["generate_btn"].click(
+        fn=handle_trellis_generation,
+        inputs=[
+            input_image, image_scale_slider, trellis["exec_mode"],
+            trellis["endpoint_id"], trellis["api_key"],
+            trellis["resolution"], trellis["guidance_scale"], trellis["seed"],
+            trellis["output_name"], trellis["output_dir"], trellis["output_format"],
+        ],
+        outputs=[output_model_viewer, trellis["logs_box"], trellis["progress_display"]],
     )
     
     # --- Clear Queue ---

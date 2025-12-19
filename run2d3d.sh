@@ -17,8 +17,10 @@ set -euo pipefail
 SEARIDGE_SHARE="/srv/searidge_share"
 PROJECT_DIR="${SEARIDGE_SHARE}/projects/Hunyuan3D-2-Fork"
 
-# Conda environment - use gen3c-rocm (Python 3.12, has apex-rocm built)
-ENV_NAME="${ENV_NAME:-gen3c-rocm}"
+# Conda environment - use gen3c-rocm310 (Python 3.10, matches NVIDIA stack)
+# gen3c-rocm310: Python 3.10, NumPy 1.26.4 - compatible with GEN3C/Lyra/TRELLIS.2/SHARP
+# gen3c-rocm: Python 3.12, NumPy 2.3.3 - NOT compatible with RunPod unified image
+ENV_NAME="${ENV_NAME:-gen3c-rocm310}"
 
 # ROCm configuration for AMD RX 6900 XT (gfx1030)
 export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-10.3.0}"

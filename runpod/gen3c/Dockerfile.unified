@@ -1,0 +1,233 @@
+# =============================================================================
+# Unified 3D Generation Docker Image for RunPod
+# Includes: GEN3C + Lyra + TRELLIS.2 + SHARP
+# =============================================================================
+# 
+# This Dockerfile builds a multi-model inference environment for RunPod.
+# All models share Python 3.10 + NumPy 1.26.4 + PyTorch 2.6.0 (NVIDIA stack)
+#
+# Included Models:
+#   - GEN3C: Image to video generation (NVIDIA Cosmos)
+#   - Lyra: Image/Video to 3D/4D Gaussian Splatting (NVIDIA, built on GEN3C)
+#   - TRELLIS.2: Image to 3D with O-Voxel representation (Microsoft)
+#   - SHARP: Image to 3D Gaussian Splatting (Apple)
+#
+# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v9 .
+# Push:  docker push 88dreams/gen3c-runpod:v9
+#
+# =============================================================================
+
+# Use NVIDIA PyTorch container as base (includes CUDA 12.4)
+FROM nvcr.io/nvidia/pytorch:24.10-py3
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# =============================================================================
+# System Dependencies
+# =============================================================================
+RUN apt-get update && apt-get install -y \
+    git \
+    tree \
+    ffmpeg \
+    wget \
+    curl \
+    libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fix shell and CUDA library links
+RUN rm /bin/sh && ln -s /bin/bash /bin/sh && \
+    ln -sf /lib64/libcuda.so.1 /lib64/libcuda.so
+
+WORKDIR /workspace
+
+# =============================================================================
+# Clone Repositories
+# =============================================================================
+# GEN3C (base for Lyra as well)
+RUN git clone https://github.com/nv-tlabs/GEN3C.git /workspace/GEN3C
+
+# Lyra (3D/4D Gaussian Splatting, built on GEN3C)
+RUN git clone https://github.com/nv-tlabs/lyra.git /workspace/lyra
+
+# TRELLIS.2 (O-Voxel 3D generation)
+RUN git clone https://github.com/microsoft/TRELLIS.2.git /workspace/TRELLIS2
+
+# SHARP (Apple's monocular view synthesis)
+RUN git clone https://github.com/apple/ml-sharp.git /workspace/ml-sharp
+
+# =============================================================================
+# Install Base Environment (Miniforge + Python 3.10)
+# =============================================================================
+# GEN3C's cosmos-predict1.yaml defines the base: Python 3.10, CUDA 12.4
+RUN echo "Installing Miniforge and base environment..." && \
+    mkdir -p ~/miniforge3 && \
+    wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge3/miniforge.sh && \
+    bash ~/miniforge3/miniforge.sh -b -u -p ~/miniforge3 && \
+    rm ~/miniforge3/miniforge.sh && \
+    source ~/miniforge3/bin/activate && \
+    conda env create --file /workspace/GEN3C/cosmos-predict1.yaml && \
+    echo "✓ Base conda environment created (Python 3.10, CUDA 12.4)"
+
+# =============================================================================
+# Install GEN3C Dependencies
+# =============================================================================
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing GEN3C dependencies..." && \
+    pip install --no-cache-dir -r /workspace/GEN3C/requirements.txt && \
+    # Link NVIDIA includes for compilation
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/ 2>/dev/null || true && \
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/python3.10 2>/dev/null || true && \
+    ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/triton/backends/nvidia/include/* $CONDA_PREFIX/include/ 2>/dev/null || true && \
+    # Install transformer-engine
+    pip install --no-cache-dir transformer-engine[pytorch]==1.12.0 && \
+    # Install Apex (CUDA extensions)
+    git clone https://github.com/NVIDIA/apex /tmp/apex && \
+    cd /tmp/apex && \
+    CUDA_HOME=$CONDA_PREFIX pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation \
+        --config-settings "--build-option=--cpp_ext" \
+        --config-settings "--build-option=--cuda_ext" . && \
+    cd /workspace && rm -rf /tmp/apex && \
+    # Install MoGe (depth estimation for GEN3C)
+    pip install --no-cache-dir git+https://github.com/microsoft/MoGe.git && \
+    # CRITICAL: Pin huggingface-hub for transformers compatibility
+    pip install --no-cache-dir "huggingface-hub>=0.26.0,<1.0" && \
+    echo "✓ GEN3C dependencies installed"
+
+# =============================================================================
+# Install Lyra Dependencies (on top of GEN3C)
+# =============================================================================
+# Lyra uses GEN3C as base and adds 3DGS reconstruction capabilities
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing Lyra dependencies..." && \
+    # Lyra's additional requirements
+    pip install --no-cache-dir \
+        flash-attn==2.7.3 \
+        timm==1.0.19 \
+        kiui==0.2.17 \
+        lru-dict==1.3.0 \
+        deepspeed==0.17.5 \
+        accelerate==1.10.0 \
+        plyfile==1.1.2 \
+        openexr==3.2.3 \
+        mpi4py==4.1.0 && \
+    # Install causal-conv1d (for Mamba)
+    pip install --no-cache-dir git+https://github.com/Dao-AILab/causal-conv1d@v1.4.0 && \
+    # Install gsplat (Gaussian splatting renderer) - use v1.4.0 release for CUDA 12 compatibility
+    pip install --no-cache-dir gsplat==1.4.0 && \
+    # Install fused-ssim
+    pip install --no-cache-dir git+https://github.com/rahul-goel/fused-ssim/@8bdb59feb7b9a41b1fab625907cb21f5417deaac && \
+    # Install Mamba (state space model)
+    pip install --no-cache-dir --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4" && \
+    echo "✓ Lyra dependencies installed"
+
+# =============================================================================
+# Install TRELLIS.2 Dependencies
+# =============================================================================
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing TRELLIS.2 dependencies..." && \
+    # Basic dependencies
+    pip install --no-cache-dir \
+        imageio \
+        imageio-ffmpeg \
+        tqdm \
+        easydict \
+        opencv-python-headless \
+        ninja \
+        trimesh \
+        gradio==6.0.1 \
+        tensorboard \
+        pandas \
+        lpips \
+        zstandard \
+        kornia && \
+    # utils3d
+    pip install --no-cache-dir git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8 && \
+    # pillow-simd (faster Pillow)
+    pip install --no-cache-dir pillow-simd || pip install --no-cache-dir pillow && \
+    # nvdiffrast (NVIDIA differentiable rendering)
+    mkdir -p /tmp/extensions && \
+    git clone -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast && \
+    pip install --no-cache-dir /tmp/extensions/nvdiffrast --no-build-isolation && \
+    rm -rf /tmp/extensions/nvdiffrast && \
+    # nvdiffrec (renderutils branch)
+    git clone -b renderutils https://github.com/JeffreyXiang/nvdiffrec.git /tmp/extensions/nvdiffrec && \
+    pip install --no-cache-dir /tmp/extensions/nvdiffrec --no-build-isolation && \
+    rm -rf /tmp/extensions/nvdiffrec && \
+    # CuMesh
+    git clone https://github.com/JeffreyXiang/CuMesh.git /tmp/extensions/CuMesh --recursive && \
+    pip install --no-cache-dir /tmp/extensions/CuMesh --no-build-isolation && \
+    rm -rf /tmp/extensions/CuMesh && \
+    # FlexGEMM
+    git clone https://github.com/JeffreyXiang/FlexGEMM.git /tmp/extensions/FlexGEMM --recursive && \
+    pip install --no-cache-dir /tmp/extensions/FlexGEMM --no-build-isolation && \
+    rm -rf /tmp/extensions/FlexGEMM && \
+    # O-Voxel (from TRELLIS.2 repo)
+    cp -r /workspace/TRELLIS2/o-voxel /tmp/extensions/o-voxel && \
+    pip install --no-cache-dir /tmp/extensions/o-voxel --no-build-isolation && \
+    rm -rf /tmp/extensions/o-voxel && \
+    rm -rf /tmp/extensions && \
+    echo "✓ TRELLIS.2 dependencies installed"
+
+# =============================================================================
+# Install SHARP Dependencies
+# =============================================================================
+# SHARP works with Python 3.10 + NumPy 1.26.4 (tested compatible)
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing SHARP dependencies..." && \
+    # SHARP's requirements (many already installed by Lyra: gsplat, timm, plyfile)
+    pip install --no-cache-dir \
+        pillow-heif \
+        scipy \
+        click \
+        rich \
+        matplotlib && \
+    # Install SHARP itself (makes 'sharp' CLI available)
+    pip install --no-cache-dir /workspace/ml-sharp && \
+    echo "✓ SHARP installed"
+
+# =============================================================================
+# Install API Server Dependencies
+# =============================================================================
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    pip install --no-cache-dir \
+        fastapi \
+        uvicorn \
+        python-multipart \
+        runpod
+
+# =============================================================================
+# Copy Server Scripts
+# =============================================================================
+COPY server_unified.py /workspace/server.py
+COPY handler_unified.py /workspace/handler.py
+COPY start_unified.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+ENV PYTHONPATH="/workspace/GEN3C:/workspace/lyra:/workspace/TRELLIS2:/workspace/ml-sharp/src"
+ENV GEN3C_CHECKPOINT_DIR="/workspace/checkpoints"
+ENV LYRA_CHECKPOINT_DIR="/workspace/checkpoints/lyra"
+ENV TRELLIS_CHECKPOINT_DIR="/workspace/checkpoints/trellis"
+ENV SHARP_CHECKPOINT_DIR="/workspace/checkpoints/sharp"
+ENV CONDA_DEFAULT_ENV="cosmos-predict1"
+ENV TRANSFORMERS_CACHE="/workspace/checkpoints/huggingface"
+ENV HF_HOME="/workspace/checkpoints/huggingface"
+
+# =============================================================================
+# Expose Ports
+# =============================================================================
+EXPOSE 8000
+
+# =============================================================================
+# Health Check
+# =============================================================================
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# =============================================================================
+# Startup Command
+# =============================================================================
+CMD ["/workspace/start.sh"]
