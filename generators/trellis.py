@@ -132,66 +132,37 @@ def run_trellis_runpod(
             api_key=api_key,
         )
         
-        # Read and encode input image
-        with open(image_path, "rb") as f:
-            image_base64 = base64.b64encode(f.read()).decode("utf-8")
-        
-        logs.append(f"[TRELLIS.2] Encoded image ({len(image_base64)} bytes)")
         logs.append(f"[TRELLIS.2] Submitting to RunPod...")
-        
-        # Build job parameters
-        job_params = {
-            "model": "trellis",
-            "image_base64": image_base64,
-            "output_name": output_name,
-            "resolution": res_value,
-            "guidance_scale": guidance_scale,
-            "output_glb": export_glb,
-            "output_ply": not export_glb,
-            "return_base64": True,
-        }
-        
-        if seed is not None:
-            job_params["seed"] = int(seed)
         
         # Estimate timeout based on resolution
         timeout_map = {512: 300, 1024: 600, 1536: 1800}  # seconds
         timeout = timeout_map.get(res_value, 600)
         
-        # Submit job
-        result = client.generate_sync(job_params, timeout=timeout)
+        # Use the dedicated TRELLIS sync method
+        result = client.generate_trellis_sync(
+            image_path=image_path,
+            output_dir=output_dir,
+            output_name=output_name,
+            resolution=res_value,
+            guidance_scale=guidance_scale,
+            output_glb=export_glb,
+            seed=seed,
+            max_wait=timeout,
+        )
         
-        if result.status == "error":
+        # Append result logs
+        if result.logs:
+            logs.append(result.logs)
+        
+        if not result.success:
             error_msg = result.error or "Unknown error"
             logs.append(f"[TRELLIS.2] Error: {error_msg}")
             return None, "\n".join(logs), f"❌ {error_msg}"
         
         logs.append(f"[TRELLIS.2] Job completed successfully")
         
-        # Ensure output directory exists
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        output_path = None
-        
-        # Save GLB output
-        if hasattr(result, 'glb_base64') and result.glb_base64:
-            glb_path = os.path.join(output_dir, f"{output_name}.glb")
-            with open(glb_path, "wb") as f:
-                f.write(base64.b64decode(result.glb_base64))
-            logs.append(f"[TRELLIS.2] Saved GLB: {glb_path}")
-            output_path = glb_path
-        
-        # Save PLY output
-        if hasattr(result, 'ply_base64') and result.ply_base64:
-            ply_path = os.path.join(output_dir, f"{output_name}.ply")
-            with open(ply_path, "wb") as f:
-                f.write(base64.b64decode(result.ply_base64))
-            logs.append(f"[TRELLIS.2] Saved PLY: {ply_path}")
-            if not output_path:
-                output_path = ply_path
-        
-        if output_path:
-            return output_path, "\n".join(logs), "✅ Generation complete!"
+        if result.output_path:
+            return result.output_path, "\n".join(logs), "✅ Generation complete!"
         else:
             logs.append("[TRELLIS.2] Warning: No output files received")
             return None, "\n".join(logs), "⚠️ No output files"

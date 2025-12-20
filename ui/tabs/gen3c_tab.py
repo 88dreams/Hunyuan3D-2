@@ -129,21 +129,25 @@ def create_gen3c_tab(
             variant="secondary",
         )
     
-    # Progress and Logs
+    # Progress and Logs (with scrolling)
     with gr.Group():
         gr.Markdown("#### Progress")
         progress_display = gr.Textbox(
             value="Ready to generate...",
             interactive=False,
-            lines=1,
+            lines=2,
+            max_lines=4,
             show_label=False,
+            autoscroll=True,
         )
     
     with gr.Accordion("Show Logs", open=False):
         logs_box = gr.Textbox(
             label="Generation Logs",
-            lines=8,
+            lines=10,
+            max_lines=20,
             interactive=False,
+            autoscroll=True,
         )
     
     return {

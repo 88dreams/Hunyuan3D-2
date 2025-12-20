@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     libjpeg-dev \
+    libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Fix shell and CUDA library links
@@ -50,8 +51,8 @@ RUN git clone https://github.com/nv-tlabs/GEN3C.git /workspace/GEN3C
 # Lyra (3D/4D Gaussian Splatting, built on GEN3C)
 RUN git clone https://github.com/nv-tlabs/lyra.git /workspace/lyra
 
-# TRELLIS.2 (O-Voxel 3D generation)
-RUN git clone https://github.com/microsoft/TRELLIS.2.git /workspace/TRELLIS2
+# TRELLIS.2 (O-Voxel 3D generation) - needs --recursive for o-voxel/third_party/eigen submodule
+RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /workspace/TRELLIS2
 
 # SHARP (Apple's monocular view synthesis)
 RUN git clone https://github.com/apple/ml-sharp.git /workspace/ml-sharp
@@ -126,7 +127,7 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
 # =============================================================================
 RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
     echo "Installing TRELLIS.2 dependencies..." && \
-    # Basic dependencies
+    # Basic dependencies (transformers needed for model loading, timm already from Lyra)
     pip install --no-cache-dir \
         imageio \
         imageio-ffmpeg \
@@ -135,6 +136,7 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
         opencv-python-headless \
         ninja \
         trimesh \
+        transformers \
         gradio==6.0.1 \
         tensorboard \
         pandas \
@@ -194,7 +196,24 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
         fastapi \
         uvicorn \
         python-multipart \
-        runpod
+        runpod \
+        boto3
+
+# =============================================================================
+# Fix utils3d Compatibility (MoGe requires utils3d.pt module)
+# =============================================================================
+# TRELLIS.2's utils3d version doesn't have the 'pt' submodule that MoGe needs.
+# Reinstall MoGe to get the correct utils3d version for GEN3C depth estimation.
+# Then restore GEN3C-critical packages that MoGe may have overwritten.
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Fixing utils3d for MoGe compatibility..." && \
+    # Install only utils3d from MoGe's requirements (not the full MoGe which overwrites too much)
+    pip install --no-cache-dir git+https://github.com/EasternJournalist/utils3d.git@3fab839f0be9931dac7c8488eb0e1600c236e183 && \
+    # Restore GEN3C-critical packages that may have been overwritten
+    pip install --no-cache-dir "huggingface-hub>=0.26.0,<1.0" && \
+    pip install --no-cache-dir transformer-engine[pytorch]==1.12.0 && \
+    pip install --no-cache-dir numpy==1.26.4 && \
+    echo "✓ utils3d fixed and GEN3C packages restored"
 
 # =============================================================================
 # Copy Server Scripts

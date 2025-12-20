@@ -15,6 +15,94 @@ from typing import Optional, Dict, Any, Callable
 from dataclasses import dataclass
 from enum import Enum
 
+# SSH download support
+try:
+    from runpod.ssh_download import (
+        download_from_runpod,
+        load_ssh_config,
+        SSHConfig,
+    )
+    _ssh_available = True
+except ImportError:
+    _ssh_available = False
+    download_from_runpod = None
+    load_ssh_config = None
+    SSHConfig = None
+
+# S3 download support
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    _s3_available = True
+except ImportError:
+    _s3_available = False
+    boto3 = None
+    ClientError = Exception
+
+
+def download_from_s3(s3_url: str, local_dir: str) -> tuple[Optional[str], str]:
+    """
+    Download a file from S3 to local directory.
+    
+    Args:
+        s3_url: Full S3 URL (https://bucket.s3.region.amazonaws.com/key)
+        local_dir: Local directory to save the file
+        
+    Returns:
+        Tuple of (local_path, message)
+    """
+    if not _s3_available:
+        return None, "❌ boto3 not installed. Run: pip install boto3"
+    
+    try:
+        # Parse S3 URL
+        # Format: https://bucket.s3.region.amazonaws.com/key
+        # or: https://bucket.s3.amazonaws.com/key (us-east-1)
+        import re
+        
+        # Try regional format first
+        match = re.match(r'https://([^.]+)\.s3\.([^.]+)\.amazonaws\.com/(.+)', s3_url)
+        if match:
+            bucket = match.group(1)
+            region = match.group(2)
+            key = match.group(3)
+        else:
+            # Try us-east-1 format
+            match = re.match(r'https://([^.]+)\.s3\.amazonaws\.com/(.+)', s3_url)
+            if match:
+                bucket = match.group(1)
+                region = "us-east-1"
+                key = match.group(2)
+            else:
+                return None, f"❌ Could not parse S3 URL: {s3_url}"
+        
+        # Create local path
+        filename = os.path.basename(key)
+        local_path = os.path.join(local_dir, filename)
+        os.makedirs(local_dir, exist_ok=True)
+        
+        # Download using requests (public bucket) or boto3 (private)
+        # Try public download first (simpler, no credentials needed)
+        import requests
+        response = requests.get(s3_url, stream=True, timeout=300)
+        
+        if response.status_code == 200:
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            file_size = os.path.getsize(local_path)
+            return local_path, f"✅ Downloaded {filename} ({file_size / 1024 / 1024:.1f}MB) from S3"
+        elif response.status_code == 403:
+            return None, f"❌ Access denied to S3 object. Check bucket policy."
+        else:
+            return None, f"❌ S3 download failed: HTTP {response.status_code}"
+            
+    except requests.exceptions.Timeout:
+        return None, "❌ S3 download timed out"
+    except Exception as e:
+        return None, f"❌ S3 download error: {e}"
+
 
 class JobStatus(Enum):
     PENDING = "pending"
@@ -25,17 +113,23 @@ class JobStatus(Enum):
 
 @dataclass
 class RunPodJobResult:
-    """Result from a RunPod job (GEN3C or SHARP)."""
+    """Result from a RunPod job (GEN3C, SHARP, Lyra, or TRELLIS)."""
     success: bool
     job_id: str
     status: JobStatus
-    model: str = "gen3c"  # "gen3c" or "sharp"
+    model: str = "gen3c"  # "gen3c", "sharp", "lyra", or "trellis"
     output_path: Optional[str] = None
     video_base64: Optional[str] = None
     ply_base64: Optional[str] = None
+    glb_base64: Optional[str] = None
     error: Optional[str] = None
     duration_seconds: float = 0.0
     logs: str = ""
+    # For large files that couldn't be returned via API
+    download_required: bool = False
+    remote_ply_path: Optional[str] = None
+    remote_video_path: Optional[str] = None
+    remote_glb_path: Optional[str] = None
 
 
 class RunPodGEN3CClient:
@@ -884,6 +978,359 @@ class UnifiedServerlessClient:
             "model": "sharp"
         }
     
+    def submit_generic_job(self, job_input: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Submit a generic job with custom input payload.
+        
+        Args:
+            job_input: Dictionary containing job parameters (must include 'model' key)
+        
+        Returns:
+            Dictionary with job_id and status
+        """
+        model = job_input.get("model", "unknown")
+        
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json={"input": job_input},
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return {
+            "job_id": result.get("id", ""),
+            "status": result.get("status", "unknown").lower(),
+            "model": model
+        }
+    
+    def generate_lyra_sync(
+        self,
+        image_path: Optional[str] = None,
+        video_path: Optional[str] = None,
+        output_dir: str = "/tmp",
+        output_name: str = "lyra_output",
+        generation_mode: str = "static",
+        num_views: int = 8,
+        camera_motion_scale: float = 1.0,
+        multi_trajectory: bool = True,
+        foreground_masking: bool = True,
+        max_gaussians: int = 100000,
+        seed: Optional[int] = None,
+        poll_interval: int = 30,
+        max_wait: int = 7200,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> RunPodJobResult:
+        """
+        Submit Lyra job and wait for completion.
+        
+        Args:
+            image_path: Path to input image (for static mode)
+            video_path: Path to input video (for dynamic mode)
+            output_dir: Directory to save output
+            output_name: Base name for output files
+            generation_mode: "static" or "dynamic"
+            num_views: Number of multi-view positions
+            camera_motion_scale: Camera motion scale
+            multi_trajectory: Enable multi-trajectory
+            foreground_masking: Enable foreground masking
+            max_gaussians: Maximum Gaussian splats
+            seed: Random seed
+            poll_interval: Seconds between status checks
+            max_wait: Maximum wait time
+            progress_callback: Optional progress callback
+            
+        Returns:
+            RunPodJobResult with PLY/video output
+        """
+        start_time = time.time()
+        logs = []
+        
+        # Determine input type and path
+        is_static = generation_mode == "static"
+        if is_static:
+            if not image_path:
+                return RunPodJobResult(
+                    success=False, job_id="", status=JobStatus.FAILED,
+                    model="lyra", error="No image path provided for static mode"
+                )
+            input_path = image_path
+            input_key = "image_base64"
+        else:
+            if not video_path:
+                return RunPodJobResult(
+                    success=False, job_id="", status=JobStatus.FAILED,
+                    model="lyra", error="No video path provided for dynamic mode"
+                )
+            input_path = video_path
+            input_key = "video_base64"
+        
+        logs.append(f"Submitting Lyra job to endpoint: {self.endpoint_id}")
+        logs.append(f"Mode: {generation_mode}, Views: {num_views}")
+        
+        try:
+            # Encode input
+            with open(input_path, "rb") as f:
+                input_base64 = base64.b64encode(f.read()).decode()
+            
+            # Build job payload
+            job_input = {
+                "model": "lyra",
+                input_key: input_base64,
+                "output_name": output_name,
+                "generation_mode": generation_mode,
+                "num_views": num_views,
+                "camera_motion_scale": camera_motion_scale,
+                "multi_trajectory": multi_trajectory,
+                "foreground_masking": foreground_masking,
+                "max_gaussians": max_gaussians,
+                "return_base64": False,  # Use S3 for large files
+            }
+            if seed is not None:
+                job_input["seed"] = seed
+            
+            submit_result = self.submit_generic_job(job_input)
+        except Exception as e:
+            return RunPodJobResult(
+                success=False, job_id="", status=JobStatus.FAILED,
+                model="lyra", error=f"Failed to submit job: {e}",
+                logs="\n".join(logs)
+            )
+        
+        job_id = submit_result.get("job_id", "")
+        logs.append(f"Job submitted: {job_id}")
+        
+        if progress_callback:
+            progress_callback("pending", 0)
+        
+        # Wait for completion
+        final_status = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        duration = time.time() - start_time
+        
+        if final_status.get("status") == "completed":
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = None
+            download_required = final_status.get("download_required", False)
+            
+            # Handle PLY output
+            if final_status.get("ply_base64"):
+                output_path = os.path.join(output_dir, f"{output_name}.ply")
+                ply_data = base64.b64decode(final_status["ply_base64"])
+                with open(output_path, "wb") as f:
+                    f.write(ply_data)
+                logs.append(f"PLY saved: {output_path}")
+            elif final_status.get("ply_s3_url"):
+                s3_url = final_status["ply_s3_url"]
+                logs.append(f"PLY available at S3: {s3_url}")
+                logs.append("Downloading from S3...")
+                local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    output_path = local_path
+                    download_required = False
+            elif final_status.get("ply_path"):
+                remote_path = final_status["ply_path"]
+                logs.append(f"PLY on RunPod volume: {remote_path}")
+                download_required = True
+            
+            # Handle video output
+            video_path_out = None
+            if final_status.get("video_base64"):
+                video_path_out = os.path.join(output_dir, f"{output_name}.mp4")
+                video_data = base64.b64decode(final_status["video_base64"])
+                with open(video_path_out, "wb") as f:
+                    f.write(video_data)
+                logs.append(f"Video saved: {video_path_out}")
+            elif final_status.get("video_s3_url"):
+                s3_url = final_status["video_s3_url"]
+                logs.append(f"Video available at S3: {s3_url}")
+                logs.append("Downloading video from S3...")
+                local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    video_path_out = local_path
+            
+            return RunPodJobResult(
+                success=True,
+                job_id=job_id,
+                status=JobStatus.COMPLETED,
+                model="lyra",
+                output_path=output_path,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+                download_required=download_required,
+            )
+        else:
+            error = final_status.get("error", "Unknown error")
+            logs.append(f"Job failed: {error}")
+            return RunPodJobResult(
+                success=False,
+                job_id=job_id,
+                status=JobStatus.FAILED,
+                model="lyra",
+                error=error,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+            )
+    
+    def generate_trellis_sync(
+        self,
+        image_path: str,
+        output_dir: str = "/tmp",
+        output_name: str = "trellis_output",
+        resolution: int = 1024,
+        guidance_scale: float = 7.5,
+        output_glb: bool = True,
+        seed: Optional[int] = None,
+        poll_interval: int = 30,
+        max_wait: int = 1800,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> RunPodJobResult:
+        """
+        Submit TRELLIS.2 job and wait for completion.
+        
+        Args:
+            image_path: Path to input image
+            output_dir: Directory to save output
+            output_name: Base name for output files
+            resolution: Voxel resolution (512, 1024, or 1536)
+            guidance_scale: CFG scale
+            output_glb: Export GLB format (True) or PLY (False)
+            seed: Random seed
+            poll_interval: Seconds between status checks
+            max_wait: Maximum wait time
+            progress_callback: Optional progress callback
+            
+        Returns:
+            RunPodJobResult with GLB/PLY output
+        """
+        start_time = time.time()
+        logs = []
+        
+        logs.append(f"Submitting TRELLIS.2 job to endpoint: {self.endpoint_id}")
+        logs.append(f"Resolution: {resolution}³, Guidance: {guidance_scale}")
+        
+        try:
+            # Encode input image
+            with open(image_path, "rb") as f:
+                image_base64 = base64.b64encode(f.read()).decode()
+            
+            # Build job payload
+            job_input = {
+                "model": "trellis",
+                "image_base64": image_base64,
+                "output_name": output_name,
+                "resolution": resolution,
+                "guidance_scale": guidance_scale,
+                "output_glb": output_glb,
+                "output_ply": not output_glb,
+                "return_base64": False,  # Use S3 for large files
+            }
+            if seed is not None:
+                job_input["seed"] = seed
+            
+            submit_result = self.submit_generic_job(job_input)
+        except Exception as e:
+            return RunPodJobResult(
+                success=False, job_id="", status=JobStatus.FAILED,
+                model="trellis", error=f"Failed to submit job: {e}",
+                logs="\n".join(logs)
+            )
+        
+        job_id = submit_result.get("job_id", "")
+        logs.append(f"Job submitted: {job_id}")
+        
+        if progress_callback:
+            progress_callback("pending", 0)
+        
+        # Wait for completion
+        final_status = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        duration = time.time() - start_time
+        
+        if final_status.get("status") == "completed":
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = None
+            download_required = final_status.get("download_required", False)
+            
+            # Handle GLB output
+            if final_status.get("glb_base64"):
+                output_path = os.path.join(output_dir, f"{output_name}.glb")
+                glb_data = base64.b64decode(final_status["glb_base64"])
+                with open(output_path, "wb") as f:
+                    f.write(glb_data)
+                logs.append(f"GLB saved: {output_path}")
+            elif final_status.get("glb_s3_url"):
+                s3_url = final_status["glb_s3_url"]
+                logs.append(f"GLB available at S3: {s3_url}")
+                logs.append("Downloading from S3...")
+                local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    output_path = local_path
+                    download_required = False
+            elif final_status.get("glb_path"):
+                remote_path = final_status["glb_path"]
+                logs.append(f"GLB on RunPod volume: {remote_path}")
+                download_required = True
+            
+            # Handle PLY output
+            if not output_path:
+                if final_status.get("ply_base64"):
+                    output_path = os.path.join(output_dir, f"{output_name}.ply")
+                    ply_data = base64.b64decode(final_status["ply_base64"])
+                    with open(output_path, "wb") as f:
+                        f.write(ply_data)
+                    logs.append(f"PLY saved: {output_path}")
+                elif final_status.get("ply_s3_url"):
+                    s3_url = final_status["ply_s3_url"]
+                    logs.append(f"PLY available at S3: {s3_url}")
+                    logs.append("Downloading from S3...")
+                    local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                    logs.append(s3_msg)
+                    if local_path:
+                        output_path = local_path
+                        download_required = False
+                elif final_status.get("ply_path"):
+                    remote_path = final_status["ply_path"]
+                    logs.append(f"PLY on RunPod volume: {remote_path}")
+                    download_required = True
+            
+            return RunPodJobResult(
+                success=True,
+                job_id=job_id,
+                status=JobStatus.COMPLETED,
+                model="trellis",
+                output_path=output_path,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+                download_required=download_required,
+            )
+        else:
+            error = final_status.get("error", "Unknown error")
+            logs.append(f"Job failed: {error}")
+            return RunPodJobResult(
+                success=False,
+                job_id=job_id,
+                status=JobStatus.FAILED,
+                model="trellis",
+                error=error,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+            )
+    
     def get_status(self, job_id: str) -> Dict[str, Any]:
         """Get job status."""
         response = requests.get(
@@ -921,11 +1368,27 @@ class UnifiedServerlessClient:
                     normalized["video_base64"] = output["video_base64"]
                 if output.get("video_path"):
                     normalized["video_path"] = output["video_path"]
-                # SHARP outputs
+                if output.get("video_s3_url"):
+                    normalized["video_s3_url"] = output["video_s3_url"]
+                # SHARP/Lyra outputs
                 if output.get("ply_base64"):
                     normalized["ply_base64"] = output["ply_base64"]
                 if output.get("ply_path"):
                     normalized["ply_path"] = output["ply_path"]
+                if output.get("ply_s3_url"):
+                    normalized["ply_s3_url"] = output["ply_s3_url"]
+                if output.get("ply_size"):
+                    normalized["ply_size"] = output["ply_size"]
+                # TRELLIS outputs
+                if output.get("glb_base64"):
+                    normalized["glb_base64"] = output["glb_base64"]
+                if output.get("glb_path"):
+                    normalized["glb_path"] = output["glb_path"]
+                if output.get("glb_s3_url"):
+                    normalized["glb_s3_url"] = output["glb_s3_url"]
+                # Download required flag
+                if output.get("download_required"):
+                    normalized["download_required"] = output["download_required"]
                 # Status
                 if output.get("status") == "error":
                     normalized["status"] = "failed"
@@ -1045,16 +1508,48 @@ class UnifiedServerlessClient:
         if final_status.get("status") == "completed":
             os.makedirs(output_dir, exist_ok=True)
             output_path = None
+            download_required = final_status.get("download_required", False)
             
-            # Save PLY
+            # Save PLY (if base64 available)
             if final_status.get("ply_base64"):
                 output_path = os.path.join(output_dir, f"{output_name}.ply")
                 ply_data = base64.b64decode(final_status["ply_base64"])
                 with open(output_path, "wb") as f:
                     f.write(ply_data)
                 logs.append(f"PLY saved: {output_path}")
+            elif final_status.get("ply_s3_url"):
+                # Download from S3
+                s3_url = final_status["ply_s3_url"]
+                logs.append(f"PLY available at S3: {s3_url}")
+                logs.append("Downloading from S3...")
+                local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    output_path = local_path
+                    download_required = False
+                else:
+                    logs.append(f"Manual download: {s3_url}")
+            elif final_status.get("ply_path"):
+                # File too large - try SSH download
+                remote_path = final_status["ply_path"]
+                ply_size = final_status.get("ply_size", 0)
+                logs.append(f"PLY on RunPod volume: {remote_path} ({ply_size / 1024 / 1024:.1f}MB)")
+                
+                if _ssh_available:
+                    ssh_config = load_ssh_config()
+                    if ssh_config.is_configured():
+                        logs.append("Attempting SSH download...")
+                        local_path, ssh_msg = download_from_runpod(remote_path, output_dir)
+                        logs.append(ssh_msg)
+                        if local_path:
+                            output_path = local_path
+                            download_required = False  # Successfully downloaded
+                    else:
+                        logs.append("⚠️ SSH not configured. Run: python -m runpod.ssh_download configure --host <IP> --key <path>")
+                else:
+                    logs.append("⚠️ SSH module not available. Manual download required.")
             
-            # Save video if rendered
+            # Save video if rendered (if base64 available)
             video_path = None
             if final_status.get("video_base64"):
                 video_path = os.path.join(output_dir, f"{output_name}.mp4")
@@ -1062,6 +1557,36 @@ class UnifiedServerlessClient:
                 with open(video_path, "wb") as f:
                     f.write(video_data)
                 logs.append(f"Video saved: {video_path}")
+            elif final_status.get("video_s3_url"):
+                # Download from S3
+                s3_url = final_status["video_s3_url"]
+                logs.append(f"Video available at S3: {s3_url}")
+                logs.append("Downloading video from S3...")
+                local_path, s3_msg = download_from_s3(s3_url, output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    video_path = local_path
+            elif final_status.get("video_path"):
+                # File too large - try SSH download
+                remote_path = final_status["video_path"]
+                video_size = final_status.get("video_size", 0)
+                logs.append(f"Video on RunPod volume: {remote_path} ({video_size / 1024 / 1024:.1f}MB)")
+                
+                if _ssh_available:
+                    ssh_config = load_ssh_config()
+                    if ssh_config.is_configured():
+                        logs.append("Attempting SSH download for video...")
+                        local_path, ssh_msg = download_from_runpod(remote_path, output_dir)
+                        logs.append(ssh_msg)
+                        if local_path:
+                            video_path = local_path
+                else:
+                    logs.append("⚠️ SSH module not available for video download.")
+            
+            # Build result message
+            if download_required:
+                message = final_status.get("message", "Files generated. Download from RunPod volume required.")
+                logs.append(f"⚠️ {message}")
             
             return RunPodJobResult(
                 success=True,
@@ -1072,7 +1597,10 @@ class UnifiedServerlessClient:
                 ply_base64=final_status.get("ply_base64"),
                 video_base64=final_status.get("video_base64"),
                 duration_seconds=duration,
-                logs="\n".join(logs)
+                logs="\n".join(logs),
+                download_required=download_required,
+                remote_ply_path=final_status.get("ply_path"),
+                remote_video_path=final_status.get("video_path"),
             )
         else:
             logs.append(f"Job failed: {final_status.get('error', 'Unknown error')}")

@@ -140,66 +140,36 @@ def run_lyra_runpod(
             api_key=api_key,
         )
         
-        # Read and encode input
-        with open(input_path, "rb") as f:
-            input_base64 = base64.b64encode(f.read()).decode("utf-8")
-        
-        logs.append(f"[Lyra] Encoded input ({len(input_base64)} bytes)")
         logs.append(f"[Lyra] Submitting to RunPod...")
         
-        # Build job parameters
-        job_params = {
-            "model": "lyra",
-            f"{input_type}_base64": input_base64,
-            "output_name": output_name,
-            "generation_mode": "static" if is_static else "dynamic",
-            "num_views": num_views,
-            "camera_motion_scale": camera_motion,
-            "multi_trajectory": multi_trajectory,
-            "foreground_masking": foreground_masking,
-            "max_gaussians": num_gaussians,
-            "output_ply": output_ply,
-            "output_video": output_video,
-            "return_base64": True,
-        }
+        # Use the dedicated Lyra sync method
+        result = client.generate_lyra_sync(
+            image_path=image_path if is_static else None,
+            video_path=video_path if not is_static else None,
+            output_dir=output_dir,
+            output_name=output_name,
+            generation_mode="static" if is_static else "dynamic",
+            num_views=num_views,
+            camera_motion_scale=camera_motion,
+            multi_trajectory=multi_trajectory,
+            foreground_masking=foreground_masking,
+            max_gaussians=num_gaussians,
+            seed=seed,
+        )
         
-        if seed is not None:
-            job_params["seed"] = int(seed)
+        # Append result logs
+        if result.logs:
+            logs.append(result.logs)
         
-        # Submit job
-        result = client.generate_sync(job_params, timeout=7200)  # 2 hour timeout
-        
-        if result.status == "error":
+        if not result.success:
             error_msg = result.error or "Unknown error"
             logs.append(f"[Lyra] Error: {error_msg}")
             return None, "\n".join(logs), f"❌ {error_msg}"
         
         logs.append(f"[Lyra] Job completed successfully")
         
-        # Ensure output directory exists
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        output_path = None
-        
-        # Save PLY output
-        if result.ply_base64:
-            ply_path = os.path.join(output_dir, f"{output_name}.ply")
-            with open(ply_path, "wb") as f:
-                f.write(base64.b64decode(result.ply_base64))
-            logs.append(f"[Lyra] Saved PLY: {ply_path}")
-            output_path = ply_path
-        
-        # Save video output
-        if result.video_base64:
-            video_out_path = os.path.join(output_dir, f"{output_name}.mp4")
-            with open(video_out_path, "wb") as f:
-                f.write(base64.b64decode(result.video_base64))
-            logs.append(f"[Lyra] Saved video: {video_out_path}")
-            if not output_path:
-                output_path = video_out_path
-        
-        if output_path:
-            return output_path, "\n".join(logs), "✅ Generation complete!"
+        if result.output_path:
+            return result.output_path, "\n".join(logs), "✅ Generation complete!"
         else:
             logs.append("[Lyra] Warning: No output files received")
             return None, "\n".join(logs), "⚠️ No output files"

@@ -2,14 +2,18 @@
 Hunyuan3D Generator for 3D Generation Studio
 
 This module provides Hunyuan3D mesh generation functionality:
-- Pipeline loading and caching
-- Memory optimization
+- Pipeline loading and caching (Local)
+- Memory optimization (Local)
 - GLB mesh generation from images
+- RunPod Serverless execution
+
+Supports both Local CUDA and RunPod Serverless modes.
 """
 
 import os
 import gc
 import time
+import base64
 from typing import Optional, Tuple, Union
 
 import torch  # type: ignore
@@ -267,4 +271,176 @@ def run_hunyuan(
                 torch.cuda.reset_peak_memory_stats()
             except Exception:
                 pass
+
+
+# =============================================================================
+# RUNPOD SERVERLESS EXECUTION
+# =============================================================================
+
+def check_hunyuan_runpod_status(endpoint_id: str = "", api_key: str = "") -> str:
+    """
+    Check Hunyuan3D availability on RunPod.
+    
+    Args:
+        endpoint_id: RunPod serverless endpoint ID
+        api_key: RunPod API key
+    
+    Returns:
+        Status message string
+    """
+    if not endpoint_id or not api_key:
+        return "⚠️ Enter RunPod credentials to use Hunyuan3D on cloud"
+    
+    try:
+        from runpod.runpod_client import UnifiedServerlessClient
+        
+        client = UnifiedServerlessClient(
+            endpoint_id=endpoint_id,
+            api_key=api_key,
+        )
+        
+        health = client.health_check()
+        
+        if health.get("status") == "healthy":
+            return "✅ Hunyuan3D endpoint available"
+        else:
+            return f"❌ Endpoint unhealthy: {health.get('message', 'Unknown error')}"
+            
+    except ImportError:
+        return "❌ RunPod client not available"
+    except Exception as e:
+        return f"❌ Connection error: {str(e)}"
+
+
+def run_hunyuan_runpod(
+    image_path: Optional[str] = None,
+    endpoint_id: str = "",
+    api_key: str = "",
+    model_choice: str = "Mini Model (Faster)",
+    guidance_scale: float = 9.0,
+    steps: int = 40,
+    octree_resolution: int = 380,
+    seed: Optional[int] = None,
+    remove_background: bool = True,
+    output_name: str = "hunyuan_output",
+    output_dir: str = HUNYUAN_DEFAULT_OUTPUT_DIR,
+) -> Tuple[Optional[str], str, str]:
+    """
+    Run Hunyuan3D inference on RunPod serverless.
+    
+    Args:
+        image_path: Path to input image
+        endpoint_id: RunPod serverless endpoint ID
+        api_key: RunPod API key
+        model_choice: "Mini Model (Faster)" or "Full Model (Higher Quality)"
+        guidance_scale: Guidance scale for generation
+        steps: Number of inference steps
+        octree_resolution: Octree resolution for mesh extraction
+        seed: Random seed (None for random)
+        remove_background: Whether to remove background
+        output_name: Base name for output files
+        output_dir: Directory to save outputs
+    
+    Returns:
+        Tuple of (output_path, logs, progress_message)
+    """
+    logs = []
+    
+    # Validate inputs
+    if not image_path or not os.path.exists(image_path):
+        return None, "Error: No input image provided", "❌ No input image"
+    
+    if not endpoint_id or not api_key:
+        return None, "Error: RunPod credentials required", "❌ Missing credentials"
+    
+    # Determine model type
+    model_type = "full" if "Full" in model_choice else "mini"
+    
+    logs.append(f"[Hunyuan3D] Model: {model_type}")
+    logs.append(f"[Hunyuan3D] Steps: {steps}, Guidance: {guidance_scale}")
+    logs.append(f"[Hunyuan3D] Resolution: {octree_resolution}")
+    logs.append(f"[Hunyuan3D] Input: {image_path}")
+    
+    try:
+        from runpod.runpod_client import UnifiedServerlessClient
+        
+        client = UnifiedServerlessClient(
+            endpoint_id=endpoint_id,
+            api_key=api_key,
+        )
+        
+        logs.append(f"[Hunyuan3D] Submitting to RunPod...")
+        
+        # Encode image
+        with open(image_path, "rb") as f:
+            image_base64 = base64.b64encode(f.read()).decode("utf-8")
+        
+        # Build job payload
+        job_input = {
+            "model": "hunyuan",
+            "image_base64": image_base64,
+            "model_variant": model_type,
+            "guidance_scale": guidance_scale,
+            "steps": steps,
+            "octree_resolution": octree_resolution,
+            "remove_background": remove_background,
+            "output_name": output_name,
+            "return_base64": False,  # Use S3 for large GLB files
+        }
+        
+        if seed is not None:
+            job_input["seed"] = int(seed)
+        
+        # Submit job
+        submit_result = client.submit_generic_job(job_input)
+        job_id = submit_result.get("job_id", "")
+        logs.append(f"[Hunyuan3D] Job submitted: {job_id}")
+        
+        # Wait for completion (Hunyuan can take 5-20 minutes)
+        timeout = 2700 if model_type == "full" else 1200  # 45 min for full, 20 min for mini
+        
+        final_status = client.wait_for_completion(
+            job_id=job_id,
+            poll_interval=30,
+            max_wait=timeout,
+        )
+        
+        if final_status.get("status") == "completed":
+            logs.append(f"[Hunyuan3D] Job completed successfully")
+            
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = None
+            
+            # Handle S3 download
+            if final_status.get("glb_s3_url"):
+                from runpod.runpod_client import download_from_s3
+                local_path, s3_msg = download_from_s3(final_status["glb_s3_url"], output_dir)
+                logs.append(s3_msg)
+                if local_path:
+                    output_path = local_path
+            
+            # Handle base64 (for small files)
+            elif final_status.get("glb_base64"):
+                output_path = os.path.join(output_dir, f"{output_name}.glb")
+                with open(output_path, "wb") as f:
+                    f.write(base64.b64decode(final_status["glb_base64"]))
+                logs.append(f"[Hunyuan3D] GLB saved: {output_path}")
+            
+            if output_path:
+                return output_path, "\n".join(logs), "✅ Generation complete!"
+            else:
+                logs.append("[Hunyuan3D] Warning: No output files received")
+                return None, "\n".join(logs), "⚠️ No output files"
+        else:
+            error = final_status.get("error", "Unknown error")
+            logs.append(f"[Hunyuan3D] Error: {error}")
+            return None, "\n".join(logs), f"❌ {error}"
+        
+    except ImportError as e:
+        logs.append(f"[Hunyuan3D] Import error: {e}")
+        return None, "\n".join(logs), "❌ RunPod client not available"
+    except Exception as e:
+        logs.append(f"[Hunyuan3D] Error: {str(e)}")
+        return None, "\n".join(logs), f"❌ {str(e)}"
 

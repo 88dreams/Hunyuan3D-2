@@ -207,6 +207,38 @@ if [ -d "/workspace/checkpoints/Gen3C-Cosmos-7B/google-t5" ]; then
 fi
 
 # =============================================================================
+# SHARP and TRELLIS Checkpoint Symlinks (from network volume)
+# =============================================================================
+echo ""
+echo "Setting up SHARP and TRELLIS checkpoint symlinks..."
+
+# SHARP checkpoint symlink
+if [ -d "/runpod-volume/checkpoints/sharp" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/sharp 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/sharp /workspace/checkpoints/sharp
+    echo "  ✓ SHARP checkpoint linked from network volume"
+elif [ -d "/workspace/volume/checkpoints/sharp" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/sharp 2>/dev/null
+    ln -sf /workspace/volume/checkpoints/sharp /workspace/checkpoints/sharp
+    echo "  ✓ SHARP checkpoint linked from workspace volume"
+fi
+
+# TRELLIS checkpoint symlink
+if [ -d "/runpod-volume/checkpoints/trellis" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/trellis 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/trellis /workspace/checkpoints/trellis
+    echo "  ✓ TRELLIS checkpoint linked from network volume"
+elif [ -d "/workspace/volume/checkpoints/trellis" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/trellis 2>/dev/null
+    ln -sf /workspace/volume/checkpoints/trellis /workspace/checkpoints/trellis
+    echo "  ✓ TRELLIS checkpoint linked from workspace volume"
+fi
+
+# =============================================================================
 # Verify Models
 # =============================================================================
 echo ""
@@ -221,11 +253,37 @@ else
     GEN3C_OK=false
 fi
 
-# SHARP CLI
+# SHARP CLI and checkpoint
 if command -v sharp &> /dev/null; then
     echo "  ✓ SHARP: CLI available"
 else
     echo "  ✗ SHARP: CLI NOT FOUND"
+fi
+
+# SHARP checkpoint (pre-downloaded to avoid runtime download)
+SHARP_CKPT="/workspace/checkpoints/sharp/sharp_2572gikvuh.pt"
+if [ -f "$SHARP_CKPT" ]; then
+    echo "  ✓ SHARP: checkpoint found at $SHARP_CKPT"
+    export SHARP_CHECKPOINT="$SHARP_CKPT"
+else
+    echo "  ⚠ SHARP: checkpoint NOT pre-downloaded (will download on first run)"
+fi
+
+# Lyra
+LYRA_SCRIPT="/workspace/lyra/scripts/inference.py"
+if [ -f "$LYRA_SCRIPT" ]; then
+    echo "  ✓ Lyra: inference script found"
+else
+    echo "  ⚠ Lyra: inference script NOT FOUND"
+fi
+
+# TRELLIS.2 checkpoint
+TRELLIS_CKPT="/workspace/checkpoints/trellis"
+if [ -d "$TRELLIS_CKPT" ]; then
+    echo "  ✓ TRELLIS.2: checkpoint found at $TRELLIS_CKPT"
+    export TRELLIS_CHECKPOINT="$TRELLIS_CKPT"
+else
+    echo "  ⚠ TRELLIS.2: checkpoint NOT pre-downloaded"
 fi
 
 # =============================================================================

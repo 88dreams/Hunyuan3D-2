@@ -17,6 +17,10 @@ import gradio as gr  # type: ignore
 TRELLIS_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/trellis"
 
 
+# TRELLIS.2 has its own dedicated endpoint
+TRELLIS_DEFAULT_ENDPOINT_ID = "lmhhb0z7aig0r4"
+
+
 def create_trellis_tab(
     default_endpoint_id: str = "",
     default_api_key: str = "",
@@ -31,13 +35,16 @@ def create_trellis_tab(
     Returns:
         Dictionary of all UI components for event handler binding
     """
+    # Use TRELLIS-specific endpoint, but share the API key
+    trellis_endpoint = TRELLIS_DEFAULT_ENDPOINT_ID
+    
     gr.Markdown("""
     **Image → High-Quality 3D with PBR Materials**
     
     Microsoft's TRELLIS.2 generates production-ready 3D models with O-Voxel representation.
     Outputs GLB files with full PBR materials (Base Color, Roughness, Metallic, Opacity).
     
-    *4B parameter model - Requires H100 GPU for best performance*
+    *4B parameter model - Runs on dedicated TRELLIS.2 endpoint*
     """)
     
     # Execution Settings
@@ -50,29 +57,39 @@ def create_trellis_tab(
             info="TRELLIS.2 requires H100 GPUs. RunPod Serverless recommended.",
         )
         status = gr.Textbox(
-            value="Configure RunPod credentials below",
+            value="Select execution mode",
             label="Status",
             interactive=False,
         )
-        check_btn = gr.Button("Check Connection", size="sm")
-    
-    # RunPod Settings
-    with gr.Group() as runpod_settings:
-        gr.Markdown("#### RunPod Settings")
-        endpoint_id = gr.Textbox(
-            value=default_endpoint_id,
-            label="Endpoint ID",
-            placeholder="Your serverless endpoint ID",
-        )
-        api_key = gr.Textbox(
-            value=default_api_key,
-            label="API Key",
-            type="password",
-            placeholder="rp_...",
-        )
-        with gr.Row():
-            check_runpod_btn = gr.Button("Check Connection", size="sm")
-            save_creds_btn = gr.Button("Save Credentials", size="sm")
+        
+        # RunPod Serverless Settings
+        # TRELLIS.2 uses its own dedicated endpoint
+        with gr.Group(visible=True) as serverless_settings:
+            # TRELLIS.2 has a dedicated endpoint, but shares API key
+            _has_api_key = bool(default_api_key)
+            
+            gr.Markdown(f"*Using dedicated TRELLIS.2 endpoint: `{trellis_endpoint}`*")
+            
+            with gr.Row():
+                check_serverless_btn = gr.Button("Check Status", size="sm")
+                cancel_btn = gr.Button("Cancel Job", variant="stop", size="sm")
+                edit_creds_btn = gr.Button("Edit Credentials", size="sm")
+            
+            with gr.Group(visible=not _has_api_key) as creds_group:
+                # Endpoint ID is pre-set for TRELLIS.2
+                endpoint_id = gr.Textbox(
+                    value=trellis_endpoint,
+                    label="Endpoint ID (TRELLIS.2 dedicated)",
+                    interactive=False,  # Don't allow editing - it's fixed
+                )
+                api_key = gr.Textbox(
+                    value=default_api_key,
+                    label="API Key",
+                    type="password",
+                )
+                save_creds_btn = gr.Button("Save Credentials", variant="primary")
+            
+            current_job_id = gr.State(value=None)
     
     # Model Settings
     with gr.Group():
@@ -155,32 +172,39 @@ def create_trellis_tab(
             variant="secondary",
         )
     
-    # Progress and Logs
+    # Progress and Logs (with scrolling)
     with gr.Group():
         gr.Markdown("#### Progress")
         progress_display = gr.Textbox(
             value="Ready to generate...",
             interactive=False,
-            lines=1,
+            lines=2,
+            max_lines=4,
             show_label=False,
+            autoscroll=True,
         )
     
     with gr.Accordion("Show Logs", open=False):
         logs_box = gr.Textbox(
             label="Generation Logs",
-            lines=8,
+            lines=10,
+            max_lines=20,
             interactive=False,
+            autoscroll=True,
         )
     
     return {
         "exec_mode": exec_mode,
         "status": status,
-        "check_btn": check_btn,
-        "runpod_settings": runpod_settings,
+        "serverless_settings": serverless_settings,
+        "check_serverless_btn": check_serverless_btn,
+        "cancel_btn": cancel_btn,
+        "edit_creds_btn": edit_creds_btn,
+        "creds_group": creds_group,
         "endpoint_id": endpoint_id,
         "api_key": api_key,
-        "check_runpod_btn": check_runpod_btn,
         "save_creds_btn": save_creds_btn,
+        "current_job_id": current_job_id,
         "resolution": resolution,
         "seed": seed,
         "guidance_scale": guidance_scale,

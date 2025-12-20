@@ -33,10 +33,15 @@ def create_lyra_tab(
     gr.Markdown("""
     **Image/Video → 3D/4D Gaussian Splatting**
     
-    NVIDIA's Lyra generates 3D Gaussian Splats from images (static) or videos (dynamic 4DGS).
-    Built on GEN3C video diffusion with a 3DGS reconstruction decoder.
+    ⚠️ **Lyra is not yet fully implemented for serverless deployment.**
     
-    *Requires H100/A100 GPU (~43GB VRAM with offloading)*
+    Lyra requires a complex multi-step pipeline:
+    1. SDG (multi-view video generation via GEN3C diffusion)
+    2. 3DGS decoder (accelerate launch with config files)
+    
+    **For fast 3DGS generation, please use SHARP instead.**
+    
+    *Full Lyra support coming in a future update.*
     """)
     
     # Execution Settings
@@ -49,29 +54,32 @@ def create_lyra_tab(
             info="Lyra requires H100/A100 GPUs. RunPod Serverless recommended.",
         )
         status = gr.Textbox(
-            value="Configure RunPod credentials below",
+            value="Select execution mode",
             label="Status",
             interactive=False,
         )
-        check_btn = gr.Button("Check Connection", size="sm")
-    
-    # RunPod Settings
-    with gr.Group() as runpod_settings:
-        gr.Markdown("#### RunPod Settings")
-        endpoint_id = gr.Textbox(
-            value=default_endpoint_id,
-            label="Endpoint ID",
-            placeholder="Your serverless endpoint ID",
-        )
-        api_key = gr.Textbox(
-            value=default_api_key,
-            label="API Key",
-            type="password",
-            placeholder="rp_...",
-        )
-        with gr.Row():
-            check_runpod_btn = gr.Button("Check Connection", size="sm")
-            save_creds_btn = gr.Button("Save Credentials", size="sm")
+        
+        # RunPod Serverless Settings
+        with gr.Group(visible=True) as serverless_settings:
+            _has_creds = bool(default_endpoint_id and default_api_key)
+            with gr.Row():
+                check_serverless_btn = gr.Button("Check Status", size="sm")
+                cancel_btn = gr.Button("Cancel Job", variant="stop", size="sm")
+                edit_creds_btn = gr.Button("Edit Credentials", size="sm")
+            
+            with gr.Group(visible=not _has_creds) as creds_group:
+                endpoint_id = gr.Textbox(
+                    value=default_endpoint_id,
+                    label="Endpoint ID",
+                )
+                api_key = gr.Textbox(
+                    value=default_api_key,
+                    label="API Key",
+                    type="password",
+                )
+                save_creds_btn = gr.Button("Save Credentials", variant="primary")
+            
+            current_job_id = gr.State(value=None)
     
     # Generation Mode
     with gr.Group():
@@ -168,32 +176,39 @@ def create_lyra_tab(
             variant="secondary",
         )
     
-    # Progress and Logs
+    # Progress and Logs (with scrolling)
     with gr.Group():
         gr.Markdown("#### Progress")
         progress_display = gr.Textbox(
             value="Ready to generate...",
             interactive=False,
-            lines=1,
+            lines=2,
+            max_lines=4,
             show_label=False,
+            autoscroll=True,
         )
     
     with gr.Accordion("Show Logs", open=False):
         logs_box = gr.Textbox(
             label="Generation Logs",
-            lines=8,
+            lines=10,
+            max_lines=20,
             interactive=False,
+            autoscroll=True,
         )
     
     return {
         "exec_mode": exec_mode,
         "status": status,
-        "check_btn": check_btn,
-        "runpod_settings": runpod_settings,
+        "serverless_settings": serverless_settings,
+        "check_serverless_btn": check_serverless_btn,
+        "cancel_btn": cancel_btn,
+        "edit_creds_btn": edit_creds_btn,
+        "creds_group": creds_group,
         "endpoint_id": endpoint_id,
         "api_key": api_key,
-        "check_runpod_btn": check_runpod_btn,
         "save_creds_btn": save_creds_btn,
+        "current_job_id": current_job_id,
         "generation_mode": generation_mode,
         "num_views": num_views,
         "camera_motion": camera_motion,

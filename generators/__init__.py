@@ -11,6 +11,8 @@ This module provides generation functions for each model:
 
 from generators.hunyuan import (
     run_hunyuan,
+    run_hunyuan_runpod,
+    check_hunyuan_runpod_status,
     ensure_pipeline,
     get_pipeline,
     HUNYUAN_DEFAULT_OUTPUT_DIR,
@@ -55,6 +57,8 @@ from generators.trellis import (
 __all__ = [
     # Hunyuan
     "run_hunyuan",
+    "run_hunyuan_runpod",
+    "check_hunyuan_runpod_status",
     "ensure_pipeline",
     "get_pipeline",
     "HUNYUAN_DEFAULT_OUTPUT_DIR",

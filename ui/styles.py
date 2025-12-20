@@ -76,6 +76,26 @@ div[class*="tab-nav"] {
    OTHER STYLES
    ============================================ */
 
+/* Scrollable textboxes for logs and progress */
+textarea {
+    overflow-y: auto !important;
+    resize: vertical !important;
+}
+
+/* Ensure textbox containers allow scrolling */
+.gradio-textbox textarea,
+[data-testid="textbox"] textarea {
+    overflow-y: auto !important;
+    max-height: 400px !important;
+}
+
+/* Accordion content should be scrollable */
+.accordion-content,
+[class*="accordion"] > div {
+    overflow-y: auto !important;
+    max-height: 500px !important;
+}
+
 /* Accordion styling for logs */
 .logs-accordion {
     margin-top: 10px;
@@ -103,6 +123,11 @@ div[class*="tab-nav"] {
     min-height: 300px;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
+}
+
+/* Expandable groups */
+.gr-group {
+    overflow: visible !important;
 }
 """
 

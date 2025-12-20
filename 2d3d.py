@@ -45,6 +45,8 @@ from ui.tabs import (
 
 from generators import (
     run_hunyuan,
+    run_hunyuan_runpod,
+    check_hunyuan_runpod_status,
     run_gen3c_runpod,
     run_gen3c_serverless,
     run_gen3c_local,
@@ -203,9 +205,12 @@ def handle_hunyuan_generation(
     image_path: Union[str, None],
     image_scale: Union[float, int],
     exec_mode: str,
+    endpoint_id: str,
+    api_key: str,
     guidance_scale: float,
     steps: int,
     seed: Optional[int],
+    octree_resolution: int,
     model_choice: str,
     use_fp16: bool,
     attention_slicing: bool,
@@ -214,25 +219,42 @@ def handle_hunyuan_generation(
     output_name: str,
     save_location: str,
 ) -> Tuple[Optional[str], str, str]:
-    """Handle Hunyuan3D generation."""
+    """Handle Hunyuan3D generation (Local or RunPod)."""
     scale_value = clamp_scale_value(image_scale)
     scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
 
     try:
-        return run_hunyuan(
-            image_path=effective_image_path,
-            guidance_scale=guidance_scale,
-            steps=steps,
-            seed=seed,
-            model_choice=model_choice,
-            use_fp16=use_fp16,
-            attention_slicing=attention_slicing,
-            cpu_offload=cpu_offload,
-            remove_background=remove_background,
-            output_name=output_name,
-            save_location=save_location,
-        )
+        if exec_mode == "RunPod Serverless":
+            # RunPod execution
+            return run_hunyuan_runpod(
+                image_path=effective_image_path,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                model_choice=model_choice,
+                guidance_scale=guidance_scale,
+                steps=steps,
+                octree_resolution=int(octree_resolution) if octree_resolution else 380,
+                seed=int(seed) if seed else None,
+                remove_background=remove_background,
+                output_name=output_name,
+                output_dir=save_location,
+            )
+        else:
+            # Local execution
+            return run_hunyuan(
+                image_path=effective_image_path,
+                guidance_scale=guidance_scale,
+                steps=steps,
+                seed=seed,
+                model_choice=model_choice,
+                use_fp16=use_fp16,
+                attention_slicing=attention_slicing,
+                cpu_offload=cpu_offload,
+                remove_background=remove_background,
+                output_name=output_name,
+                save_location=save_location,
+            )
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -522,10 +544,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # --- Output Viewer ---
             with gr.Group():
                 gr.Markdown("### Output")
-                output_model_viewer = gr.Model3D(
-                    label="3D Model Viewer",
-                    height=300,
-                    visible=True,
+                # Note: Model3D viewer removed - PLY files not supported
+                # Files are saved to output directory and can be viewed in external tools
+                output_model_viewer = gr.Textbox(
+                    label="Output File",
+                    value="Output file path will appear here",
+                    interactive=False,
+                    lines=2,
                 )
                 output_video_player = gr.Video(
                     label="Video Output",
@@ -697,11 +722,34 @@ with gr.Blocks(title="3D Generation Studio") as demo:
         fn=handle_hunyuan_generation,
         inputs=[
             input_image, image_scale_slider, hunyuan["exec_mode"],
-            hunyuan["guidance"], hunyuan["steps"], hunyuan["seed"], hunyuan["model_choice"],
+            hunyuan["endpoint_id"], hunyuan["api_key"],
+            hunyuan["guidance"], hunyuan["steps"], hunyuan["seed"], hunyuan["octree_resolution"],
+            hunyuan["model_choice"],
             hunyuan["fp16"], hunyuan["attention_slicing"], hunyuan["cpu_offload"], hunyuan["remove_bg"],
             hunyuan["output_name"], hunyuan["save_location"],
         ],
         outputs=[output_model_viewer, hunyuan["logs_box"], hunyuan["progress_display"]],
+    )
+    
+    # --- Hunyuan Check Status ---
+    def check_hunyuan_status(endpoint_id, api_key):
+        return check_hunyuan_runpod_status(endpoint_id, api_key)
+    
+    hunyuan["check_serverless_btn"].click(
+        fn=check_hunyuan_status,
+        inputs=[hunyuan["endpoint_id"], hunyuan["api_key"]],
+        outputs=[hunyuan["status"]],
+    )
+    
+    # --- Hunyuan Edit Credentials Toggle ---
+    hunyuan["edit_creds_btn"].click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[hunyuan["creds_group"]],
+    )
+    
+    hunyuan["save_creds_btn"].click(
+        fn=lambda: gr.update(visible=False),
+        outputs=[hunyuan["creds_group"]],
     )
     
     # --- GEN3C Generation ---
@@ -732,16 +780,16 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     sharp["exec_mode"].change(
         fn=sharp_mode_change,
         inputs=[sharp["exec_mode"]],
-        outputs=[sharp["runpod_settings"], sharp["status"]],
+        outputs=[sharp["creds_group"], sharp["status"]],
     )
     
     # --- SHARP Status Checks ---
-    sharp["check_btn"].click(
+    sharp["check_local_btn"].click(
         fn=check_sharp_installation,
-        outputs=[sharp["status"]],
+        outputs=[sharp["local_status"]],
     )
     
-    sharp["check_runpod_btn"].click(
+    sharp["check_serverless_btn"].click(
         fn=check_serverless_status,
         inputs=[sharp["endpoint_id"], sharp["api_key"]],
         outputs=[sharp["status"]],
@@ -750,7 +798,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     sharp["save_creds_btn"].click(
         fn=save_serverless_credentials,
         inputs=[sharp["endpoint_id"], sharp["api_key"]],
-        outputs=[sharp["status"], sharp["runpod_settings"]],
+        outputs=[sharp["status"], sharp["creds_group"]],
     )
     
     # --- SHARP Generation ---
@@ -765,13 +813,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     # --- Lyra Status Checks ---
-    lyra["check_btn"].click(
-        fn=lambda ep, key: check_lyra_status(ep, key),
-        inputs=[lyra["endpoint_id"], lyra["api_key"]],
-        outputs=[lyra["status"]],
-    )
-    
-    lyra["check_runpod_btn"].click(
+    lyra["check_serverless_btn"].click(
         fn=lambda ep, key: check_lyra_status(ep, key),
         inputs=[lyra["endpoint_id"], lyra["api_key"]],
         outputs=[lyra["status"]],
@@ -780,7 +822,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     lyra["save_creds_btn"].click(
         fn=save_serverless_credentials,
         inputs=[lyra["endpoint_id"], lyra["api_key"]],
-        outputs=[lyra["status"], lyra["runpod_settings"]],
+        outputs=[lyra["status"], lyra["creds_group"]],
     )
     
     # --- Lyra Generation ---
@@ -799,13 +841,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     # --- TRELLIS.2 Status Checks ---
-    trellis["check_btn"].click(
-        fn=lambda ep, key: check_trellis_status(ep, key),
-        inputs=[trellis["endpoint_id"], trellis["api_key"]],
-        outputs=[trellis["status"]],
-    )
-    
-    trellis["check_runpod_btn"].click(
+    trellis["check_serverless_btn"].click(
         fn=lambda ep, key: check_trellis_status(ep, key),
         inputs=[trellis["endpoint_id"], trellis["api_key"]],
         outputs=[trellis["status"]],
@@ -814,7 +850,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     trellis["save_creds_btn"].click(
         fn=save_serverless_credentials,
         inputs=[trellis["endpoint_id"], trellis["api_key"]],
-        outputs=[trellis["status"], trellis["runpod_settings"]],
+        outputs=[trellis["status"], trellis["creds_group"]],
     )
     
     # --- TRELLIS.2 Generation ---
@@ -866,4 +902,12 @@ if __name__ == "__main__":
     print(f"[STARTUP] Cluster status: {format_cluster_status()}")
     print("[STARTUP] 3D Generation Studio v2.1 ready!")
 
-    demo.launch(server_port=5683, share=False, css=CUSTOM_CSS)
+    demo.launch(
+        server_port=5683,
+        share=False,
+        css=CUSTOM_CSS,
+        allowed_paths=[
+            "/srv/searidge_share/outputs",  # All model outputs
+            "/tmp",
+        ]
+    )
