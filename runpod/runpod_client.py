@@ -1386,6 +1386,15 @@ class UnifiedServerlessClient:
                     normalized["glb_path"] = output["glb_path"]
                 if output.get("glb_s3_url"):
                     normalized["glb_s3_url"] = output["glb_s3_url"]
+                # SuGaR/Mesh extraction outputs
+                if output.get("mesh_base64"):
+                    normalized["mesh_base64"] = output["mesh_base64"]
+                if output.get("mesh_path"):
+                    normalized["mesh_path"] = output["mesh_path"]
+                if output.get("mesh_s3_url"):
+                    normalized["mesh_s3_url"] = output["mesh_s3_url"]
+                if output.get("mesh_size"):
+                    normalized["mesh_size"] = output["mesh_size"]
                 # Download required flag
                 if output.get("download_required"):
                     normalized["download_required"] = output["download_required"]

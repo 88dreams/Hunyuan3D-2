@@ -28,8 +28,8 @@ def create_hunyuan_tab(
     Returns:
         Dictionary of all UI components for event handler binding
     """
-    # Use Hunyuan-specific endpoint if available, otherwise use provided default
-    hunyuan_endpoint = HUNYUAN_DEFAULT_ENDPOINT_ID or default_endpoint_id
+    # Use provided default (from saved config), fallback to hardcoded if not set
+    hunyuan_endpoint = default_endpoint_id or HUNYUAN_DEFAULT_ENDPOINT_ID
     
     gr.Markdown("**Image → GLB Mesh** | High-quality 3D mesh generation")
     

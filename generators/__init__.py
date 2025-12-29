@@ -7,6 +7,7 @@ This module provides generation functions for each model:
 - Lyra: Image/Video → 3DGS/4DGS (NVIDIA)
 - SHARP: Image → 3DGS PLY (Apple)
 - TRELLIS.2: Image → GLB with PBR (Microsoft)
+- SuGaR: 3DGS → GLB/OBJ mesh extraction
 """
 
 from generators.hunyuan import (
@@ -54,6 +55,14 @@ from generators.trellis import (
     TRELLIS_DEFAULT_OUTPUT_DIR,
 )
 
+from generators.sugar import (
+    run_sugar_extraction,
+    run_tsdf_extraction,
+    check_sugar_status,
+    detect_ply_format,
+    MESH_DEFAULT_OUTPUT_DIR,
+)
+
 __all__ = [
     # Hunyuan
     "run_hunyuan",
@@ -90,5 +99,11 @@ __all__ = [
     "check_trellis_status",
     "check_trellis_installation",
     "TRELLIS_DEFAULT_OUTPUT_DIR",
+    # SuGaR (Mesh Extraction)
+    "run_sugar_extraction",
+    "run_tsdf_extraction",
+    "check_sugar_status",
+    "detect_ply_format",
+    "MESH_DEFAULT_OUTPUT_DIR",
 ]
 

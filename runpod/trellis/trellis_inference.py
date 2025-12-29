@@ -69,11 +69,16 @@ def main():
         if trellis_path not in sys.path:
             sys.path.insert(0, trellis_path)
         
+        # Set required env vars before importing
+        os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '1'
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        
         import torch
         from PIL import Image
         
-        # TRELLIS.2 uses a pipeline approach
-        from trellis.pipelines import TrellisImageTo3DPipeline
+        # TRELLIS.2 uses trellis2 module (not trellis)
+        from trellis2.pipelines import Trellis2ImageTo3DPipeline
+        import o_voxel
         
         logger.info("TRELLIS.2 modules loaded successfully")
         
@@ -92,19 +97,29 @@ def main():
         else:
             checkpoint_path = os.environ.get("TRELLIS_CHECKPOINT_DIR", "/runpod-volume/checkpoints/trellis")
         
-        # Check if we have local checkpoints or need to download
-        local_model_path = os.path.join(checkpoint_path, "TRELLIS.2-4B")
+        # Check for local checkpoints - they're directly in the checkpoint_path (not in a subdirectory)
+        # The structure is: checkpoint_path/pipeline.json, checkpoint_path/ckpts/
+        pipeline_json = os.path.join(checkpoint_path, "pipeline.json")
+        ckpts_dir = os.path.join(checkpoint_path, "ckpts")
         
-        if os.path.exists(local_model_path):
-            logger.info(f"Loading from local checkpoint: {local_model_path}")
-            pipeline = TrellisImageTo3DPipeline.from_pretrained(local_model_path)
+        if os.path.exists(pipeline_json) and os.path.isdir(ckpts_dir):
+            logger.info(f"Loading from local checkpoint: {checkpoint_path}")
+            logger.info(f"  - pipeline.json: {pipeline_json}")
+            logger.info(f"  - ckpts dir: {ckpts_dir}")
+            
+            # List available checkpoints
+            ckpt_files = os.listdir(ckpts_dir)
+            logger.info(f"  - Found {len(ckpt_files)} checkpoint files")
+            
+            pipeline = Trellis2ImageTo3DPipeline.from_pretrained(checkpoint_path)
         else:
-            logger.info("Loading from HuggingFace: microsoft/TRELLIS-image-large")
+            logger.info(f"Local checkpoints not found at {checkpoint_path}")
+            logger.info("Loading from HuggingFace: microsoft/TRELLIS.2-4B")
             # This will download to HF cache
-            pipeline = TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
+            pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
         
         # Move to GPU
-        pipeline = pipeline.to("cuda")
+        pipeline.cuda()
         logger.info("Pipeline initialized and moved to GPU")
         
     except Exception as e:
@@ -126,27 +141,38 @@ def main():
     try:
         logger.info(f"Running TRELLIS.2 inference (resolution={args.resolution}, guidance={args.guidance_scale})...")
         
-        # TRELLIS.2 pipeline call
-        outputs = pipeline(
-            image,
-            seed=args.seed if args.seed is not None else 42,
-            guidance_scale=args.guidance_scale,
-        )
+        # TRELLIS.2 pipeline.run() returns a list of mesh objects
+        mesh = pipeline.run(image, seed=args.seed if args.seed is not None else 42)[0]
+        
+        # Simplify mesh to stay within nvdiffrast limits
+        mesh.simplify(16777216)
         
         logger.info("Inference complete")
         
-        # Extract the 3D representation
-        # TRELLIS.2 outputs O-Voxel representation that can be exported to various formats
-        
         output_paths = []
         
-        # Export GLB
-        if args.output_glb:
+        # Export GLB using o_voxel.postprocess.to_glb
+        if args.output_glb or (not args.output_glb and not args.output_ply):
             glb_path = os.path.join(args.output_dir, f"{args.output_name}.glb")
             logger.info(f"Exporting GLB: {glb_path}")
             
-            # TRELLIS.2 has built-in export functionality
-            outputs.save_glb(glb_path)
+            # Use o_voxel postprocessing to export GLB
+            glb = o_voxel.postprocess.to_glb(
+                vertices=mesh.vertices,
+                faces=mesh.faces,
+                attr_volume=mesh.attrs,
+                coords=mesh.coords,
+                attr_layout=mesh.layout,
+                voxel_size=mesh.voxel_size,
+                aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+                decimation_target=1000000,
+                texture_size=4096,
+                remesh=True,
+                remesh_band=1,
+                remesh_project=0,
+                verbose=True
+            )
+            glb.export(glb_path, extension_webp=True)
             
             if os.path.exists(glb_path):
                 file_size = os.path.getsize(glb_path) / 1024 / 1024
@@ -155,27 +181,32 @@ def main():
             else:
                 logger.warning("GLB export failed - file not created")
         
-        # Export PLY
+        # Export PLY if requested
         if args.output_ply:
             ply_path = os.path.join(args.output_dir, f"{args.output_name}.ply")
             logger.info(f"Exporting PLY: {ply_path}")
             
-            # TRELLIS.2 has built-in export functionality
-            outputs.save_ply(ply_path)
-            
-            if os.path.exists(ply_path):
-                file_size = os.path.getsize(ply_path) / 1024 / 1024
-                logger.info(f"PLY exported: {ply_path} ({file_size:.1f}MB)")
-                output_paths.append(ply_path)
-            else:
-                logger.warning("PLY export failed - file not created")
-        
-        # Default to GLB if neither specified
-        if not args.output_glb and not args.output_ply:
-            glb_path = os.path.join(args.output_dir, f"{args.output_name}.glb")
-            logger.info(f"Exporting default GLB: {glb_path}")
-            outputs.save_glb(glb_path)
-            output_paths.append(glb_path)
+            # Use o_voxel postprocessing to export PLY
+            try:
+                ply = o_voxel.postprocess.to_ply(
+                    vertices=mesh.vertices,
+                    faces=mesh.faces,
+                    attr_volume=mesh.attrs,
+                    coords=mesh.coords,
+                    attr_layout=mesh.layout,
+                    voxel_size=mesh.voxel_size,
+                    aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+                )
+                ply.export(ply_path)
+                
+                if os.path.exists(ply_path):
+                    file_size = os.path.getsize(ply_path) / 1024 / 1024
+                    logger.info(f"PLY exported: {ply_path} ({file_size:.1f}MB)")
+                    output_paths.append(ply_path)
+                else:
+                    logger.warning("PLY export failed - file not created")
+            except Exception as e:
+                logger.warning(f"PLY export not available: {e}")
         
         if output_paths:
             logger.info(f"Successfully exported: {output_paths}")

@@ -26,6 +26,28 @@ import os
 import json
 import time
 from typing import Optional, Tuple, Union
+from pathlib import Path
+
+# Load AWS credentials from config file if not already set
+def _load_aws_credentials():
+    """Load AWS credentials from config file."""
+    aws_creds_file = Path.home() / ".config" / "3d_studio" / "aws_credentials.env"
+    if aws_creds_file.exists():
+        with open(aws_creds_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    # Only set if not already in environment
+                    if key not in os.environ or not os.environ[key]:
+                        os.environ[key] = value
+        print(f"[CONFIG] Loaded AWS credentials from {aws_creds_file}")
+    else:
+        print(f"[CONFIG] AWS credentials file not found: {aws_creds_file}")
+
+_load_aws_credentials()
 
 import torch  # type: ignore
 import gradio as gr  # type: ignore
@@ -41,6 +63,7 @@ from ui.tabs import (
     create_lyra_tab,
     create_sharp_tab,
     create_trellis_tab,
+    create_mesh_extraction_tab,
 )
 
 from generators import (
@@ -67,6 +90,12 @@ from generators import (
     run_trellis_runpod,
     check_trellis_status,
     TRELLIS_DEFAULT_OUTPUT_DIR,
+    # SuGaR (Mesh Extraction)
+    run_sugar_extraction,
+    run_tsdf_extraction,
+    check_sugar_status,
+    detect_ply_format,
+    MESH_DEFAULT_OUTPUT_DIR,
 )
 
 from job_queue import (
@@ -171,11 +200,16 @@ def _save_runpod_config(config: dict) -> None:
         print(f"[CONFIG] Warning: Could not save RunPod config: {e}")
 
 
-def save_serverless_credentials(endpoint_id: str, api_key: str) -> Tuple[str, dict]:
-    """Save serverless credentials to config file."""
+def save_serverless_credentials(endpoint_id: str, api_key: str, model: str = "gen3c") -> Tuple[str, dict]:
+    """Save serverless credentials to config file for a specific model."""
     config = _load_runpod_config()
-    config["serverless_endpoint_id"] = endpoint_id.strip() if endpoint_id else ""
-    config["serverless_api_key"] = api_key.strip() if api_key else ""
+    # Save per-model credentials
+    config[f"{model}_endpoint_id"] = endpoint_id.strip() if endpoint_id else ""
+    config[f"{model}_api_key"] = api_key.strip() if api_key else ""
+    # Also save as default for backwards compatibility
+    if model == "gen3c":
+        config["serverless_endpoint_id"] = endpoint_id.strip() if endpoint_id else ""
+        config["serverless_api_key"] = api_key.strip() if api_key else ""
     _save_runpod_config(config)
     return "✅ Credentials saved", gr.update(visible=False)
 
@@ -191,10 +225,29 @@ def save_pod_url(pod_url: str) -> str:
 # Load saved config
 _runpod_config = _load_runpod_config()
 DEFAULT_RUNPOD_URL = _runpod_config.get("pod_url", "https://iv94zuokozefxc-8000.proxy.runpod.net")
+# Legacy/default credentials (used by GEN3C/SHARP/Lyra)
 DEFAULT_SERVERLESS_ENDPOINT = _runpod_config.get("serverless_endpoint_id", "")
 DEFAULT_SERVERLESS_API_KEY = _runpod_config.get("serverless_api_key", "")
+# Per-model credentials
+DEFAULT_GEN3C_ENDPOINT = _runpod_config.get("gen3c_endpoint_id", DEFAULT_SERVERLESS_ENDPOINT)
+DEFAULT_GEN3C_API_KEY = _runpod_config.get("gen3c_api_key", DEFAULT_SERVERLESS_API_KEY)
+DEFAULT_SHARP_ENDPOINT = _runpod_config.get("sharp_endpoint_id", DEFAULT_SERVERLESS_ENDPOINT)
+DEFAULT_SHARP_API_KEY = _runpod_config.get("sharp_api_key", DEFAULT_SERVERLESS_API_KEY)
+DEFAULT_LYRA_ENDPOINT = _runpod_config.get("lyra_endpoint_id", DEFAULT_SERVERLESS_ENDPOINT)
+DEFAULT_LYRA_API_KEY = _runpod_config.get("lyra_api_key", DEFAULT_SERVERLESS_API_KEY)
+DEFAULT_TRELLIS_ENDPOINT = _runpod_config.get("trellis_endpoint_id", "")
+DEFAULT_TRELLIS_API_KEY = _runpod_config.get("trellis_api_key", DEFAULT_SERVERLESS_API_KEY)
+DEFAULT_HUNYUAN_ENDPOINT = _runpod_config.get("hunyuan_endpoint_id", "")
+DEFAULT_HUNYUAN_API_KEY = _runpod_config.get("hunyuan_api_key", DEFAULT_SERVERLESS_API_KEY)
+# Mesh extraction uses the same endpoint as GEN3C/SHARP/Lyra by default
+DEFAULT_MESH_ENDPOINT = _runpod_config.get("mesh_extraction_endpoint_id", DEFAULT_GEN3C_ENDPOINT)
+DEFAULT_MESH_API_KEY = _runpod_config.get("mesh_extraction_api_key", DEFAULT_SERVERLESS_API_KEY)
 
-print(f"[CONFIG] Loaded RunPod config: endpoint={'set' if DEFAULT_SERVERLESS_ENDPOINT else 'not set'}")
+print(f"[CONFIG] Loaded RunPod credentials:")
+print(f"  - GEN3C/SHARP/Lyra: endpoint={'set' if DEFAULT_GEN3C_ENDPOINT else 'not set'}")
+print(f"  - TRELLIS: endpoint={'set' if DEFAULT_TRELLIS_ENDPOINT else 'not set'}")
+print(f"  - Hunyuan: endpoint={'set' if DEFAULT_HUNYUAN_ENDPOINT else 'not set'}")
+print(f"  - Mesh Extraction: endpoint={'set' if DEFAULT_MESH_ENDPOINT else 'not set'}")
 
 
 # =============================================================================
@@ -403,8 +456,12 @@ def handle_lyra_generation(
     output_dir: str,
     output_ply: bool,
     output_video: bool,
-) -> Tuple[Optional[str], str, str]:
-    """Handle Lyra generation (RunPod only)."""
+) -> Tuple[Optional[str], str, str, str]:
+    """Handle Lyra generation (RunPod only).
+    
+    Returns:
+        Tuple of (output_path, logs, progress, ply_path_for_conversion)
+    """
     scale_value = clamp_scale_value(image_scale)
     
     # Lyra can use image or video depending on mode
@@ -420,7 +477,7 @@ def handle_lyra_generation(
         temp_scaled = None
     
     try:
-        return run_lyra_runpod(
+        result = run_lyra_runpod(
             image_path=effective_image_path,
             video_path=effective_video_path,
             endpoint_id=endpoint_id,
@@ -437,6 +494,17 @@ def handle_lyra_generation(
             output_ply=output_ply,
             output_video=output_video,
         )
+        
+        # result is (output_path, logs, progress)
+        output_path, logs, progress = result
+        
+        # Extract PLY path for conversion field (if it's a PLY file)
+        ply_path = ""
+        if output_path and output_path.endswith(".ply"):
+            ply_path = output_path
+        
+        return output_path, logs, progress, ply_path
+        
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -481,6 +549,259 @@ def handle_trellis_generation(
                 os.remove(temp_scaled)
             except Exception:
                 pass
+
+
+def generate_blender_script(
+    ply_path: str,
+    display_mode: str,
+    point_size: float,
+    max_points: int,
+) -> str:
+    """
+    Generate a customized Blender import script for the given PLY file.
+    
+    Args:
+        ply_path: Path to the point cloud PLY file
+        display_mode: "points", "spheres", or "cubes"
+        point_size: Size of spheres/cubes
+        max_points: Maximum points to import (0 = all)
+    
+    Returns:
+        Status message with path to generated script
+    """
+    from pathlib import Path
+    
+    if not ply_path or not ply_path.strip():
+        return "❌ Error: No PLY path provided"
+    
+    ply_path = ply_path.strip()
+    if not os.path.exists(ply_path):
+        return f"❌ Error: PLY file not found: {ply_path}"
+    
+    # Read the template script
+    template_path = os.path.join(os.path.dirname(__file__), "scripts", "blender_import_pointcloud.py")
+    if not os.path.exists(template_path):
+        return f"❌ Error: Template script not found: {template_path}"
+    
+    with open(template_path, 'r') as f:
+        script_content = f.read()
+    
+    # Customize the script with user settings
+    max_points_value = "None" if max_points == 0 else str(int(max_points))
+    
+    # Replace configuration values
+    script_content = script_content.replace(
+        'PLY_PATH = "/srv/searidge_share/outputs/lyra/bright23_h200_lyra_converted.ply"',
+        f'PLY_PATH = "{ply_path}"'
+    )
+    script_content = script_content.replace(
+        'DISPLAY_MODE = "points"',
+        f'DISPLAY_MODE = "{display_mode}"'
+    )
+    script_content = script_content.replace(
+        'POINT_SIZE = 0.01',
+        f'POINT_SIZE = {point_size}'
+    )
+    script_content = script_content.replace(
+        'MAX_POINTS = None',
+        f'MAX_POINTS = {max_points_value}'
+    )
+    
+    # Write customized script
+    ply_file = Path(ply_path)
+    output_script = ply_file.parent / f"{ply_file.stem}_blender_import.py"
+    
+    with open(output_script, 'w') as f:
+        f.write(script_content)
+    
+    return f"✅ Script generated: {output_script}\n\nTo use:\n1. Open Blender\n2. Go to Scripting workspace\n3. Open this script\n4. Press Alt+P to run"
+
+
+def open_in_blender(
+    ply_path: str,
+    display_mode: str,
+    point_size: float,
+    max_points: int,
+) -> str:
+    """
+    Generate script and attempt to open Blender with it.
+    
+    Returns:
+        Status message
+    """
+    import subprocess
+    from pathlib import Path
+    
+    # First generate the script
+    result = generate_blender_script(ply_path, display_mode, point_size, max_points)
+    
+    if result.startswith("❌"):
+        return result
+    
+    # Extract script path from result
+    script_path = result.split(": ")[1].split("\n")[0]
+    
+    # Try to find and run Blender
+    blender_paths = [
+        "/usr/bin/blender",
+        "/snap/bin/blender",
+        "/usr/local/bin/blender",
+        os.path.expanduser("~/blender/blender"),
+    ]
+    
+    blender_exe = None
+    for path in blender_paths:
+        if os.path.exists(path):
+            blender_exe = path
+            break
+    
+    if not blender_exe:
+        # Try to find via 'which'
+        try:
+            result_which = subprocess.run(["which", "blender"], capture_output=True, text=True)
+            if result_which.returncode == 0:
+                blender_exe = result_which.stdout.strip()
+        except Exception:
+            pass
+    
+    if not blender_exe:
+        return f"✅ Script generated: {script_path}\n\n⚠️ Blender not found in PATH. Please open Blender manually and run the script."
+    
+    # Launch Blender with the script
+    try:
+        subprocess.Popen([blender_exe, "--python", script_path])
+        return f"✅ Blender launched with script: {script_path}"
+    except Exception as e:
+        return f"✅ Script generated: {script_path}\n\n⚠️ Failed to launch Blender: {e}"
+
+
+def handle_lyra_ply_conversion(
+    input_path: str,
+    convert_pointcloud: bool,
+    convert_3dgs: bool,
+    max_points: float,
+    min_opacity: float,
+    preset: str,
+) -> Tuple[str, str]:
+    """
+    Convert Lyra's PyTorch PLY format to standard formats.
+    
+    Args:
+        input_path: Path to Lyra's raw .ply output (PyTorch tensor format)
+        convert_pointcloud: If True, convert to simple point cloud (MeshLab/Blender)
+        convert_3dgs: If True, convert to full 3DGS format (SuperSplat)
+        max_points: Maximum number of points (0 = no limit)
+        min_opacity: Minimum opacity threshold (0 = no filter)
+        preset: Preset name for quick settings
+    
+    Returns:
+        Tuple of (status_message, pointcloud_path_for_blender)
+    """
+    import subprocess
+    from pathlib import Path
+    
+    if not input_path or not input_path.strip():
+        return "❌ Error: No input PLY path provided", ""
+    
+    input_path = input_path.strip()
+    if not os.path.exists(input_path):
+        return f"❌ Error: Input file not found: {input_path}", ""
+    
+    if not convert_pointcloud and not convert_3dgs:
+        return "❌ Error: Select at least one output format", ""
+    
+    # Get the conversion script path
+    script_path = os.path.join(os.path.dirname(__file__), "scripts", "convert_lyra_ply.py")
+    if not os.path.exists(script_path):
+        return f"❌ Error: Conversion script not found: {script_path}", ""
+    
+    # Apply preset settings (override sliders if not "Custom")
+    if preset == "Full Quality":
+        max_points = 0
+        min_opacity = 0
+    elif preset == "Web Viewer (500k)":
+        max_points = 500000
+        min_opacity = 0.01
+    elif preset == "Quick Preview (100k)":
+        max_points = 100000
+        min_opacity = 0.05
+    # "Custom" uses the slider values directly
+    
+    input_file = Path(input_path)
+    output_dir = input_file.parent
+    base_name = input_file.stem
+    
+    # Build suffix based on settings
+    suffix = ""
+    if max_points > 0:
+        suffix += f"_{int(max_points)//1000}k"
+    if min_opacity > 0:
+        suffix += f"_op{int(min_opacity*100)}"
+    
+    results = []
+    pointcloud_path = ""  # For Blender import
+    
+    # Build common arguments
+    common_args = []
+    if max_points > 0:
+        common_args.extend(["--max-points", str(int(max_points))])
+    if min_opacity > 0:
+        common_args.extend(["--min-opacity", str(min_opacity)])
+    
+    # Convert to 3DGS format (default)
+    if convert_3dgs:
+        output_3dgs = output_dir / f"{base_name}_3dgs{suffix}.ply"
+        try:
+            cmd = ["python", script_path, str(input_path), str(output_3dgs)] + common_args
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # Increased timeout for large files
+            )
+            if result.returncode == 0:
+                # Extract point count from output
+                output_lines = result.stdout.strip().split('\n')
+                point_info = [l for l in output_lines if 'Gaussians' in l or 'points' in l]
+                point_summary = point_info[-1] if point_info else ""
+                results.append(f"✅ 3DGS: {output_3dgs.name}")
+                if point_summary:
+                    results.append(f"   {point_summary}")
+            else:
+                results.append(f"❌ 3DGS failed: {result.stderr[:200]}")
+        except subprocess.TimeoutExpired:
+            results.append("❌ 3DGS conversion timed out (>5 min)")
+        except Exception as e:
+            results.append(f"❌ 3DGS error: {e}")
+    
+    # Convert to simple point cloud
+    if convert_pointcloud:
+        output_pc = output_dir / f"{base_name}_pointcloud{suffix}.ply"
+        try:
+            cmd = ["python", script_path, str(input_path), str(output_pc), "--simple"] + common_args
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if result.returncode == 0:
+                output_lines = result.stdout.strip().split('\n')
+                point_info = [l for l in output_lines if 'points' in l]
+                point_summary = point_info[-1] if point_info else ""
+                results.append(f"✅ Point cloud: {output_pc.name}")
+                if point_summary:
+                    results.append(f"   {point_summary}")
+                pointcloud_path = str(output_pc)  # Set for Blender import
+            else:
+                results.append(f"❌ Point cloud failed: {result.stderr[:200]}")
+        except subprocess.TimeoutExpired:
+            results.append("❌ Point cloud conversion timed out (>5 min)")
+        except Exception as e:
+            results.append(f"❌ Point cloud error: {e}")
+    
+    status = "\n".join(results) if results else "No conversions performed"
+    return status, pointcloud_path
 
 
 # =============================================================================
@@ -591,37 +912,46 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 
                 # TAB 1: HUNYUAN 3D
                 with gr.TabItem("Hunyuan 3D", id="hunyuan"):
-                    hunyuan = create_hunyuan_tab()
+                    hunyuan = create_hunyuan_tab(
+                        default_endpoint_id=DEFAULT_HUNYUAN_ENDPOINT,
+                        default_api_key=DEFAULT_HUNYUAN_API_KEY,
+                    )
                 
                 # TAB 2: GEN3C VIDEO
                 with gr.TabItem("GEN3C Video", id="gen3c"):
                     gen3c = create_gen3c_tab(
                         default_runpod_url=DEFAULT_RUNPOD_URL,
-                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
-                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                        default_endpoint_id=DEFAULT_GEN3C_ENDPOINT,
+                        default_api_key=DEFAULT_GEN3C_API_KEY,
                         format_cluster_status_fn=format_cluster_status,
                     )
                 
                 # TAB 3: LYRA 3DGS
                 with gr.TabItem("Lyra 3DGS", id="lyra"):
                     lyra = create_lyra_tab(
-                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
-                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                        default_endpoint_id=DEFAULT_LYRA_ENDPOINT,
+                        default_api_key=DEFAULT_LYRA_API_KEY,
                     )
                 
                 # TAB 4: SHARP
                 with gr.TabItem("SHARP", id="sharp"):
                     sharp = create_sharp_tab(
-                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
-                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                        default_endpoint_id=DEFAULT_SHARP_ENDPOINT,
+                        default_api_key=DEFAULT_SHARP_API_KEY,
                     )
                 
                 # TAB 5: TRELLIS.2
                 with gr.TabItem("TRELLIS.2", id="trellis"):
                     trellis = create_trellis_tab(
-                        default_endpoint_id=DEFAULT_SERVERLESS_ENDPOINT,
-                        default_api_key=DEFAULT_SERVERLESS_API_KEY,
+                        default_endpoint_id=DEFAULT_TRELLIS_ENDPOINT,
+                        default_api_key=DEFAULT_TRELLIS_API_KEY,
                     )
+                
+                # TAB 6: MESH EXTRACTION (SuGaR)
+                mesh_extraction = create_mesh_extraction_tab(
+                    default_endpoint_id=DEFAULT_MESH_ENDPOINT,
+                    default_api_key=DEFAULT_MESH_API_KEY,
+                )
     
     # =========================================================================
     # EVENT HANDLERS
@@ -693,7 +1023,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     gen3c["save_creds_btn"].click(
-        fn=save_serverless_credentials,
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "gen3c"),
         inputs=[gen3c["endpoint_id"], gen3c["api_key"]],
         outputs=[gen3c["status"], gen3c["creds_group"]],
     )
@@ -748,8 +1078,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     hunyuan["save_creds_btn"].click(
-        fn=lambda: gr.update(visible=False),
-        outputs=[hunyuan["creds_group"]],
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "hunyuan"),
+        inputs=[hunyuan["endpoint_id"], hunyuan["api_key"]],
+        outputs=[hunyuan["status"], hunyuan["creds_group"]],
     )
     
     # --- GEN3C Generation ---
@@ -796,9 +1127,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     sharp["save_creds_btn"].click(
-        fn=save_serverless_credentials,
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "sharp"),
         inputs=[sharp["endpoint_id"], sharp["api_key"]],
         outputs=[sharp["status"], sharp["creds_group"]],
+    )
+    
+    sharp["edit_creds_btn"].click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[sharp["creds_group"]],
     )
     
     # --- SHARP Generation ---
@@ -820,9 +1156,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     lyra["save_creds_btn"].click(
-        fn=save_serverless_credentials,
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "lyra"),
         inputs=[lyra["endpoint_id"], lyra["api_key"]],
         outputs=[lyra["status"], lyra["creds_group"]],
+    )
+    
+    lyra["edit_creds_btn"].click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[lyra["creds_group"]],
     )
     
     # --- Lyra Generation ---
@@ -837,7 +1178,88 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             lyra["output_name"], lyra["output_dir"],
             lyra["output_ply"], lyra["output_video"],
         ],
-        outputs=[output_model_viewer, lyra["logs_box"], lyra["progress_display"]],
+        outputs=[output_model_viewer, lyra["logs_box"], lyra["progress_display"], lyra["ply_input_path"]],
+    )
+    
+    # --- Lyra PLY Conversion ---
+    lyra["convert_btn"].click(
+        fn=handle_lyra_ply_conversion,
+        inputs=[
+            lyra["ply_input_path"],
+            lyra["convert_pointcloud"],
+            lyra["convert_3dgs"],
+            lyra["downsample_max_points"],
+            lyra["downsample_min_opacity"],
+            lyra["downsample_presets"],
+        ],
+        outputs=[lyra["convert_status"], lyra["blender_ply_path"]],
+    )
+    
+    # --- Lyra Preset Updates (sync sliders with preset selection) ---
+    def update_downsample_from_preset(preset):
+        """Update slider values when preset changes."""
+        if preset == "Full Quality":
+            return 0, 0.0
+        elif preset == "Web Viewer (500k)":
+            return 500000, 0.01
+        elif preset == "Quick Preview (100k)":
+            return 100000, 0.05
+        else:  # Custom
+            return gr.update(), gr.update()  # Keep current values
+    
+    lyra["downsample_presets"].change(
+        fn=update_downsample_from_preset,
+        inputs=[lyra["downsample_presets"]],
+        outputs=[lyra["downsample_max_points"], lyra["downsample_min_opacity"]],
+    )
+    
+    # --- Lyra Blender Import ---
+    lyra["blender_generate_btn"].click(
+        fn=generate_blender_script,
+        inputs=[
+            lyra["blender_ply_path"],
+            lyra["blender_display_mode"],
+            lyra["blender_point_size"],
+            lyra["blender_max_points"],
+        ],
+        outputs=[lyra["blender_script_output"]],
+    )
+    
+    lyra["blender_open_btn"].click(
+        fn=open_in_blender,
+        inputs=[
+            lyra["blender_ply_path"],
+            lyra["blender_display_mode"],
+            lyra["blender_point_size"],
+            lyra["blender_max_points"],
+        ],
+        outputs=[lyra["blender_script_output"]],
+    )
+    
+    # --- Lyra PLY Dropdown (Post-Process tab) ---
+    from ui.tabs.lyra_tab import scan_for_lyra_ply_files
+    
+    def refresh_lyra_ply_dropdown():
+        """Refresh the list of available PLY files for Lyra post-processing."""
+        files = scan_for_lyra_ply_files()
+        return gr.update(choices=files)
+    
+    def on_lyra_ply_selected(selection: str):
+        """Extract path from dropdown selection (removes size info)."""
+        if selection and " (" in selection:
+            # Remove the " (X.X MB)" suffix
+            return selection.rsplit(" (", 1)[0]
+        return selection or ""
+    
+    lyra["refresh_ply_btn"].click(
+        fn=refresh_lyra_ply_dropdown,
+        outputs=[lyra["ply_dropdown"]],
+    )
+    
+    lyra["ply_dropdown"].change(
+        fn=on_lyra_ply_selected,
+        inputs=[lyra["ply_dropdown"]],
+        outputs=[lyra["ply_input_path"]],
     )
     
     # --- TRELLIS.2 Status Checks ---
@@ -848,9 +1270,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     )
     
     trellis["save_creds_btn"].click(
-        fn=save_serverless_credentials,
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "trellis"),
         inputs=[trellis["endpoint_id"], trellis["api_key"]],
         outputs=[trellis["status"], trellis["creds_group"]],
+    )
+    
+    trellis["edit_creds_btn"].click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[trellis["creds_group"]],
     )
     
     # --- TRELLIS.2 Generation ---
@@ -863,6 +1290,160 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             trellis["output_name"], trellis["output_dir"], trellis["output_format"],
         ],
         outputs=[output_model_viewer, trellis["logs_box"], trellis["progress_display"]],
+    )
+    
+    # =========================================================================
+    # MESH EXTRACTION (SuGaR) EVENT HANDLERS
+    # =========================================================================
+    
+    def handle_mesh_extraction(
+        input_ply: str,
+        input_format: str,
+        method: str,
+        regularization: str,
+        quality_preset: str,
+        poisson_depth: int,
+        decimate_faces: int,
+        export_texture: bool,
+        texture_resolution: str,
+        refinement_time: str,
+        tsdf_voxel_size: float,
+        tsdf_num_views: int,
+        output_name: str,
+        output_format: str,
+        output_dir: str,
+        endpoint_id: str,
+        api_key: str,
+    ):
+        """Handle mesh extraction request."""
+        if not input_ply or not input_ply.strip():
+            return "", "Error: No input PLY file specified", "❌ Missing input"
+        
+        if "SuGaR" in method:
+            result = run_sugar_extraction(
+                input_ply=input_ply,
+                input_format=input_format,
+                regularization=regularization,
+                quality_preset=quality_preset,
+                poisson_depth=poisson_depth,
+                decimate_faces=decimate_faces,
+                export_texture=export_texture,
+                texture_resolution=int(texture_resolution),
+                refinement_time=refinement_time,
+                output_name=output_name,
+                output_format=output_format,
+                output_dir=output_dir,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+            )
+        else:
+            # TSDF method
+            result = run_tsdf_extraction(
+                input_ply=input_ply,
+                input_format=input_format,
+                voxel_size=tsdf_voxel_size,
+                num_views=tsdf_num_views,
+                output_name=output_name,
+                output_dir=output_dir,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+            )
+        
+        output_path, logs, status = result
+        return output_path or "", logs, status
+    
+    # Mesh extraction button
+    mesh_extraction["extract_btn"].click(
+        fn=handle_mesh_extraction,
+        inputs=[
+            mesh_extraction["input_ply"],
+            mesh_extraction["input_format"],
+            mesh_extraction["method"],
+            mesh_extraction["regularization"],
+            mesh_extraction["quality_preset"],
+            mesh_extraction["poisson_depth"],
+            mesh_extraction["decimate_faces"],
+            mesh_extraction["export_texture"],
+            mesh_extraction["texture_resolution"],
+            mesh_extraction["refinement_time"],
+            mesh_extraction["tsdf_voxel_size"],
+            mesh_extraction["tsdf_num_views"],
+            mesh_extraction["output_name"],
+            mesh_extraction["output_format"],
+            mesh_extraction["output_dir"],
+            mesh_extraction["endpoint_id"],
+            mesh_extraction["api_key"],
+        ],
+        outputs=[
+            mesh_extraction["output_path"],
+            mesh_extraction["logs"],
+            mesh_extraction["status"],
+        ],
+    )
+    
+    # Credential save/test buttons
+    mesh_extraction["save_creds_btn"].click(
+        fn=lambda eid, key: save_serverless_credentials(eid, key, "mesh_extraction"),
+        inputs=[mesh_extraction["endpoint_id"], mesh_extraction["api_key"]],
+        outputs=[mesh_extraction["creds_status"], mesh_extraction["creds_group"]],
+    )
+    
+    mesh_extraction["test_creds_btn"].click(
+        fn=check_sugar_status,
+        inputs=[mesh_extraction["endpoint_id"], mesh_extraction["api_key"]],
+        outputs=[mesh_extraction["creds_status"]],
+    )
+    
+    mesh_extraction["edit_creds_btn"].click(
+        fn=lambda: gr.update(visible=True),
+        inputs=[],
+        outputs=[mesh_extraction["creds_group"]],
+    )
+    
+    # Method toggle - show/hide settings accordions
+    def toggle_method_settings(method: str):
+        show_sugar = "SuGaR" in method
+        show_tsdf = "TSDF" in method
+        return gr.update(open=show_sugar), gr.update(open=show_tsdf)
+    
+    mesh_extraction["method"].change(
+        fn=toggle_method_settings,
+        inputs=[mesh_extraction["method"]],
+        outputs=[mesh_extraction["sugar_settings"], mesh_extraction["tsdf_settings"]],
+    )
+    
+    # Auto-fill Blender path from output
+    mesh_extraction["output_path"].change(
+        fn=lambda x: x,
+        inputs=[mesh_extraction["output_path"]],
+        outputs=[mesh_extraction["blender_mesh_path"]],
+    )
+    
+    # PLY file dropdown - refresh and selection handlers
+    from ui.tabs.mesh_extraction_tab import scan_for_ply_files
+    
+    def refresh_ply_dropdown():
+        """Refresh the list of available PLY files."""
+        files = scan_for_ply_files()
+        return gr.update(choices=files)
+    
+    def on_ply_selected(selection: str):
+        """Extract path from dropdown selection (removes size info)."""
+        if selection and " (" in selection:
+            # Remove the " (X.X MB)" suffix
+            return selection.rsplit(" (", 1)[0]
+        return selection or ""
+    
+    mesh_extraction["refresh_btn"].click(
+        fn=refresh_ply_dropdown,
+        inputs=[],
+        outputs=[mesh_extraction["ply_dropdown"]],
+    )
+    
+    mesh_extraction["ply_dropdown"].change(
+        fn=on_ply_selected,
+        inputs=[mesh_extraction["ply_dropdown"]],
+        outputs=[mesh_extraction["input_ply"]],
     )
     
     # --- Clear Queue ---

@@ -39,7 +39,7 @@ TRELLIS_DIR = "/workspace/TRELLIS2"
 CHECKPOINT_DIR = os.environ.get("TRELLIS_CHECKPOINT_DIR", "/runpod-volume/checkpoints/trellis")
 OUTPUT_DIR = "/runpod-volume/outputs/trellis"
 INFERENCE_SCRIPT = "/workspace/trellis_inference.py"
-PYTHON_PATH = "/root/miniforge3/envs/trellis2/bin/python"
+PYTHON_PATH = "/root/miniforge3/envs/cosmos-predict1/bin/python"
 
 # S3 Configuration
 S3_BUCKET = os.environ.get("S3_BUCKET")

@@ -35,8 +35,8 @@ def create_trellis_tab(
     Returns:
         Dictionary of all UI components for event handler binding
     """
-    # Use TRELLIS-specific endpoint, but share the API key
-    trellis_endpoint = TRELLIS_DEFAULT_ENDPOINT_ID
+    # Use provided default (from saved config), fallback to hardcoded if not set
+    trellis_endpoint = default_endpoint_id or TRELLIS_DEFAULT_ENDPOINT_ID
     
     gr.Markdown("""
     **Image → High-Quality 3D with PBR Materials**

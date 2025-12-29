@@ -12,8 +12,17 @@
 #   - TRELLIS.2: Image to 3D with O-Voxel representation (Microsoft)
 #   - SHARP: Image to 3D Gaussian Splatting (Apple)
 #
-# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v9 .
-# Push:  docker push 88dreams/gen3c-runpod:v9
+# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v39 .
+# Push:  docker push 88dreams/gen3c-runpod:v39
+#
+# v23: Updated Lyra dependencies (gsplat commit failed to build)
+# v24: Fixed Lyra validation, reverted gsplat to stable 1.4.0
+# v32: Patch Lyra's gs_deferred.py to work with gsplat 1.4.0 (remove with_ut args)
+# v33: Pre-compile gsplat CUDA extensions during build
+# v34: Rebuild gsplat from source with TORCH_CUDA_ARCH_LIST for all GPU archs
+# v35: Fix nvcc compiler-bindir conflict by setting CC/CXX/CUDAHOSTCXX to system gcc
+# v36: Fix PLY output path detection - search Lyra's default output directories
+# v39: Add SuGaR mesh extraction support (3DGS -> GLB/OBJ)
 #
 # =============================================================================
 
@@ -56,6 +65,9 @@ RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /workspace/
 
 # SHARP (Apple's monocular view synthesis)
 RUN git clone https://github.com/apple/ml-sharp.git /workspace/ml-sharp
+
+# SuGaR (Surface-Aligned Gaussian Splatting for Mesh Extraction)
+RUN git clone --recursive https://github.com/Anttwo/SuGaR.git /workspace/SuGaR
 
 # =============================================================================
 # Install Base Environment (Miniforge + Python 3.10)
@@ -114,13 +126,39 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
         mpi4py==4.1.0 && \
     # Install causal-conv1d (for Mamba)
     pip install --no-cache-dir git+https://github.com/Dao-AILab/causal-conv1d@v1.4.0 && \
-    # Install gsplat (Gaussian splatting renderer) - use v1.4.0 release for CUDA 12 compatibility
+    # Install gsplat - use stable version (specific commit fails to build)
+    # We'll patch Lyra's code to remove unsupported arguments
     pip install --no-cache-dir gsplat==1.4.0 && \
     # Install fused-ssim
     pip install --no-cache-dir git+https://github.com/rahul-goel/fused-ssim/@8bdb59feb7b9a41b1fab625907cb21f5417deaac && \
     # Install Mamba (state space model)
     pip install --no-cache-dir --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4" && \
     echo "✓ Lyra dependencies installed"
+
+# =============================================================================
+# Patch Lyra for gsplat 1.4.0 compatibility
+# The stable gsplat doesn't support 'with_ut' and 'with_eval3d' arguments
+# =============================================================================
+RUN echo "Patching Lyra for gsplat 1.4.0 compatibility..." && \
+    sed -i "s/self.raster_kwargs = {'with_ut': True, 'with_eval3d': True, 'packed': False}/self.raster_kwargs = {'packed': False}/" /workspace/lyra/src/rendering/gs_deferred.py && \
+    sed -i "s/self.raster_kwargs = {'with_ut': False, 'with_eval3d': False, 'packed': False}/self.raster_kwargs = {'packed': False}/" /workspace/lyra/src/rendering/gs_deferred.py && \
+    echo "✓ Lyra patched for gsplat compatibility"
+
+# =============================================================================
+# gsplat CUDA compilation workaround
+# The conda environment has compiler conflicts with nvcc
+# Fix by setting correct compiler paths and environment variables
+# =============================================================================
+ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0"
+ENV TORCH_EXTENSIONS_DIR=/workspace/.torch_extensions
+ENV MAX_JOBS=4
+# Use system compiler instead of conda compiler to avoid nvcc conflicts
+ENV CC=/usr/bin/gcc
+ENV CXX=/usr/bin/g++
+ENV CUDAHOSTCXX=/usr/bin/g++
+
+RUN mkdir -p /workspace/.torch_extensions && \
+    chmod 777 /workspace/.torch_extensions
 
 # =============================================================================
 # Install TRELLIS.2 Dependencies
@@ -189,6 +227,45 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
     echo "✓ SHARP installed"
 
 # =============================================================================
+# Install SuGaR Dependencies
+# =============================================================================
+# SuGaR requires pytorch3d, diff-gaussian-rasterization, simple-knn, open3d, pymcubes
+# Note: CUDA compilation requires system compiler (same fix as gsplat)
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing SuGaR dependencies..." && \
+    # Install pytorch3d (required for mesh operations)
+    pip install --no-cache-dir "pytorch3d>=0.7.4" -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt231/download.html || \
+    pip install --no-cache-dir git+https://github.com/facebookresearch/pytorch3d.git && \
+    # Install open3d for point cloud and mesh processing
+    pip install --no-cache-dir open3d && \
+    # Install pymcubes for marching cubes mesh extraction
+    pip install --no-cache-dir PyMCubes && \
+    echo "✓ SuGaR Python dependencies installed"
+
+# Install SuGaR's Gaussian Splatting CUDA submodules
+# Must use system compiler to avoid nvcc conflicts with conda compiler
+RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing SuGaR CUDA extensions..." && \
+    export CC=/usr/bin/gcc && \
+    export CXX=/usr/bin/g++ && \
+    export CUDAHOSTCXX=/usr/bin/g++ && \
+    export TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0" && \
+    # Patch simple-knn for PyTorch 2.x compatibility (deprecated data<T>() -> data_ptr<T>())
+    sed -i 's/\.data<float>()/\.data_ptr<float>()/g' /workspace/SuGaR/gaussian_splatting/submodules/simple-knn/spatial.cu && \
+    sed -i 's/\.data<float>()/\.data_ptr<float>()/g' /workspace/SuGaR/gaussian_splatting/submodules/simple-knn/simple_knn.cu && \
+    # Patch simple-knn to add missing FLT_MAX include and remove redundant __CUDACC__ define
+    sed -i '1i #include <cfloat>' /workspace/SuGaR/gaussian_splatting/submodules/simple-knn/simple_knn.cu && \
+    sed -i '/#define __CUDACC__/d' /workspace/SuGaR/gaussian_splatting/submodules/simple-knn/simple_knn.cu && \
+    # Install diff-gaussian-rasterization
+    cd /workspace/SuGaR/gaussian_splatting/submodules/diff-gaussian-rasterization && \
+    pip install --no-cache-dir . && \
+    # Install simple-knn
+    cd /workspace/SuGaR/gaussian_splatting/submodules/simple-knn && \
+    pip install --no-cache-dir . && \
+    cd /workspace && \
+    echo "✓ SuGaR CUDA extensions installed"
+
+# =============================================================================
 # Install API Server Dependencies
 # =============================================================================
 RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
@@ -221,12 +298,14 @@ RUN source ~/miniforge3/bin/activate cosmos-predict1 && \
 COPY server_unified.py /workspace/server.py
 COPY handler_unified.py /workspace/handler.py
 COPY start_unified.sh /workspace/start.sh
-RUN chmod +x /workspace/start.sh
+COPY lyra_inference.py /workspace/lyra_inference.py
+COPY sugar_inference.py /workspace/sugar_inference.py
+RUN chmod +x /workspace/start.sh /workspace/lyra_inference.py /workspace/sugar_inference.py
 
 # =============================================================================
 # Environment Variables
 # =============================================================================
-ENV PYTHONPATH="/workspace/GEN3C:/workspace/lyra:/workspace/TRELLIS2:/workspace/ml-sharp/src"
+ENV PYTHONPATH="/workspace/GEN3C:/workspace/lyra:/workspace/TRELLIS2:/workspace/ml-sharp/src:/workspace/SuGaR"
 ENV GEN3C_CHECKPOINT_DIR="/workspace/checkpoints"
 ENV LYRA_CHECKPOINT_DIR="/workspace/checkpoints/lyra"
 ENV TRELLIS_CHECKPOINT_DIR="/workspace/checkpoints/trellis"

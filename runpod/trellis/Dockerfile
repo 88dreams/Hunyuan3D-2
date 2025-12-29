@@ -5,8 +5,14 @@
 # and replaces the handler with a TRELLIS.2-specific one.
 #
 # v2: Rebuild to fix initialization
+# v6: Upgrade transformers for DINOv3ViTModel support
 
 FROM 88dreams/gen3c-runpod:v22
+
+# Upgrade transformers to get DINOv3ViTModel (required by TRELLIS.2)
+# The cosmos-predict1 env has an older version that doesn't include DINOv3
+RUN source /root/miniforge3/bin/activate cosmos-predict1 && \
+    pip install --no-cache-dir --upgrade "transformers>=4.48.0"
 
 # Copy TRELLIS.2-specific handler and scripts
 COPY handler_trellis.py /workspace/handler.py

@@ -238,6 +238,38 @@ elif [ -d "/workspace/volume/checkpoints/trellis" ]; then
     echo "  ✓ TRELLIS checkpoint linked from workspace volume"
 fi
 
+# Lyra checkpoint symlinks
+# Lyra's sample.py uses relative path "checkpoints/Lyra/..." from /workspace/lyra/
+# Our checkpoints are at /workspace/checkpoints/lyra/ (lowercase)
+# We need to create symlinks so both paths work
+if [ -d "/runpod-volume/checkpoints/lyra" ]; then
+    # Link to /workspace/checkpoints/lyra (lowercase)
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/lyra 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/lyra /workspace/checkpoints/lyra
+    
+    # Also create capital-L symlink for Lyra repo's hardcoded paths
+    rm -rf /workspace/checkpoints/Lyra 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/lyra /workspace/checkpoints/Lyra
+    
+    # Create symlink inside /workspace/lyra/ for relative path access
+    mkdir -p /workspace/lyra/checkpoints
+    rm -rf /workspace/lyra/checkpoints/Lyra 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/lyra /workspace/lyra/checkpoints/Lyra
+    
+    echo "  ✓ Lyra checkpoint linked from network volume"
+elif [ -d "/workspace/volume/checkpoints/lyra" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/lyra 2>/dev/null
+    ln -sf /workspace/volume/checkpoints/lyra /workspace/checkpoints/lyra
+    rm -rf /workspace/checkpoints/Lyra 2>/dev/null
+    ln -sf /workspace/volume/checkpoints/lyra /workspace/checkpoints/Lyra
+    mkdir -p /workspace/lyra/checkpoints
+    rm -rf /workspace/lyra/checkpoints/Lyra 2>/dev/null
+    ln -sf /workspace/volume/checkpoints/lyra /workspace/lyra/checkpoints/Lyra
+    echo "  ✓ Lyra checkpoint linked from workspace volume"
+fi
+
 # =============================================================================
 # Verify Models
 # =============================================================================
@@ -269,12 +301,13 @@ else
     echo "  ⚠ SHARP: checkpoint NOT pre-downloaded (will download on first run)"
 fi
 
-# Lyra
-LYRA_SCRIPT="/workspace/lyra/scripts/inference.py"
-if [ -f "$LYRA_SCRIPT" ]; then
-    echo "  ✓ Lyra: inference script found"
+# Lyra (validated by checking for sample.py and lyra.yaml in repo)
+LYRA_SAMPLE="/workspace/lyra/sample.py"
+LYRA_CONFIG="/workspace/lyra/lyra.yaml"
+if [ -f "$LYRA_SAMPLE" ] && [ -f "$LYRA_CONFIG" ]; then
+    echo "  ✓ Lyra: repo validated (sample.py + lyra.yaml)"
 else
-    echo "  ⚠ Lyra: inference script NOT FOUND"
+    echo "  ⚠ Lyra: repo NOT properly configured"
 fi
 
 # TRELLIS.2 checkpoint

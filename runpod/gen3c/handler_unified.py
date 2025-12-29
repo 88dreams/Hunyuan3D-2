@@ -36,6 +36,7 @@ GEN3C_DIR = os.environ.get("GEN3C_DIR", "/workspace/GEN3C")
 SHARP_DIR = os.environ.get("SHARP_DIR", "/workspace/ml-sharp")
 LYRA_DIR = os.environ.get("LYRA_DIR", "/workspace/lyra")
 TRELLIS_DIR = os.environ.get("TRELLIS_DIR", "/workspace/TRELLIS2")
+SUGAR_DIR = os.environ.get("SUGAR_DIR", "/workspace/SuGaR")
 CHECKPOINT_DIR = os.environ.get("GEN3C_CHECKPOINT_DIR", "/workspace/checkpoints")
 SHARP_CHECKPOINT = os.environ.get("SHARP_CHECKPOINT", "/workspace/checkpoints/sharp/sharp_2572gikvuh.pt")
 TRELLIS_CHECKPOINT = os.environ.get("TRELLIS_CHECKPOINT", "/workspace/checkpoints/trellis")
@@ -133,6 +134,8 @@ def upload_file_to_s3_if_large(file_path: str, model: str, filename: str) -> Dic
         "s3_key": None,
     }
     
+    logger.info(f"S3 upload check: file_size={file_size / 1024 / 1024:.1f}MB, MAX={MAX_BASE64_SIZE / 1024 / 1024:.1f}MB, S3_ENABLED={S3_ENABLED}")
+    
     # Only upload to S3 if file is too large for base64
     if file_size > MAX_BASE64_SIZE and S3_ENABLED:
         # Use configured prefix (e.g., MediaContent/outputs/sharp/file.ply)
@@ -142,6 +145,8 @@ def upload_file_to_s3_if_large(file_path: str, model: str, filename: str) -> Dic
             result["uploaded"] = True
             result["s3_url"] = s3_url
             result["s3_key"] = s3_key
+    elif file_size > MAX_BASE64_SIZE and not S3_ENABLED:
+        logger.warning(f"S3 NOT enabled - large file cannot be transferred. S3_BUCKET={S3_BUCKET}, S3_ACCESS_KEY={'set' if S3_ACCESS_KEY else 'NOT SET'}, S3_SECRET_KEY={'set' if S3_SECRET_KEY else 'NOT SET'}")
     
     return result
 
@@ -411,15 +416,39 @@ def run_sharp(
 
 def validate_lyra() -> bool:
     """Check if Lyra environment is available."""
-    # Check if Lyra repo exists - just verify the directory is present
-    # Lyra is built on GEN3C so it shares the same environment
+    # Check if Lyra repo exists
     lyra_exists = os.path.isdir(LYRA_DIR)
+    
+    # Check if lyra_inference.py script exists (our wrapper)
+    inference_script = "/workspace/lyra_inference.py"
+    script_exists = os.path.exists(inference_script)
+    
     if lyra_exists:
         # Check for any Python files or common repo indicators
         has_readme = os.path.exists(os.path.join(LYRA_DIR, "README.md"))
-        has_setup = os.path.exists(os.path.join(LYRA_DIR, "setup.py"))
-        has_pyproject = os.path.exists(os.path.join(LYRA_DIR, "pyproject.toml"))
-        return has_readme or has_setup or has_pyproject
+        has_sample = os.path.exists(os.path.join(LYRA_DIR, "sample.py"))
+        has_yaml = os.path.exists(os.path.join(LYRA_DIR, "lyra.yaml"))
+        repo_valid = has_readme or has_sample or has_yaml
+        
+        if repo_valid:
+            logger.info(f"Lyra repo validated: README={has_readme}, sample.py={has_sample}, lyra.yaml={has_yaml}")
+            return True
+        else:
+            logger.warning(f"Lyra directory exists but missing expected files at {LYRA_DIR}")
+            # List contents for debugging
+            try:
+                contents = os.listdir(LYRA_DIR)[:10]
+                logger.warning(f"Lyra dir contents (first 10): {contents}")
+            except Exception as e:
+                logger.warning(f"Could not list Lyra dir: {e}")
+    else:
+        logger.warning(f"Lyra directory not found: {LYRA_DIR}")
+    
+    # Fallback: if inference script exists, we can still try to run
+    if script_exists:
+        logger.info("Lyra inference script found, marking as available")
+        return True
+    
     return False
 
 
@@ -433,34 +462,100 @@ def run_lyra(
     foreground_masking: bool = True,
     max_gaussians: int = 100000,
     seed: Optional[int] = None,
+    input_video_path: str = None,
 ) -> Dict[str, str]:
     """
     Run Lyra inference for 3D/4D Gaussian Splatting generation.
     
-    NOTE: Lyra requires a complex multi-step pipeline:
+    Lyra is a 2-step pipeline:
     1. SDG (Synthetic Data Generation) - generates multi-view videos using GEN3C
-       Command: torchrun cosmos_predict1/diffusion/inference/gen3c_single_image_sdg.py
     2. 3DGS decoder - reconstructs Gaussian splats
-       Command: accelerate launch sample.py --config configs/demo/lyra_static.yaml
     
-    This is NOT a simple single-script inference like SHARP.
-    Full implementation requires:
-    - Pre-downloaded Lyra checkpoints (~10GB+)
-    - Config files for each mode
-    - Multi-step orchestration with accelerate
-    
-    For now, this returns an error indicating Lyra is not yet fully implemented.
+    This function calls the lyra_inference.py wrapper script which handles both steps.
     """
-    # Lyra is not yet fully implemented for serverless
-    # The repo uses a complex multi-step pipeline that requires significant setup
-    raise RuntimeError(
-        "Lyra is not yet fully implemented for serverless deployment. "
-        "Lyra requires a multi-step pipeline: "
-        "1) SDG (multi-view video generation via GEN3C diffusion), "
-        "2) 3DGS decoder (accelerate launch sample.py with config). "
-        "This requires additional checkpoints (~10GB) and configuration. "
-        "Please use SHARP for fast 3DGS generation, or GEN3C for video generation."
-    )
+    results = {}
+    
+    # Create temp output directory
+    temp_output_dir = tempfile.mkdtemp(prefix="lyra_output_")
+    
+    try:
+        # Build command
+        # Use conda environment's Python
+        python_path = "/root/miniforge3/envs/cosmos-predict1/bin/python"
+        lyra_script = "/workspace/lyra_inference.py"
+        
+        cmd = [
+            python_path,
+            lyra_script,
+            "--output_dir", temp_output_dir,
+            "--output_name", output_name,
+            "--checkpoint_dir", CHECKPOINT_DIR,  # Lyra uses GEN3C checkpoints
+            "--mode", generation_mode,
+            "--movement_factor", str(camera_motion_scale),
+        ]
+        
+        # Add input based on mode
+        if generation_mode == "static":
+            cmd.extend(["--input_image", input_image_path])
+        else:
+            if input_video_path:
+                cmd.extend(["--input_video", input_video_path])
+            else:
+                raise RuntimeError("Dynamic mode requires input_video_path")
+        
+        # Add flags
+        if foreground_masking:
+            cmd.append("--foreground_masking")
+        else:
+            cmd.append("--no_foreground_masking")
+        
+        if multi_trajectory:
+            cmd.append("--multi_trajectory")
+        else:
+            cmd.append("--no_multi_trajectory")
+        
+        logger.info(f"Running Lyra: {' '.join(cmd)}")
+        
+        # Run the inference
+        # Lyra is very slow - SDG (diffusion) + 3DGS (reconstruction) can take 60-90 minutes
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=7200,  # 2 hour timeout for full Lyra pipeline
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"Lyra failed. stderr: {result.stderr[-2000:]}")
+            raise RuntimeError(f"Lyra failed: {result.stderr[-2000:]}")
+        
+        # Find output PLY
+        ply_path = None
+        for root, dirs, files in os.walk(temp_output_dir):
+            for f in files:
+                if f.endswith('.ply'):
+                    ply_path = os.path.join(root, f)
+                    break
+            if ply_path:
+                break
+        
+        if not ply_path:
+            raise RuntimeError("Lyra completed but no PLY file found")
+        
+        # Copy to persistent output location
+        output_dir = os.path.join(OUTPUT_DIR, "lyra")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        final_ply_path = os.path.join(output_dir, f"{output_name}.ply")
+        shutil.copy2(ply_path, final_ply_path)
+        results["ply_path"] = final_ply_path
+        logger.info(f"Lyra PLY saved: {final_ply_path}")
+        
+        return results
+        
+    finally:
+        # Cleanup
+        shutil.rmtree(temp_output_dir, ignore_errors=True)
 
 
 # =============================================================================
@@ -561,6 +656,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         # Determine model type
         model = job_input.get("model", "gen3c").lower()
         
+        # Default to False - PLY/GLB files can be 50-100+ MB which exceeds RunPod's 10MB response limit
+        return_base64 = job_input.get("return_base64", False)
+        
+        # SuGaR uses PLY input, not image - handle separately
+        if model == "sugar":
+            return handle_sugar(job, job_input, "", return_base64)
+        
+        # All other models require image input
         if "image_base64" not in job_input:
             return {"status": "error", "message": "Missing required field: image_base64"}
         
@@ -568,9 +671,6 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(base64.b64decode(job_input["image_base64"]))
             input_path = f.name
-        
-        # Default to False - PLY/GLB files can be 50-100+ MB which exceeds RunPod's 10MB response limit
-        return_base64 = job_input.get("return_base64", False)
         
         try:
             if model == "gen3c":
@@ -582,7 +682,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             elif model == "trellis":
                 return handle_trellis(job, job_input, input_path, return_base64)
             else:
-                return {"status": "error", "message": f"Unknown model: {model}. Supported: gen3c, sharp, lyra, trellis"}
+                return {"status": "error", "message": f"Unknown model: {model}. Supported: gen3c, sharp, lyra, trellis, sugar"}
         finally:
             # Cleanup temp input
             Path(input_path).unlink(missing_ok=True)
@@ -895,6 +995,292 @@ def handle_trellis(job: Dict, job_input: Dict, input_path: str, return_base64: b
 
 
 # =============================================================================
+# SUGAR MESH EXTRACTION
+# =============================================================================
+
+def validate_sugar() -> bool:
+    """Check if SuGaR environment is available."""
+    sugar_exists = os.path.isdir(SUGAR_DIR)
+    
+    if sugar_exists:
+        # Check for key SuGaR files
+        has_pipeline = os.path.exists(os.path.join(SUGAR_DIR, "train_full_pipeline.py"))
+        has_extract = os.path.exists(os.path.join(SUGAR_DIR, "extract_mesh.py"))
+        has_extractors = os.path.isdir(os.path.join(SUGAR_DIR, "sugar_extractors"))
+        
+        if has_pipeline and has_extract and has_extractors:
+            logger.info("SuGaR validated: pipeline, extract_mesh, extractors found")
+            return True
+        else:
+            logger.warning(f"SuGaR directory exists but missing files: pipeline={has_pipeline}, extract={has_extract}, extractors={has_extractors}")
+    else:
+        logger.warning(f"SuGaR directory not found: {SUGAR_DIR}")
+    
+    # Check for sugar_inference.py wrapper
+    if os.path.exists("/workspace/sugar_inference.py"):
+        logger.info("SuGaR inference wrapper found")
+        return True
+    
+    return False
+
+
+def run_sugar(
+    input_ply_path: str,
+    output_name: str,
+    input_format: str = "auto",
+    regularization: str = "dn_consistency",
+    poisson_depth: int = 10,
+    refinement_time: str = "short",
+    target_vertices: int = 1_000_000,
+    export_texture: bool = True,
+    texture_resolution: int = 2048,
+    export_glb: bool = True,
+    export_obj: bool = False,
+) -> Dict[str, str]:
+    """
+    Run SuGaR mesh extraction.
+    
+    Returns:
+        Dictionary with output paths: {"mesh_path": ..., "texture_path": ...}
+    """
+    results = {}
+    
+    # Create temp output directory
+    temp_output_dir = tempfile.mkdtemp(prefix="sugar_output_")
+    
+    try:
+        # Use conda environment's Python
+        python_path = "/root/miniforge3/envs/cosmos-predict1/bin/python"
+        sugar_script = "/workspace/sugar_inference.py"
+        
+        cmd = [
+            python_path,
+            sugar_script,
+            "--input_ply", input_ply_path,
+            "--output_dir", temp_output_dir,
+            "--output_name", output_name,
+            "--regularization", regularization,
+            "--poisson_depth", str(poisson_depth),
+            "--refinement_time", refinement_time,
+            "--target_vertices", str(target_vertices),
+            "--texture_resolution", str(texture_resolution),
+        ]
+        
+        if export_texture:
+            cmd.append("--export_texture")
+        if export_glb:
+            cmd.append("--export_glb")
+        if export_obj:
+            cmd.append("--export_obj")
+        
+        logger.info(f"Running SuGaR: {' '.join(cmd)}")
+        
+        # SuGaR can take 15-60 minutes
+        timeout = 7200 if refinement_time == "long" else (3600 if refinement_time == "medium" else 1800)
+        
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        
+        if proc.returncode != 0:
+            logger.error(f"SuGaR failed: {proc.stderr}")
+            raise RuntimeError(f"SuGaR failed: {proc.stderr[-500:]}")
+        
+        logger.info("SuGaR completed successfully")
+        
+        # Find output files
+        sugar_output_dir = os.path.join(OUTPUT_DIR, "sugar")
+        Path(sugar_output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Look for mesh files
+        for ext in [".glb", ".obj", ".ply"]:
+            mesh_file = os.path.join(temp_output_dir, f"{output_name}{ext}")
+            if os.path.exists(mesh_file):
+                dest_path = os.path.join(sugar_output_dir, f"{output_name}{ext}")
+                shutil.copy2(mesh_file, dest_path)
+                results["mesh_path"] = dest_path
+                logger.info(f"SuGaR mesh saved: {dest_path}")
+                break
+        
+        # Look for texture files
+        for ext in [".png", ".jpg"]:
+            tex_file = os.path.join(temp_output_dir, f"{output_name}_texture{ext}")
+            if os.path.exists(tex_file):
+                dest_path = os.path.join(sugar_output_dir, f"{output_name}_texture{ext}")
+                shutil.copy2(tex_file, dest_path)
+                results["texture_path"] = dest_path
+                break
+        
+        return results
+    
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"SuGaR timeout after {timeout}s")
+    finally:
+        shutil.rmtree(temp_output_dir, ignore_errors=True)
+
+
+def handle_sugar(job: Dict, job_input: Dict, input_path: str, return_base64: bool) -> Dict:
+    """
+    Handle SuGaR mesh extraction job.
+    
+    Note: SuGaR expects a PLY file as input, not an image.
+    Supports three input methods:
+    1. input_ply_path: Direct path on network volume (preferred for large files)
+    2. ply_base64: Base64-encoded PLY data
+    3. Fallback to input_path if neither is provided
+    """
+    if not validate_sugar():
+        return {"status": "error", "message": "SuGaR environment not available"}
+    
+    output_name = job_input.get("output_name", f"sugar_{job.get('id', 'output')}")
+    input_format = job_input.get("input_format", "auto")
+    regularization = job_input.get("regularization", "dn_consistency")
+    poisson_depth = int(job_input.get("poisson_depth", 10))
+    refinement_time = job_input.get("refinement_time", "short")
+    target_vertices = int(job_input.get("target_vertices", 1_000_000))
+    export_texture = job_input.get("export_texture", True)
+    texture_resolution = int(job_input.get("texture_resolution", 2048))
+    export_glb = job_input.get("export_glb", True)
+    export_obj = job_input.get("export_obj", False)
+    
+    logger.info(f"SuGaR job: output_name={output_name}, reg={regularization}, depth={poisson_depth}")
+    
+    # Determine input PLY path - support multiple input methods
+    cleanup_ply = False  # Track if we need to delete the PLY after
+    
+    if "input_s3_url" in job_input:
+        # Download PLY from S3 (for large files uploaded by client)
+        s3_url = job_input["input_s3_url"]
+        logger.info(f"SuGaR downloading PLY from S3...")
+        
+        try:
+            import requests
+            response = requests.get(s3_url, timeout=300)  # 5 min timeout for large files
+            response.raise_for_status()
+            
+            with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as f:
+                f.write(response.content)
+                ply_input_path = f.name
+            
+            file_size_mb = len(response.content) / (1024 * 1024)
+            logger.info(f"SuGaR downloaded {file_size_mb:.1f} MB from S3")
+            cleanup_ply = True
+            
+        except Exception as e:
+            logger.error(f"Failed to download from S3: {e}")
+            return {"status": "error", "message": f"Failed to download PLY from S3: {e}"}
+    
+    elif "input_ply_path" in job_input:
+        # Direct path on network volume (for files already on RunPod)
+        ply_input_path = job_input["input_ply_path"]
+        logger.info(f"SuGaR using network volume path: {ply_input_path}")
+        
+        if not os.path.exists(ply_input_path):
+            # Log what we can see to help debug
+            parent_dir = os.path.dirname(ply_input_path)
+            logger.error(f"PLY file not found: {ply_input_path}")
+            logger.error(f"Parent dir exists: {os.path.exists(parent_dir)}")
+            if os.path.exists(parent_dir):
+                try:
+                    files = os.listdir(parent_dir)
+                    logger.error(f"Files in {parent_dir}: {files[:20]}")  # First 20 files
+                except Exception as e:
+                    logger.error(f"Cannot list {parent_dir}: {e}")
+            
+            return {"status": "error", "message": f"PLY file not found: {ply_input_path}"}
+        
+        cleanup_ply = False  # Don't delete the original file!
+        
+    elif "ply_base64" in job_input:
+        # Decode PLY from base64 to temp file
+        logger.info("SuGaR decoding PLY from base64...")
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as f:
+            f.write(base64.b64decode(job_input["ply_base64"]))
+            ply_input_path = f.name
+        cleanup_ply = True
+        
+    else:
+        # Assume input_path is already a PLY (renamed from .png)
+        ply_input_path = input_path.replace(".png", ".ply")
+        if os.path.exists(input_path):
+            shutil.move(input_path, ply_input_path)
+        cleanup_ply = True
+    
+    try:
+        results = run_sugar(
+            input_ply_path=ply_input_path,
+            output_name=output_name,
+            input_format=input_format,
+            regularization=regularization,
+            poisson_depth=poisson_depth,
+            refinement_time=refinement_time,
+            target_vertices=target_vertices,
+            export_texture=export_texture,
+            texture_resolution=texture_resolution,
+            export_glb=export_glb,
+            export_obj=export_obj,
+        )
+    finally:
+        # Only cleanup temp PLY files, not files from network volume
+        if cleanup_ply:
+            Path(ply_input_path).unlink(missing_ok=True)
+    
+    response = {
+        "status": "success",
+        "message": "Mesh extracted successfully",
+        "model": "sugar",
+        "output_name": output_name,
+    }
+    
+    download_required = False
+    
+    if "mesh_path" in results:
+        mesh_size = os.path.getsize(results["mesh_path"])
+        response["mesh_path"] = results["mesh_path"]
+        response["mesh_name"] = os.path.basename(results["mesh_path"])
+        response["mesh_size"] = mesh_size
+        
+        # Always try base64 for small files (< 8MB)
+        encoded = encode_file_if_small(results["mesh_path"])
+        if encoded:
+            response["mesh_base64"] = encoded
+            logger.info(f"Mesh encoded as base64 ({mesh_size / 1024 / 1024:.1f}MB)")
+        
+        # Try S3 upload for large files that couldn't be base64 encoded
+        if "mesh_base64" not in response:
+            s3_result = upload_file_to_s3_if_large(
+                results["mesh_path"], "sugar", os.path.basename(results["mesh_path"])
+            )
+            if s3_result["uploaded"]:
+                response["mesh_s3_url"] = s3_result["s3_url"]
+                response["message"] = f"Mesh uploaded to S3 ({mesh_size / 1024 / 1024:.1f}MB)"
+            else:
+                download_required = True
+    
+    if "texture_path" in results:
+        tex_size = os.path.getsize(results["texture_path"])
+        response["texture_path"] = results["texture_path"]
+        response["texture_name"] = os.path.basename(results["texture_path"])
+        response["texture_size"] = tex_size
+        
+        # Try S3 for texture
+        s3_result = upload_file_to_s3_if_large(
+            results["texture_path"], "sugar", os.path.basename(results["texture_path"])
+        )
+        if s3_result["uploaded"]:
+            response["texture_s3_url"] = s3_result["s3_url"]
+    
+    if download_required:
+        response["download_required"] = True
+        response["message"] = "Mesh generated but too large for API response. Download from network volume or configure S3."
+    
+    return response
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -904,6 +1290,7 @@ if __name__ == "__main__":
     logger.info(f"SHARP Directory: {SHARP_DIR}")
     logger.info(f"Lyra Directory: {LYRA_DIR}")
     logger.info(f"TRELLIS Directory: {TRELLIS_DIR}")
+    logger.info(f"SuGaR Directory: {SUGAR_DIR}")
     logger.info(f"Checkpoint Directory: {CHECKPOINT_DIR}")
     
     # Validate environments at startup
@@ -911,11 +1298,14 @@ if __name__ == "__main__":
     sharp_ok = validate_sharp()
     lyra_ok = validate_lyra()
     trellis_ok = validate_trellis()
+    sugar_ok = validate_sugar()
     
     logger.info(f"GEN3C available: {gen3c_ok}")
     logger.info(f"SHARP available: {sharp_ok}")
     logger.info(f"Lyra available: {lyra_ok}")
     logger.info(f"TRELLIS.2 available: {trellis_ok}")
+    logger.info(f"SuGaR available: {sugar_ok}")
+    logger.info(f"S3 enabled: {S3_ENABLED} (bucket={S3_BUCKET}, region={S3_REGION}, access_key={'set' if S3_ACCESS_KEY else 'NOT SET'})")
     
     # Start the serverless worker
     runpod.serverless.start({"handler": handler})

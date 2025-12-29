@@ -8,8 +8,8 @@ echo "=============================================="
 echo "TRELLIS.2 RunPod Serverless Worker"
 echo "=============================================="
 
-# Activate conda environment
-source /root/miniforge3/bin/activate trellis2
+# Activate conda environment (uses cosmos-predict1 from unified base image)
+source /root/miniforge3/bin/activate cosmos-predict1
 
 # Check for network volume
 echo "Detecting network volume mount..."
