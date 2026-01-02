@@ -487,8 +487,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # Header
             gr.HTML("""
                 <div class="sidebar-header">
-                    <h2>3D Studio</h2>
-                    <p>Multi-model generation</p>
+                    <h2>ARKRUNR WORLDS</h2>
                 </div>
             """)
             
@@ -526,21 +525,23 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # Create Section
             gr.HTML('<div class="sidebar-category">CREATE</div>')
             
-            nav_sharp = gr.Button("SHARP", elem_classes=["sidebar-nav"])
-            nav_gen3c = gr.Button("GEN3C", elem_classes=["sidebar-nav"])
-            nav_lyra = gr.Button("Lyra", elem_classes=["sidebar-nav"])
-            nav_trellis = gr.Button("TRELLIS.2", elem_classes=["sidebar-nav"])
-            nav_hunyuan = gr.Button("Hunyuan3D", elem_classes=["sidebar-nav"])
+            # Button grid - 2 columns
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_sharp = gr.Button("SHARP", elem_classes=["sidebar-nav"], elem_id="nav-sharp", scale=1)
+                nav_gen3c = gr.Button("GEN3C", elem_classes=["sidebar-nav"], elem_id="nav-gen3c", scale=1)
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_lyra = gr.Button("Lyra", elem_classes=["sidebar-nav"], elem_id="nav-lyra", scale=1)
+                nav_trellis = gr.Button("TRELLIS", elem_classes=["sidebar-nav"], elem_id="nav-trellis", scale=1)
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_hunyuan = gr.Button("Hunyuan", elem_classes=["sidebar-nav"], elem_id="nav-hunyuan", scale=1)
+                nav_mesh = gr.Button("Mesh", elem_classes=["sidebar-nav"], elem_id="nav-mesh", scale=1)
             
-            # Refine Section
-            gr.HTML('<div class="sidebar-category">REFINE</div>')
+            # Refine/Monitor Section combined
+            gr.HTML('<div class="sidebar-category">TOOLS</div>')
             
-            nav_mesh = gr.Button("Mesh Extract", elem_classes=["sidebar-nav"])
-            
-            # Monitor Section
-            gr.HTML('<div class="sidebar-category">MONITOR</div>')
-            
-            nav_settings = gr.Button("Settings", elem_classes=["sidebar-nav"])
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_settings = gr.Button("Settings", elem_classes=["sidebar-nav"], elem_id="nav-settings", scale=1)
+                gr.Column(scale=1, min_width=0)  # Empty spacer
             
             # System metrics at bottom
             gr.HTML('<div class="sidebar-category">SYSTEM</div>')
@@ -548,7 +549,8 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 value="Loading...",
                 show_label=False,
                 interactive=False,
-                max_lines=2,
+                max_lines=4,
+                lines=3,
             )
             
             # Footer
@@ -556,6 +558,48 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 <div class="sidebar-footer">
                     v2.2 • Sidebar UI
                 </div>
+                <script>
+                    // Add click handlers to toggle nav-active state
+                    function setupNavButtons() {
+                        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings'];
+                        let setupDone = false;
+                        
+                        navButtons.forEach(id => {
+                            const btn = document.getElementById(id);
+                            if (btn) {
+                                setupDone = true;
+                                if (!btn.hasAttribute('data-nav-setup')) {
+                                    btn.setAttribute('data-nav-setup', 'true');
+                                    btn.addEventListener('click', function() {
+                                        // Remove active state from all buttons
+                                        navButtons.forEach(bid => {
+                                            const b = document.getElementById(bid);
+                                            if (b) b.setAttribute('data-active', 'false');
+                                        });
+                                        // Add active state to clicked button
+                                        this.setAttribute('data-active', 'true');
+                                    });
+                                }
+                            }
+                        });
+                        
+                        // Set initial active state for SHARP
+                        if (setupDone) {
+                            const sharpBtn = document.getElementById('nav-sharp');
+                            if (sharpBtn && sharpBtn.getAttribute('data-active') !== 'true') {
+                                sharpBtn.setAttribute('data-active', 'true');
+                            }
+                        }
+                    }
+                    // Run setup after Gradio loads
+                    setTimeout(setupNavButtons, 500);
+                    setTimeout(setupNavButtons, 1500);
+                    // Also run on any mutations in case of re-render
+                    const observer = new MutationObserver(function() {
+                        setTimeout(setupNavButtons, 100);
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                </script>
             """)
         
         # =====================================================================

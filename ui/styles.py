@@ -10,29 +10,37 @@ CUSTOM_CSS = """
    Warm cream/yellow palette
    ============================================ */
 
-/* Root Variables - New warm palette */
+/* Root Variables - Dark theme with orange accents */
 :root {
-    --bg-primary: #ffffee;
-    --bg-secondary: #e3f6f5;
-    --bg-tertiary: #bae8e8;
-    --border-color: #272343;
-    --text-primary: #272343;
-    --text-secondary: #2d334a;
-    --text-muted: #4a5568;
-    --accent-primary: #ffd803;
-    --accent-secondary: #e6c200;
-    --accent-glow: rgba(255, 216, 3, 0.3);
+    --bg-primary: #0f0f1a;
+    --bg-secondary: #1a1a2e;
+    --bg-tertiary: #16213e;
+    --border-color: #2a2a4a;
+    --text-primary: #ffffff;
+    --text-secondary: #b0b0b0;
+    --text-muted: #888888;
+    --accent-primary: #ff7c00;
+    --accent-secondary: #ff5500;
+    --accent-glow: rgba(255, 124, 0, 0.3);
     --success: #22c55e;
     --warning: #f59e0b;
     --error: #ef4444;
     --info: #3b82f6;
     
     /* Illustration colors */
-    --stroke: #272343;
-    --main: #fffffe;
-    --highlight: #ffd803;
-    --secondary: #e3f6f5;
-    --tertiary: #bae8e8;
+    --stroke: #2a2a4a;
+    --main: #1a1a2e;
+    --highlight: #ff7c00;
+    --secondary: #1a1a2e;
+    --tertiary: #16213e;
+    
+    /* Button specific */
+    --button-bg: #ff7c00;
+    --button-text: #ffffff;
+    
+    /* Card/Group backgrounds */
+    --card-bg: #1a1a2e;
+    --card-border: #2a2a4a;
     
     /* Base font size increase */
     font-size: 16px;
@@ -82,103 +90,137 @@ CUSTOM_CSS = """
     width: 280px !important;
     min-width: 280px !important;
     max-width: 280px !important;
-    background: linear-gradient(180deg, var(--secondary) 0%, var(--tertiary) 100%) !important;
-    border-right: 2px solid var(--stroke) !important;
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%) !important;
+    border-right: 1px solid var(--border-color) !important;
     display: flex !important;
     flex-direction: column !important;
     height: 100vh !important;
     position: sticky !important;
     top: 0 !important;
     overflow-y: auto !important;
-    padding: 0 8px !important;
+    overflow-x: hidden !important;
+    padding: 0 4px !important;
 }
 
-/* Sidebar Input Section - make image upload larger */
+/* Sidebar Input Section - compact */
 .sidebar .gr-group {
-    padding: 12px !important;
-    margin: 8px 0 !important;
+    padding: 8px !important;
+    margin: 4px 0 !important;
 }
 
 .sidebar .gr-image {
-    min-height: 180px !important;
+    min-height: 140px !important;
 }
 
 .sidebar .gr-image .image-container {
-    min-height: 160px !important;
+    min-height: 120px !important;
 }
 
 .sidebar .upload-container {
-    min-height: 160px !important;
-    padding: 20px !important;
+    min-height: 120px !important;
+    padding: 12px !important;
+}
+
+/* Button grid rows */
+.sidebar .button-grid {
+    gap: 4px !important;
+    padding: 0 4px !important;
+    margin-bottom: 4px !important;
+}
+
+.sidebar .button-grid .gr-button,
+.sidebar .button-grid button {
+    min-width: 0 !important;
+    padding: 10px 6px !important;
+    font-size: 1.0em !important;
 }
 
 .sidebar-header {
-    padding: 20px 16px !important;
-    border-bottom: 1px solid var(--stroke) !important;
-    background: linear-gradient(180deg, var(--main) 0%, var(--secondary) 100%) !important;
+    padding: 12px 12px !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    background: linear-gradient(180deg, #1f1f3a 0%, var(--bg-secondary) 100%) !important;
 }
 
 .sidebar-header h2 {
     margin: 0 !important;
     font-size: 1.3em !important;
-    font-weight: 700 !important;
+    font-weight: 800 !important;
     color: var(--text-primary) !important;
-    letter-spacing: 0.5px !important;
-}
-
-.sidebar-header p {
-    margin: 6px 0 0 0 !important;
-    font-size: 0.9em !important;
-    color: var(--text-muted) !important;
+    letter-spacing: 2px !important;
+    text-transform: uppercase !important;
 }
 
 .sidebar-category {
-    padding: 16px 16px 8px 16px !important;
-    font-size: 0.8em !important;
-    font-weight: 600 !important;
-    color: var(--text-muted) !important;
+    padding: 8px 12px 6px 12px !important;
+    font-size: 1.1em !important;
+    font-weight: 700 !important;
+    color: var(--accent-primary) !important;
     text-transform: uppercase !important;
-    letter-spacing: 1.5px !important;
+    letter-spacing: 2px !important;
+    border-bottom: 2px solid var(--accent-primary) !important;
+    margin: 6px 8px 8px 8px !important;
+    background: linear-gradient(90deg, rgba(255, 124, 0, 0.15) 0%, transparent 100%) !important;
 }
 
 .sidebar-nav button,
 .sidebar button {
     display: flex !important;
     align-items: center !important;
-    width: calc(100% - 16px) !important;
-    margin: 2px 8px !important;
-    padding: 12px 14px !important;
-    border-radius: 8px !important;
-    border: none !important;
-    background: transparent !important;
-    color: var(--text-secondary) !important;
+    justify-content: center !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px 8px !important;
+    border-radius: 6px !important;
+    border: 1px solid var(--border-color) !important;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
     font-size: 1.0em !important;
-    font-weight: 500 !important;
-    text-align: left !important;
+    font-weight: 600 !important;
+    text-align: center !important;
     cursor: pointer !important;
     transition: all 0.15s ease !important;
 }
 
+/* Button grid for CREATE section */
+.sidebar .button-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+    padding: 0 8px !important;
+    margin-bottom: 4px !important;
+}
+
+.sidebar .button-grid button {
+    width: 100% !important;
+    padding: 10px 6px !important;
+    font-size: 0.85em !important;
+}
+
 .sidebar-nav button:hover,
 .sidebar button:hover {
-    background: var(--tertiary) !important;
+    background: rgba(255, 124, 0, 0.15) !important;
+    border-color: var(--accent-primary) !important;
     color: var(--text-primary) !important;
 }
 
 .sidebar-nav button.active,
 .sidebar button.selected,
-.sidebar-nav button[aria-pressed="true"] {
-    background: linear-gradient(90deg, var(--tertiary) 0%, var(--secondary) 100%) !important;
-    color: var(--text-primary) !important;
-    border-left: 3px solid var(--accent-primary) !important;
-    padding-left: 11px !important;
+.sidebar-nav button[aria-pressed="true"],
+.sidebar-nav.active button,
+.sidebar .nav-active,
+.sidebar button:focus,
+.sidebar button[data-active="true"] {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
 }
 
 .sidebar-footer {
     margin-top: auto !important;
-    padding: 16px !important;
+    padding: 8px !important;
     border-top: 1px solid var(--border-color) !important;
-    font-size: 0.85em !important;
+    font-size: 0.75em !important;
     color: var(--text-muted) !important;
     text-align: center !important;
 }
@@ -226,8 +268,8 @@ CUSTOM_CSS = """
    ============================================ */
 
 .card, .gr-group, .gr-box {
-    background: var(--bg-secondary) !important;
-    border: 1px solid var(--border-color) !important;
+    background: var(--card-bg) !important;
+    border: 1px solid var(--card-border) !important;
     border-radius: 12px !important;
     padding: 20px !important;
     margin-bottom: 16px !important;
@@ -264,7 +306,7 @@ input[type="number"],
 textarea,
 .gr-textbox input,
 .gr-textbox textarea {
-    background: var(--main) !important;
+    background: var(--bg-primary) !important;
     border: 1px solid var(--border-color) !important;
     border-radius: 8px !important;
     color: var(--text-primary) !important;
@@ -317,9 +359,9 @@ input[type="radio"] {
 .gr-button-primary,
 button.primary,
 button[variant="primary"] {
-    background: var(--accent-primary) !important;
+    background: var(--button-bg) !important;
     border: 2px solid var(--stroke) !important;
-    color: var(--text-primary) !important;
+    color: var(--button-text) !important;
     font-weight: 600 !important;
     padding: 12px 24px !important;
     border-radius: 8px !important;
@@ -340,9 +382,9 @@ button[variant="primary"]:hover {
 .gr-button-secondary,
 button.secondary,
 button[variant="secondary"] {
-    background: var(--secondary) !important;
-    border: 1px solid var(--stroke) !important;
-    color: var(--text-primary) !important;
+    background: transparent !important;
+    border: 1px solid var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
     font-weight: 500 !important;
     padding: 10px 20px !important;
     border-radius: 8px !important;
@@ -352,7 +394,7 @@ button[variant="secondary"] {
 .gr-button-secondary:hover,
 button.secondary:hover,
 button[variant="secondary"]:hover {
-    background: var(--tertiary) !important;
+    background: rgba(255, 124, 0, 0.1) !important;
 }
 
 /* Stop/Cancel Button */
@@ -405,7 +447,7 @@ button.lg, button[size="lg"] {
 
 .gr-accordion > button:hover,
 .gr-accordion-header:hover {
-    background: var(--tertiary) !important;
+    background: rgba(255, 124, 0, 0.05) !important;
 }
 
 .gr-accordion-content {

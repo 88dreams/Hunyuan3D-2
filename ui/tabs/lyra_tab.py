@@ -341,6 +341,54 @@ def create_lyra_tab(
             )
             
             # -----------------------------------------------------------------
+            # Geometry Visualization (diagnostic tool)
+            # -----------------------------------------------------------------
+            with gr.Accordion("🔍 Visualize Geometry (Diagnostic)", open=False):
+                gr.Markdown("""
+                **Diagnose 3DGS quality** by creating a sparse, color-coded point cloud.
+                
+                This helps you see if the 3D structure is correct before mesh conversion.
+                The output works in Blender, MeshLab, CloudCompare, or SuperSplat.
+                """)
+                
+                with gr.Row():
+                    vis_color_mode = gr.Radio(
+                        choices=["depth", "height", "opacity", "xyz", "original"],
+                        value="depth",
+                        label="Color Mode",
+                        info="depth: blue=near, red=far | height: blue=floor, red=ceiling",
+                    )
+                    vis_num_points = gr.Slider(
+                        minimum=10000, maximum=200000, value=50000, step=10000,
+                        label="Points to Show",
+                        info="Fewer = easier to see structure",
+                    )
+                
+                with gr.Row():
+                    visualize_btn = gr.Button(
+                        "🔬 Create Visualization",
+                        variant="secondary",
+                        size="lg",
+                    )
+                
+                vis_status = gr.Textbox(
+                    value="",
+                    label="Visualization Result",
+                    interactive=False,
+                    lines=4,
+                )
+                
+                gr.Markdown("""
+                **How to interpret:**
+                - ✅ **Good**: Clear floor plane, distinct walls, recognizable room shape
+                - ❌ **Bad**: Scattered points, no structure, everything at same depth
+                
+                **Color meanings (depth mode):**
+                - 🔵 Blue = Near (close to camera)
+                - 🔴 Red = Far (back wall)
+                """)
+            
+            # -----------------------------------------------------------------
             # Blender Export (separate section)
             # -----------------------------------------------------------------
             with gr.Accordion("🎨 Blender Import Helper", open=False):
@@ -427,6 +475,11 @@ def create_lyra_tab(
         "downsample_presets": downsample_presets,
         "convert_btn": convert_btn,
         "convert_status": convert_status,
+        # Geometry visualization controls
+        "vis_color_mode": vis_color_mode,
+        "vis_num_points": vis_num_points,
+        "visualize_btn": visualize_btn,
+        "vis_status": vis_status,
         # Blender components
         "blender_ply_path": blender_ply_path,
         "blender_display_mode": blender_display_mode,

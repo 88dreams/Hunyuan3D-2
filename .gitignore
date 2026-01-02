@@ -176,3 +176,4 @@ weights/
 *.safetensors
 assets/stages/
 inputs/
+.runpod_config.json

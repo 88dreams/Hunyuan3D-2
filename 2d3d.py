@@ -804,6 +804,103 @@ def handle_lyra_ply_conversion(
     return status, pointcloud_path
 
 
+def handle_lyra_geometry_visualization(
+    input_path: str,
+    color_mode: str,
+    num_points: float,
+) -> str:
+    """
+    Create a diagnostic visualization of 3DGS geometry.
+    
+    This helps diagnose whether the 3DGS generation is producing
+    correct geometry before mesh conversion.
+    
+    Args:
+        input_path: Path to Lyra's raw .ply output
+        color_mode: How to color points (depth, height, opacity, xyz, original)
+        num_points: Number of points to include in visualization
+    
+    Returns:
+        Status message with output path and viewing instructions
+    """
+    import subprocess
+    from pathlib import Path
+    
+    if not input_path or not input_path.strip():
+        return "❌ Error: No input PLY path provided"
+    
+    input_path = input_path.strip()
+    if not os.path.exists(input_path):
+        return f"❌ Error: Input file not found: {input_path}"
+    
+    # Get the conversion script path
+    script_path = os.path.join(os.path.dirname(__file__), "scripts", "convert_lyra_ply.py")
+    if not os.path.exists(script_path):
+        return f"❌ Error: Conversion script not found: {script_path}"
+    
+    input_file = Path(input_path)
+    output_path = input_file.parent / f"{input_file.stem}_vis_{color_mode}.ply"
+    
+    try:
+        cmd = [
+            "python", script_path,
+            str(input_path),
+            str(output_path),
+            "--visualize-geometry",
+            "--color-mode", color_mode,
+            "--vis-points", str(int(num_points)),
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        
+        if result.returncode == 0:
+            status_lines = [
+                f"✅ Visualization created: {output_path.name}",
+                "",
+                f"📁 Full path: {output_path}",
+                "",
+                "🔍 Open in Blender, MeshLab, or CloudCompare to inspect geometry.",
+                "",
+                f"🎨 Color mode: {color_mode}",
+            ]
+            
+            if color_mode == "depth":
+                status_lines.extend([
+                    "   🔵 Blue = Near (close to camera)",
+                    "   🔴 Red = Far (back wall)",
+                ])
+            elif color_mode == "height":
+                status_lines.extend([
+                    "   🔵 Blue = Low (floor)",
+                    "   🔴 Red = High (ceiling)",
+                ])
+            elif color_mode == "opacity":
+                status_lines.extend([
+                    "   ⬛ Dark = Low opacity (invisible)",
+                    "   🟨 Bright = High opacity (solid)",
+                ])
+            
+            status_lines.extend([
+                "",
+                "✓ Good geometry: Clear floor, distinct walls, room shape visible",
+                "✗ Bad geometry: Scattered points, no structure, flat blob",
+            ])
+            
+            return "\n".join(status_lines)
+        else:
+            return f"❌ Visualization failed:\n{result.stderr[:500]}"
+            
+    except subprocess.TimeoutExpired:
+        return "❌ Visualization timed out (>2 min)"
+    except Exception as e:
+        return f"❌ Visualization error: {e}"
+
+
 # =============================================================================
 # GRADIO INTERFACE
 # =============================================================================
@@ -1193,6 +1290,17 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             lyra["downsample_presets"],
         ],
         outputs=[lyra["convert_status"], lyra["blender_ply_path"]],
+    )
+    
+    # --- Lyra Geometry Visualization (Diagnostic) ---
+    lyra["visualize_btn"].click(
+        fn=handle_lyra_geometry_visualization,
+        inputs=[
+            lyra["ply_input_path"],
+            lyra["vis_color_mode"],
+            lyra["vis_num_points"],
+        ],
+        outputs=[lyra["vis_status"]],
     )
     
     # --- Lyra Preset Updates (sync sliders with preset selection) ---

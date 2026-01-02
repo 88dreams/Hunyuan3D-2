@@ -391,6 +391,260 @@ def downsample_gaussians(positions, colors, opacities, scales, rotations,
     return positions, colors, opacities, scales, rotations, sh_rest
 
 
+def create_geometry_visualization(positions, colors, opacities, color_mode="depth"):
+    """
+    Create a visualization-friendly version of the point cloud.
+    
+    Color modes:
+    - "depth": Color by Z-depth (blue=near, red=far) - shows depth layers
+    - "height": Color by Y-height (blue=low, red=high) - shows floor/ceiling
+    - "opacity": Color by opacity (dark=low, bright=high)
+    - "original": Keep original colors
+    
+    Returns:
+        Modified colors array for visualization
+    """
+    n = len(positions)
+    
+    if color_mode == "depth":
+        # Color by Z-depth (assumes Z is depth axis)
+        z = positions[:, 2]
+        z_norm = (z - z.min()) / (z.max() - z.min() + 1e-8)
+        
+        # Blue (near) to Red (far) gradient
+        vis_colors = np.zeros((n, 3))
+        vis_colors[:, 0] = z_norm  # Red increases with depth
+        vis_colors[:, 2] = 1 - z_norm  # Blue decreases with depth
+        vis_colors[:, 1] = 0.2  # Small green component
+        
+        print(f"Depth visualization: Z range = [{z.min():.3f}, {z.max():.3f}]")
+        
+    elif color_mode == "height":
+        # Color by Y-height (assumes Y is up)
+        y = positions[:, 1]
+        y_norm = (y - y.min()) / (y.max() - y.min() + 1e-8)
+        
+        # Blue (low/floor) to Red (high/ceiling) gradient
+        vis_colors = np.zeros((n, 3))
+        vis_colors[:, 0] = y_norm  # Red increases with height
+        vis_colors[:, 2] = 1 - y_norm  # Blue decreases with height
+        vis_colors[:, 1] = 0.2
+        
+        print(f"Height visualization: Y range = [{y.min():.3f}, {y.max():.3f}]")
+        
+    elif color_mode == "opacity":
+        # Color by opacity (shows which Gaussians are most visible)
+        op_norm = (opacities - opacities.min()) / (opacities.max() - opacities.min() + 1e-8)
+        
+        # Dark (low opacity) to Bright yellow (high opacity)
+        vis_colors = np.zeros((n, 3))
+        vis_colors[:, 0] = op_norm  # Red
+        vis_colors[:, 1] = op_norm  # Green
+        vis_colors[:, 2] = 0.1  # Low blue
+        
+        print(f"Opacity visualization: range = [{opacities.min():.3f}, {opacities.max():.3f}]")
+        
+    elif color_mode == "xyz":
+        # Color by position (X=red, Y=green, Z=blue) - shows 3D structure
+        pos_min = positions.min(axis=0)
+        pos_max = positions.max(axis=0)
+        pos_norm = (positions - pos_min) / (pos_max - pos_min + 1e-8)
+        
+        vis_colors = pos_norm
+        
+        print(f"XYZ visualization: ranges X=[{pos_min[0]:.3f}, {pos_max[0]:.3f}], "
+              f"Y=[{pos_min[1]:.3f}, {pos_max[1]:.3f}], Z=[{pos_min[2]:.3f}, {pos_max[2]:.3f}]")
+        
+    else:  # "original"
+        vis_colors = colors
+        
+    return vis_colors
+
+
+def write_visualization_ply(output_path: str, positions: np.ndarray, colors: np.ndarray,
+                            point_size_hint: float = None):
+    """
+    Write a visualization PLY with clear, sparse points.
+    
+    This is a simple XYZ+RGB format that works in all viewers:
+    - Blender (import as point cloud)
+    - MeshLab
+    - CloudCompare
+    - Open3D
+    
+    NOTE: Uses binary format for faster loading and better Blender compatibility.
+    """
+    n = positions.shape[0]
+    
+    # Convert colors to 0-255 range
+    colors_uint8 = (np.clip(colors, 0, 1) * 255).astype(np.uint8)
+    
+    # Use binary format - better compatibility with Blender vertex colors
+    header = f"""ply
+format binary_little_endian 1.0
+comment Geometry visualization - {n} points
+comment Color mode shows depth/structure
+comment Open in Blender: Material Preview mode, Base Color = Attribute "Col"
+element vertex {n}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header
+"""
+    
+    # Write binary format for better Blender compatibility
+    with open(output_path, 'wb') as f:
+        f.write(header.encode('ascii'))
+        
+        # Pack data: x, y, z (float32), r, g, b (uint8)
+        for i in range(n):
+            # Write position as 3 floats
+            f.write(struct.pack('<fff', positions[i, 0], positions[i, 1], positions[i, 2]))
+            # Write color as 3 bytes
+            f.write(struct.pack('<BBB', colors_uint8[i, 0], colors_uint8[i, 1], colors_uint8[i, 2]))
+    
+    print(f"Wrote visualization PLY: {output_path}")
+    print(f"  Points: {n:,}")
+    print(f"  Format: Binary (fast loading, Blender compatible)")
+
+
+def visualize_geometry(input_path: str, output_path: str, 
+                       num_points: int = 50000,
+                       color_mode: str = "depth",
+                       min_opacity: float = 0.0):
+    """
+    Create a diagnostic visualization of 3DGS geometry.
+    
+    This aggressively downsamples and recolors the point cloud
+    to reveal the underlying 3D structure.
+    
+    Args:
+        input_path: Path to Lyra PLY file
+        output_path: Path to write visualization PLY
+        num_points: Number of points to keep (default 50k for clear viewing)
+        color_mode: How to color points ("depth", "height", "opacity", "xyz", "original")
+        min_opacity: Filter out low-opacity Gaussians first (default 0 = no filter)
+    """
+    print("=" * 60)
+    print("GEOMETRY VISUALIZATION MODE")
+    print("=" * 60)
+    print(f"Input: {input_path}")
+    print(f"Output: {output_path}")
+    print(f"Target points: {num_points:,}")
+    print(f"Color mode: {color_mode}")
+    print(f"Min opacity filter: {min_opacity}")
+    print("=" * 60)
+    
+    # Load Gaussians
+    print("\nLoading Gaussians...")
+    gaussians = load_lyra_gaussians(input_path)
+    positions, colors, opacities, scales, rotations, sh_rest = gaussians_to_ply_data(gaussians)
+    
+    original_count = len(positions)
+    print(f"\nOriginal: {original_count:,} Gaussians")
+    
+    # Check opacity range to understand the data
+    print(f"\nOpacity range: [{opacities.min():.4f}, {opacities.max():.4f}], mean: {opacities.mean():.4f}")
+    
+    # Step 1: Filter by opacity (only if threshold is set)
+    if min_opacity > 0:
+        print(f"\nStep 1: Filtering by opacity >= {min_opacity}...")
+        opacity_mask = opacities >= min_opacity
+        positions = positions[opacity_mask]
+        colors = colors[opacity_mask]
+        opacities = opacities[opacity_mask]
+        print(f"  After opacity filter: {len(positions):,} ({100*len(positions)/original_count:.1f}%)")
+    else:
+        print(f"\nStep 1: Skipping opacity filter (keeping all {len(positions):,} points)")
+    
+    # Step 2: Downsample to target
+    if len(positions) > num_points:
+        print(f"\nStep 2: Downsampling to {num_points:,} points...")
+        np.random.seed(42)
+        indices = np.random.choice(len(positions), size=num_points, replace=False)
+        positions = positions[indices]
+        colors = colors[indices]
+        opacities = opacities[indices]
+        print(f"  After downsample: {len(positions):,}")
+    
+    # Step 3: Create visualization colors
+    print(f"\nStep 3: Creating {color_mode} visualization...")
+    vis_colors = create_geometry_visualization(positions, colors, opacities, color_mode)
+    
+    # Step 4: Write output
+    print(f"\nStep 4: Writing visualization PLY...")
+    write_visualization_ply(output_path, positions, vis_colors)
+    
+    # Print viewing instructions
+    print("\n" + "=" * 60)
+    print("VIEWING INSTRUCTIONS")
+    print("=" * 60)
+    print("""
+The output file can be viewed in:
+
+1. BLENDER:
+   - File → Import → Stanford (.ply)
+   - In viewport, press Z → Material Preview to see colors
+   - Use scroll wheel to zoom, middle-mouse to rotate
+
+2. MESHLAB:
+   - File → Import Mesh
+   - Colors should show automatically
+
+3. CLOUDCOMPARE:
+   - File → Open
+   - Colors should show automatically
+
+4. SUPERSPLAT (web):
+   - https://playcanvas.com/supersplat/editor
+   - Drag and drop the file
+
+COLOR INTERPRETATION:
+""")
+    
+    if color_mode == "depth":
+        print("  BLUE = Near (close to camera)")
+        print("  RED  = Far (away from camera)")
+        print("  → Look for distinct depth layers (floor, walls, objects)")
+    elif color_mode == "height":
+        print("  BLUE = Low (floor level)")
+        print("  RED  = High (ceiling level)")
+        print("  → Look for floor plane and ceiling")
+    elif color_mode == "opacity":
+        print("  DARK   = Low opacity (less visible)")
+        print("  BRIGHT = High opacity (more visible)")
+        print("  → Bright areas are the 'solid' parts of the scene")
+    elif color_mode == "xyz":
+        print("  RED   = X position")
+        print("  GREEN = Y position")
+        print("  BLUE  = Z position")
+        print("  → Shows overall 3D structure")
+    
+    print("\n" + "=" * 60)
+    print("WHAT TO LOOK FOR")
+    print("=" * 60)
+    print("""
+GOOD GEOMETRY (3DGS is working):
+  ✓ Clear floor plane (flat layer of one color)
+  ✓ Distinct walls (vertical surfaces)
+  ✓ Recognizable room shape
+  ✓ Objects at correct depths
+  ✓ Depth layers match your source image
+
+BAD GEOMETRY (3DGS has problems):
+  ✗ Scattered points with no structure
+  ✗ Everything at similar depth (flat)
+  ✗ No clear floor/walls
+  ✗ Blobs instead of surfaces
+  ✗ Points don't match source image layout
+""")
+    
+    return output_path
+
+
 def convert_lyra_ply(input_path: str, output_path: str, simple: bool = False,
                      max_points: int = None, min_opacity: float = None):
     """
@@ -448,11 +702,16 @@ Examples:
   # Simple point cloud for MeshLab/Blender
   python convert_lyra_ply.py input.ply output.ply --simple --max-points 500000
 
+  # DIAGNOSTIC: Visualize geometry structure
+  python convert_lyra_ply.py input.ply --visualize-geometry
+  python convert_lyra_ply.py input.ply --visualize-geometry --color-mode height
+
 Recommended settings by use case:
   - SuperSplat web viewer:  --max-points 500000
   - Local 3DGS viewer:      --max-points 1000000
   - Quick preview:          --max-points 100000 --min-opacity 0.05
   - Full quality:           (no flags)
+  - Geometry diagnosis:     --visualize-geometry
 """
     )
     parser.add_argument("input", help="Input .ply file (Lyra format) or directory")
@@ -467,6 +726,21 @@ Recommended settings by use case:
                         help="Minimum opacity threshold (0.0-1.0). "
                              "Filters out near-invisible Gaussians. Recommended: 0.05-0.1")
     
+    # Visualization options
+    parser.add_argument("--visualize-geometry", action="store_true",
+                        help="Create a diagnostic visualization to inspect 3DGS geometry. "
+                             "Outputs a sparse, color-coded point cloud for easy viewing.")
+    parser.add_argument("--color-mode", type=str, default="depth",
+                        choices=["depth", "height", "opacity", "xyz", "original"],
+                        help="Color mode for --visualize-geometry: "
+                             "depth (blue=near, red=far), "
+                             "height (blue=floor, red=ceiling), "
+                             "opacity (dark=invisible, bright=visible), "
+                             "xyz (position-based RGB), "
+                             "original (keep source colors). Default: depth")
+    parser.add_argument("--vis-points", type=int, default=50000,
+                        help="Number of points for visualization (default: 50000)")
+    
     args = parser.parse_args()
     
     if not TORCH_AVAILABLE:
@@ -475,6 +749,28 @@ Recommended settings by use case:
     
     input_path = Path(args.input)
     
+    # Handle visualization mode
+    if args.visualize_geometry:
+        if not input_path.is_file():
+            print(f"Error: Input file not found: {input_path}")
+            sys.exit(1)
+        
+        # Generate output path
+        if args.output:
+            output_path = args.output
+        else:
+            output_path = str(input_path.with_stem(input_path.stem + f"_vis_{args.color_mode}")) + ".ply"
+        
+        visualize_geometry(
+            str(input_path),
+            output_path,
+            num_points=args.vis_points,
+            color_mode=args.color_mode,
+            min_opacity=args.min_opacity if args.min_opacity else 0.0,  # No opacity filter by default for viz
+        )
+        return
+    
+    # Normal conversion mode
     if input_path.is_file():
         # Single file conversion
         if args.output:

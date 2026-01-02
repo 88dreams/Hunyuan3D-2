@@ -107,8 +107,10 @@ def format_system_metrics(metrics: Dict[str, float]) -> str:
             return f"🟢 {value:.1f}%"
 
     lines = [
-        f"CPU: {color_code(cpu)} | Memory: {color_code(mem)}",
-        f"GPU: {color_code(gpu)} | GPU Memory: {color_code(gpu_mem)}"
+        f"CPU: {color_code(cpu)}",
+        f"Memory: {color_code(mem)}",
+        f"GPU: {color_code(gpu)}",
+        f"GPU Mem: {color_code(gpu_mem)}"
     ]
     return "\n".join(lines)
 
