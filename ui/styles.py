@@ -208,12 +208,18 @@ CUSTOM_CSS = """
 .sidebar-nav button[aria-pressed="true"],
 .sidebar-nav.active button,
 .sidebar .nav-active,
-.sidebar button:focus,
 .sidebar button[data-active="true"] {
     background: var(--accent-primary) !important;
     border-color: var(--accent-primary) !important;
     color: #ffffff !important;
     font-weight: 700 !important;
+}
+
+/* Ensure focus doesn't override active state */
+.sidebar button[data-active="true"]:focus {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    color: #ffffff !important;
 }
 
 .sidebar-footer {
@@ -538,16 +544,63 @@ button[role="tab"][aria-selected="true"],
     background: var(--bg-secondary) !important;
     border: 2px dashed var(--border-color) !important;
     border-radius: 12px !important;
-    transition: all 0.2s ease !important;
+    transition: border-color 0.2s ease !important;
 }
 
 .gr-image:hover, .gr-video:hover {
     border-color: var(--accent-primary) !important;
-    background: rgba(255, 124, 0, 0.03) !important;
 }
 
 .gr-image img, .gr-video video {
     border-radius: 8px !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Ensure uploaded image stays visible - override all Gradio defaults */
+.sidebar .gr-image img,
+.sidebar .gr-image .image-container img,
+.sidebar .gr-image [data-testid="image"] img,
+.sidebar .image-frame img,
+.sidebar [data-testid="image"] img {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    position: relative !important;
+    z-index: 10 !important;
+}
+
+/* Fix for Gradio image preview and all possible containers */
+.sidebar .gr-image .image-preview,
+.sidebar .gr-image .uploaded-image,
+.sidebar .gr-image .preview-image,
+.sidebar .image-frame,
+.sidebar [data-testid="image"],
+.sidebar .gr-image > div,
+.sidebar .gr-image > div > div {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+}
+
+/* Ensure the image container doesn't collapse */
+.sidebar .gr-image,
+.sidebar .gr-image > div {
+    min-height: 100px !important;
+    overflow: visible !important;
+}
+
+/* Override any hover-only visibility */
+.sidebar .gr-image img,
+.sidebar .gr-image:hover img,
+.sidebar .gr-image:not(:hover) img {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 /* ============================================

@@ -558,48 +558,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 <div class="sidebar-footer">
                     v2.2 • Sidebar UI
                 </div>
-                <script>
-                    // Add click handlers to toggle nav-active state
-                    function setupNavButtons() {
-                        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings'];
-                        let setupDone = false;
-                        
-                        navButtons.forEach(id => {
-                            const btn = document.getElementById(id);
-                            if (btn) {
-                                setupDone = true;
-                                if (!btn.hasAttribute('data-nav-setup')) {
-                                    btn.setAttribute('data-nav-setup', 'true');
-                                    btn.addEventListener('click', function() {
-                                        // Remove active state from all buttons
-                                        navButtons.forEach(bid => {
-                                            const b = document.getElementById(bid);
-                                            if (b) b.setAttribute('data-active', 'false');
-                                        });
-                                        // Add active state to clicked button
-                                        this.setAttribute('data-active', 'true');
-                                    });
-                                }
-                            }
-                        });
-                        
-                        // Set initial active state for SHARP
-                        if (setupDone) {
-                            const sharpBtn = document.getElementById('nav-sharp');
-                            if (sharpBtn && sharpBtn.getAttribute('data-active') !== 'true') {
-                                sharpBtn.setAttribute('data-active', 'true');
-                            }
-                        }
-                    }
-                    // Run setup after Gradio loads
-                    setTimeout(setupNavButtons, 500);
-                    setTimeout(setupNavButtons, 1500);
-                    // Also run on any mutations in case of re-render
-                    const observer = new MutationObserver(function() {
-                        setTimeout(setupNavButtons, 100);
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                </script>
             """)
         
         # =====================================================================
@@ -962,14 +920,28 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     # NAVIGATION EVENT HANDLERS
     # =========================================================================
     
+    # JavaScript to highlight active nav button
+    highlight_js = """
+    () => {
+        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings'];
+        navButtons.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.classList.remove('nav-active');
+        });
+        const activeBtn = document.getElementById('%s');
+        if (activeBtn) activeBtn.classList.add('nav-active');
+        return [];
+    }
+    """
+    
     # Navigation buttons - use gr.Tabs.select() to switch tabs
-    nav_sharp.click(fn=lambda: gr.Tabs(selected="sharp"), outputs=[page_tabs])
-    nav_gen3c.click(fn=lambda: gr.Tabs(selected="gen3c"), outputs=[page_tabs])
-    nav_lyra.click(fn=lambda: gr.Tabs(selected="lyra"), outputs=[page_tabs])
-    nav_trellis.click(fn=lambda: gr.Tabs(selected="trellis"), outputs=[page_tabs])
-    nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs])
-    nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs])
-    nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs])
+    nav_sharp.click(fn=lambda: gr.Tabs(selected="sharp"), outputs=[page_tabs], js=highlight_js % 'nav-sharp')
+    nav_gen3c.click(fn=lambda: gr.Tabs(selected="gen3c"), outputs=[page_tabs], js=highlight_js % 'nav-gen3c')
+    nav_lyra.click(fn=lambda: gr.Tabs(selected="lyra"), outputs=[page_tabs], js=highlight_js % 'nav-lyra')
+    nav_trellis.click(fn=lambda: gr.Tabs(selected="trellis"), outputs=[page_tabs], js=highlight_js % 'nav-trellis')
+    nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs], js=highlight_js % 'nav-hunyuan')
+    nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs], js=highlight_js % 'nav-mesh')
+    nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs], js=highlight_js % 'nav-settings')
     
     # =========================================================================
     # IMAGE INPUT HANDLERS
@@ -1228,6 +1200,24 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     timer.tick(
         fn=lambda: format_system_metrics(get_system_metrics()),
         outputs=[system_metrics],
+    )
+    
+    # =========================================================================
+    # INITIAL PAGE LOAD - Highlight SHARP button
+    # =========================================================================
+    
+    demo.load(
+        fn=lambda: None,
+        outputs=None,
+        js="""
+        () => {
+            setTimeout(() => {
+                const sharpBtn = document.getElementById('nav-sharp');
+                if (sharpBtn) sharpBtn.classList.add('nav-active');
+            }, 500);
+            return [];
+        }
+        """
     )
 
 
