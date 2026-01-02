@@ -487,13 +487,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # Header
             gr.HTML("""
                 <div class="sidebar-header">
-                    <h2>🎨 3D Studio</h2>
+                    <h2>3D Studio</h2>
                     <p>Multi-model generation</p>
                 </div>
             """)
             
             # Input Section (always visible)
-            gr.HTML('<div class="sidebar-category">📥 INPUT</div>')
+            gr.HTML('<div class="sidebar-category">INPUT</div>')
             
             input_image = gr.Image(
                 type="filepath",
@@ -524,23 +524,23 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             )
             
             # Create Section
-            gr.HTML('<div class="sidebar-category">🎬 CREATE</div>')
+            gr.HTML('<div class="sidebar-category">CREATE</div>')
             
-            nav_sharp = gr.Button("⚡ SHARP", elem_classes=["sidebar-nav"])
-            nav_gen3c = gr.Button("🎬 GEN3C", elem_classes=["sidebar-nav"])
-            nav_lyra = gr.Button("🌀 Lyra", elem_classes=["sidebar-nav"])
-            nav_trellis = gr.Button("🔷 TRELLIS.2", elem_classes=["sidebar-nav"])
-            nav_hunyuan = gr.Button("🏔️ Hunyuan3D", elem_classes=["sidebar-nav"])
+            nav_sharp = gr.Button("SHARP", elem_classes=["sidebar-nav"])
+            nav_gen3c = gr.Button("GEN3C", elem_classes=["sidebar-nav"])
+            nav_lyra = gr.Button("Lyra", elem_classes=["sidebar-nav"])
+            nav_trellis = gr.Button("TRELLIS.2", elem_classes=["sidebar-nav"])
+            nav_hunyuan = gr.Button("Hunyuan3D", elem_classes=["sidebar-nav"])
             
             # Refine Section
-            gr.HTML('<div class="sidebar-category">🔧 REFINE</div>')
+            gr.HTML('<div class="sidebar-category">REFINE</div>')
             
-            nav_mesh = gr.Button("🔶 Mesh Extract", elem_classes=["sidebar-nav"])
+            nav_mesh = gr.Button("Mesh Extract", elem_classes=["sidebar-nav"])
             
             # Monitor Section
-            gr.HTML('<div class="sidebar-category">📊 MONITOR</div>')
+            gr.HTML('<div class="sidebar-category">MONITOR</div>')
             
-            nav_settings = gr.Button("⚙️ Settings", elem_classes=["sidebar-nav"])
+            nav_settings = gr.Button("Settings", elem_classes=["sidebar-nav"])
             
             # System metrics at bottom
             gr.HTML('<div class="sidebar-category">SYSTEM</div>')
@@ -566,7 +566,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # Output display (shared across all pages)
             with gr.Group():
                 output_display = gr.Textbox(
-                    label="📤 Output",
+                    label="Output",
                     value="Output file path will appear here",
                     interactive=False,
                 )
@@ -587,7 +587,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("SHARP", id="sharp"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>⚡ SHARP</h1>
+                            <h1>SHARP</h1>
                             <p>Apple's fast 3D Gaussian Splatting from a single image. Generates PLY in ~60 seconds.</p>
                         </div>
                     """)
@@ -599,7 +599,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 sharp_output_name = gr.Textbox(value="sharp_output", label="Output Name")
                                 sharp_output_dir = gr.Textbox(value=SHARP_DEFAULT_OUTPUT_DIR, label="Output Directory")
                             
-                            sharp_generate_btn = gr.Button("⚡ Generate PLY", variant="primary", size="lg")
+                            sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
                             sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                         
                         with gr.Column(scale=1):
@@ -618,7 +618,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("GEN3C", id="gen3c"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>🎬 GEN3C</h1>
+                            <h1>GEN3C</h1>
                             <p>NVIDIA's 3D-consistent video generation from a single image. Creates orbital camera videos.</p>
                         </div>
                     """)
@@ -648,7 +648,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 gen3c_video_name = gr.Textbox(value="gen3c_video", label="Video Name")
                                 gen3c_output_dir = gr.Textbox(value=GEN3C_DEFAULT_OUTPUT_DIR, label="Output Directory")
                             
-                            gen3c_generate_btn = gr.Button("🎬 Generate Video", variant="primary", size="lg")
+                            gen3c_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
                             gen3c_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                         
                         with gr.Column(scale=1):
@@ -667,7 +667,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("Lyra", id="lyra"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>🌀 Lyra</h1>
+                            <h1>Lyra</h1>
                             <p>NVIDIA's Image/Video to 3D Gaussian Splatting. High-quality 3DGS with multi-view consistency.</p>
                         </div>
                     """)
@@ -700,7 +700,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         lyra_output_name = gr.Textbox(value="lyra_output", label="Output Name")
                                         lyra_output_dir = gr.Textbox(value=LYRA_DEFAULT_OUTPUT_DIR, label="Output Dir")
                                     
-                                    lyra_generate_btn = gr.Button("🌀 Generate 3DGS", variant="primary", size="lg")
+                                    lyra_generate_btn = gr.Button("Generate 3DGS", variant="primary", size="lg")
                                     lyra_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -735,7 +735,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("TRELLIS.2", id="trellis"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>🔷 TRELLIS.2</h1>
+                            <h1>TRELLIS.2</h1>
                             <p>Microsoft's high-quality 3D generation. Creates detailed GLB meshes from images.</p>
                         </div>
                     """)
@@ -752,7 +752,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 trellis_output_name = gr.Textbox(value="trellis_output", label="Output Name")
                                 trellis_output_dir = gr.Textbox(value=TRELLIS_DEFAULT_OUTPUT_DIR, label="Output Dir")
                             
-                            trellis_generate_btn = gr.Button("🔷 Generate 3D", variant="primary", size="lg")
+                            trellis_generate_btn = gr.Button("Generate 3D", variant="primary", size="lg")
                             trellis_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                         
                         with gr.Column(scale=1):
@@ -771,7 +771,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("Hunyuan3D", id="hunyuan"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>🏔️ Hunyuan3D</h1>
+                            <h1>Hunyuan3D</h1>
                             <p>Tencent's image-to-3D mesh generation. Creates GLB meshes directly from images.</p>
                         </div>
                     """)
@@ -798,7 +798,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 hunyuan_output_dir = gr.Textbox(value="/srv/searidge_share/outputs/hunyuan", label="Output Dir")
                             
                             hunyuan_exec_mode = gr.Radio(["RunPod Serverless", "Local"], value="RunPod Serverless", label="Mode", visible=False)
-                            hunyuan_generate_btn = gr.Button("🏔️ Generate Mesh", variant="primary", size="lg")
+                            hunyuan_generate_btn = gr.Button("Generate Mesh", variant="primary", size="lg")
                             hunyuan_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                         
                         with gr.Column(scale=1):
@@ -817,7 +817,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("Mesh", id="mesh"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>🔶 Mesh Extraction</h1>
+                            <h1>Mesh Extraction</h1>
                             <p>Convert 3D Gaussian Splatting to GLB mesh using Poisson surface reconstruction.</p>
                         </div>
                     """)
@@ -848,7 +848,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 mesh_output_format = gr.Dropdown(["GLB", "OBJ", "PLY"], value="GLB", label="Format")
                             mesh_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Directory")
                             
-                            mesh_extract_btn = gr.Button("🔶 Extract Mesh", variant="primary", size="lg")
+                            mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
                             mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                         
                         with gr.Column(scale=1):
@@ -867,7 +867,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("Settings", id="settings"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>⚙️ Settings</h1>
+                            <h1>Settings</h1>
                             <p>Manage RunPod credentials and system configuration.</p>
                         </div>
                     """)
@@ -875,6 +875,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.Markdown("### RunPod Endpoints")
                     gr.Markdown("Configure API credentials for each model. Credentials are saved locally.")
                     
+                    # All accordions open by default for full visibility
                     with gr.Accordion("GEN3C / SHARP / Lyra / Mesh (Unified Endpoint)", open=True):
                         with gr.Row():
                             settings_gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
@@ -884,7 +885,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
                         settings_gen3c_status = gr.Textbox(value="", interactive=False, max_lines=1)
                     
-                    with gr.Accordion("TRELLIS.2 (Separate Endpoint)", open=False):
+                    with gr.Accordion("TRELLIS.2 (Separate Endpoint)", open=True):
                         with gr.Row():
                             settings_trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint ID")
                             settings_trellis_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
@@ -893,7 +894,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
                         settings_trellis_status = gr.Textbox(value="", interactive=False, max_lines=1)
                     
-                    with gr.Accordion("Hunyuan3D (Separate Endpoint)", open=False):
+                    with gr.Accordion("Hunyuan3D (Separate Endpoint)", open=True):
                         with gr.Row():
                             settings_hunyuan_endpoint = gr.Textbox(value=DEFAULT_HUNYUAN_ENDPOINT, label="Endpoint ID")
                             settings_hunyuan_key = gr.Textbox(value=DEFAULT_HUNYUAN_API_KEY, label="API Key", type="password")
@@ -902,16 +903,16 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             settings_hunyuan_save = gr.Button("Save", size="sm", variant="primary")
                         settings_hunyuan_status = gr.Textbox(value="", interactive=False, max_lines=1)
                     
-                    gr.Markdown("### AWS S3 (Large File Transfers)")
-                    aws_configured = "✅ Configured" if os.environ.get("AWS_ACCESS_KEY_ID") else "⚠️ Not configured"
-                    gr.Textbox(value=aws_configured, label="Status", interactive=False)
-                    gr.Markdown("""
-                    S3 is used for files >30MB. Configure in `~/.config/3d_studio/aws_credentials.env`:
-                    ```
-                    AWS_ACCESS_KEY_ID=your_key
-                    AWS_SECRET_ACCESS_KEY=your_secret
-                    ```
-                    """)
+                    with gr.Accordion("AWS S3 (Large File Transfers)", open=True):
+                        aws_configured = "Configured" if os.environ.get("AWS_ACCESS_KEY_ID") else "Not configured"
+                        gr.Textbox(value=aws_configured, label="Status", interactive=False)
+                        gr.Markdown("""
+                        S3 is used for files >30MB. Configure in `~/.config/3d_studio/aws_credentials.env`:
+                        ```
+                        AWS_ACCESS_KEY_ID=your_key
+                        AWS_SECRET_ACCESS_KEY=your_secret
+                        ```
+                        """)
     
     # =========================================================================
     # NAVIGATION EVENT HANDLERS

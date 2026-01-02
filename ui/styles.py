@@ -1,30 +1,41 @@
 """
 CSS Styles for 3D Generation Studio
 
-Modern sidebar-based interface with dark theme and orange accents.
+Modern sidebar-based interface with warm cream/yellow theme.
 """
 
 CUSTOM_CSS = """
 /* ============================================
    3D Generation Studio - Sidebar UI Theme
+   Warm cream/yellow palette
    ============================================ */
 
-/* Root Variables */
+/* Root Variables - New warm palette */
 :root {
-    --bg-primary: #0f0f1a;
-    --bg-secondary: #1a1a2e;
-    --bg-tertiary: #16213e;
-    --border-color: #2a2a4a;
-    --text-primary: #ffffff;
-    --text-secondary: #b0b0b0;
-    --text-muted: #666666;
-    --accent-primary: #ff7c00;
-    --accent-secondary: #ff5500;
-    --accent-glow: rgba(255, 124, 0, 0.3);
+    --bg-primary: #ffffee;
+    --bg-secondary: #e3f6f5;
+    --bg-tertiary: #bae8e8;
+    --border-color: #272343;
+    --text-primary: #272343;
+    --text-secondary: #2d334a;
+    --text-muted: #4a5568;
+    --accent-primary: #ffd803;
+    --accent-secondary: #e6c200;
+    --accent-glow: rgba(255, 216, 3, 0.3);
     --success: #22c55e;
     --warning: #f59e0b;
     --error: #ef4444;
     --info: #3b82f6;
+    
+    /* Illustration colors */
+    --stroke: #272343;
+    --main: #fffffe;
+    --highlight: #ffd803;
+    --secondary: #e3f6f5;
+    --tertiary: #bae8e8;
+    
+    /* Base font size increase */
+    font-size: 16px;
 }
 
 /* Global Container */
@@ -71,8 +82,8 @@ CUSTOM_CSS = """
     width: 280px !important;
     min-width: 280px !important;
     max-width: 280px !important;
-    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%) !important;
-    border-right: 1px solid var(--border-color) !important;
+    background: linear-gradient(180deg, var(--secondary) 0%, var(--tertiary) 100%) !important;
+    border-right: 2px solid var(--stroke) !important;
     display: flex !important;
     flex-direction: column !important;
     height: 100vh !important;
@@ -103,27 +114,27 @@ CUSTOM_CSS = """
 
 .sidebar-header {
     padding: 20px 16px !important;
-    border-bottom: 1px solid var(--border-color) !important;
-    background: linear-gradient(180deg, #1f1f3a 0%, var(--bg-secondary) 100%) !important;
+    border-bottom: 1px solid var(--stroke) !important;
+    background: linear-gradient(180deg, var(--main) 0%, var(--secondary) 100%) !important;
 }
 
 .sidebar-header h2 {
     margin: 0 !important;
-    font-size: 1.2em !important;
+    font-size: 1.3em !important;
     font-weight: 700 !important;
-    color: var(--accent-primary) !important;
+    color: var(--text-primary) !important;
     letter-spacing: 0.5px !important;
 }
 
 .sidebar-header p {
     margin: 6px 0 0 0 !important;
-    font-size: 0.8em !important;
+    font-size: 0.9em !important;
     color: var(--text-muted) !important;
 }
 
 .sidebar-category {
     padding: 16px 16px 8px 16px !important;
-    font-size: 0.7em !important;
+    font-size: 0.8em !important;
     font-weight: 600 !important;
     color: var(--text-muted) !important;
     text-transform: uppercase !important;
@@ -141,7 +152,7 @@ CUSTOM_CSS = """
     border: none !important;
     background: transparent !important;
     color: var(--text-secondary) !important;
-    font-size: 0.9em !important;
+    font-size: 1.0em !important;
     font-weight: 500 !important;
     text-align: left !important;
     cursor: pointer !important;
@@ -150,15 +161,15 @@ CUSTOM_CSS = """
 
 .sidebar-nav button:hover,
 .sidebar button:hover {
-    background: rgba(255, 124, 0, 0.1) !important;
+    background: var(--tertiary) !important;
     color: var(--text-primary) !important;
 }
 
 .sidebar-nav button.active,
 .sidebar button.selected,
 .sidebar-nav button[aria-pressed="true"] {
-    background: linear-gradient(90deg, rgba(255, 124, 0, 0.2) 0%, rgba(255, 124, 0, 0.05) 100%) !important;
-    color: var(--accent-primary) !important;
+    background: linear-gradient(90deg, var(--tertiary) 0%, var(--secondary) 100%) !important;
+    color: var(--text-primary) !important;
     border-left: 3px solid var(--accent-primary) !important;
     padding-left: 11px !important;
 }
@@ -167,7 +178,7 @@ CUSTOM_CSS = """
     margin-top: auto !important;
     padding: 16px !important;
     border-top: 1px solid var(--border-color) !important;
-    font-size: 0.75em !important;
+    font-size: 0.85em !important;
     color: var(--text-muted) !important;
     text-align: center !important;
 }
@@ -198,7 +209,7 @@ CUSTOM_CSS = """
 
 .page-header h1 {
     margin: 0 !important;
-    font-size: 1.6em !important;
+    font-size: 1.8em !important;
     font-weight: 700 !important;
     color: var(--text-primary) !important;
 }
@@ -206,7 +217,7 @@ CUSTOM_CSS = """
 .page-header p {
     margin: 10px 0 0 0 !important;
     color: var(--text-secondary) !important;
-    font-size: 0.95em !important;
+    font-size: 1.05em !important;
     line-height: 1.5 !important;
 }
 
@@ -232,13 +243,13 @@ CUSTOM_CSS = """
 
 .card-header h3 {
     margin: 0 !important;
-    font-size: 1.1em !important;
+    font-size: 1.2em !important;
     font-weight: 600 !important;
     color: var(--text-primary) !important;
 }
 
 .card-header .icon {
-    font-size: 1.3em !important;
+    font-size: 1.4em !important;
     margin-right: 10px !important;
 }
 
@@ -253,12 +264,12 @@ input[type="number"],
 textarea,
 .gr-textbox input,
 .gr-textbox textarea {
-    background: var(--bg-primary) !important;
+    background: var(--main) !important;
     border: 1px solid var(--border-color) !important;
     border-radius: 8px !important;
     color: var(--text-primary) !important;
     padding: 10px 14px !important;
-    font-size: 0.9em !important;
+    font-size: 1.0em !important;
     transition: border-color 0.2s ease !important;
 }
 
@@ -274,7 +285,7 @@ textarea:focus {
 /* Labels */
 label, .gr-input-label {
     color: var(--text-secondary) !important;
-    font-size: 0.85em !important;
+    font-size: 0.95em !important;
     font-weight: 500 !important;
     margin-bottom: 6px !important;
 }
@@ -306,13 +317,13 @@ input[type="radio"] {
 .gr-button-primary,
 button.primary,
 button[variant="primary"] {
-    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%) !important;
-    border: none !important;
-    color: white !important;
+    background: var(--accent-primary) !important;
+    border: 2px solid var(--stroke) !important;
+    color: var(--text-primary) !important;
     font-weight: 600 !important;
     padding: 12px 24px !important;
     border-radius: 8px !important;
-    font-size: 0.95em !important;
+    font-size: 1.05em !important;
     transition: all 0.2s ease !important;
     cursor: pointer !important;
 }
@@ -322,15 +333,16 @@ button.primary:hover,
 button[variant="primary"]:hover {
     transform: translateY(-1px) !important;
     box-shadow: 0 4px 16px var(--accent-glow) !important;
+    background: var(--accent-secondary) !important;
 }
 
 /* Secondary Button */
 .gr-button-secondary,
 button.secondary,
 button[variant="secondary"] {
-    background: transparent !important;
-    border: 1px solid var(--accent-primary) !important;
-    color: var(--accent-primary) !important;
+    background: var(--secondary) !important;
+    border: 1px solid var(--stroke) !important;
+    color: var(--text-primary) !important;
     font-weight: 500 !important;
     padding: 10px 20px !important;
     border-radius: 8px !important;
@@ -340,7 +352,7 @@ button[variant="secondary"] {
 .gr-button-secondary:hover,
 button.secondary:hover,
 button[variant="secondary"]:hover {
-    background: rgba(255, 124, 0, 0.1) !important;
+    background: var(--tertiary) !important;
 }
 
 /* Stop/Cancel Button */
@@ -361,13 +373,13 @@ button[variant="stop"]:hover {
 /* Small Buttons */
 button.sm, button[size="sm"] {
     padding: 6px 12px !important;
-    font-size: 0.8em !important;
+    font-size: 0.9em !important;
 }
 
 /* Large Buttons */
 button.lg, button[size="lg"] {
     padding: 14px 28px !important;
-    font-size: 1.05em !important;
+    font-size: 1.15em !important;
 }
 
 /* ============================================
@@ -386,13 +398,14 @@ button.lg, button[size="lg"] {
     background: transparent !important;
     color: var(--text-primary) !important;
     font-weight: 600 !important;
+    font-size: 1.0em !important;
     padding: 14px 16px !important;
     border-radius: 12px 12px 0 0 !important;
 }
 
 .gr-accordion > button:hover,
 .gr-accordion-header:hover {
-    background: rgba(255, 124, 0, 0.05) !important;
+    background: var(--tertiary) !important;
 }
 
 .gr-accordion-content {
