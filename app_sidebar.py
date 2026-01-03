@@ -1092,21 +1092,24 @@ Output Format: GLB (preserves textures)
                         """)
                     
                     # Gen3C Documentation
-                    with gr.Accordion("GEN3C - Video-to-3D Generation", open=False):
+                    with gr.Accordion("GEN3C - Image-to-Video with Camera Control", open=False):
                         gr.Markdown("""
 ## GEN3C (NVIDIA)
 
-**What it does:** Gen3C generates 3D Gaussian Splats from video input using camera pose estimation and multi-view synthesis. It creates immersive 3D scenes that can be rendered from novel viewpoints, ideal for walkthrough-style content.
+**What it does:** Gen3C generates **videos from single images** with precise camera control and 3D consistency. It uses a 3D cache (point clouds from depth prediction) to maintain spatial coherence as the camera moves through the scene. The model excels at creating smooth, realistic camera movements while keeping the scene consistent.
+
+**Key capability:** Unlike other video generators, Gen3C maintains 3D consistency by using depth-based point clouds to guide generation. This means objects stay in place as the camera moves, rather than morphing or popping in/out.
 
 ### Key Settings
 
 | Setting | Description | Range | Default |
 |---------|-------------|-------|---------|
 | **Seed** | Random seed for reproducibility | 0-999999 | 42 |
-| **Num Frames** | Number of video frames to process | 8-64 | 16 |
-| **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 7.5 |
-| **Camera Motion** | Predefined camera path type | orbit/zoom/pan | orbit |
-| **Output Format** | 3DGS PLY or video | ply/mp4 | ply |
+| **Num Frames** | Output video length (121*N - 1 pattern) | 121-361+ | 121 |
+| **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 1.0 |
+| **Trajectory** | Camera movement pattern | left/right/up/down/zoom_in/zoom_out/clockwise/counterclockwise | left |
+| **Camera Rotation** | Rotation angle in degrees | 0-360 | varies |
+| **Movement Distance** | How far camera moves | 0.1-2.0 | varies |
 
 ### Architectural Interior Settings
 
@@ -1114,19 +1117,21 @@ For architectural interiors with Gen3C:
 
 ```
 Seed: Fixed for consistency
-Num Frames: 32-48 (more frames = smoother reconstruction)
-Guidance Scale: 8.0-10.0
-Camera Motion: orbit (for room centers) or pan (for corridors)
-Output Format: PLY (for 3DGS editing)
+Num Frames: 121 (or 241 for longer tours)
+Guidance Scale: 1.0 (default works well)
+Trajectory: clockwise or counterclockwise (for room tours)
+           zoom_out (to reveal full space)
+           left/right (for corridor walkthroughs)
 ```
 
 **Tips for Architectural Interiors:**
-- Input video should have smooth, steady camera movement
-- Orbit shots around room center work best
-- Avoid fast movements or motion blur
-- 5-10 second clips are ideal
-- Works excellently for capturing spatial relationships
-- Best for living rooms, lobbies, and open-plan spaces
+- Use high-quality input images (1024x1024+) with good depth cues
+- Clockwise/counterclockwise trajectories create room tour effect
+- Zoom_out reveals the full space from a detail shot
+- Works best with images that have clear foreground/background separation
+- Enable foreground_masking for better depth handling
+- Ideal for: virtual tours, real estate walkthroughs, design visualization
+- Output is VIDEO (mp4), not 3D model - use Lyra for 3DGS output
                         """)
                     
                     # Lyra Documentation
@@ -1254,7 +1259,7 @@ Output Format: GLB (for textured meshes)
                         gr.Markdown("""
 ## MESH Extraction
 
-**What it does:** Converts 3D Gaussian Splat (3DGS) files to traditional mesh formats (GLB/OBJ) using Poisson surface reconstruction. This allows 3DGS outputs from Lyra, Gen3C, or other sources to be used in standard 3D software.
+**What it does:** Converts 3D Gaussian Splat (3DGS) files to traditional mesh formats (GLB/OBJ) using Poisson surface reconstruction. This allows 3DGS outputs from Lyra, SHARP, or other sources to be used in standard 3D software.
 
 ### Key Settings
 
@@ -1294,8 +1299,9 @@ Output Format: GLB (preserves vertex colors as texture)
 
 | Task | Recommended Model | Why |
 |------|-------------------|-----|
-| **Single room photo → 3D** | SHARP or Lyra | High detail, good texture preservation |
-| **Walkthrough video → 3D** | Gen3C | Captures spatial relationships |
+| **Single room photo → 3D mesh** | SHARP | Fast, high detail, direct GLB output |
+| **Single room photo → 3DGS** | Lyra | Best 3D Gaussian Splat quality |
+| **Virtual tour video from photo** | Gen3C | Camera-controlled video with 3D consistency |
 | **Furniture generation** | Hunyuan3D | Text-to-3D for custom pieces |
 | **Clean mesh output** | TRELLIS.2 | Best topology for editing |
 | **3DGS to mesh** | MESH tab | Poisson reconstruction |
@@ -1310,11 +1316,12 @@ Output Format: GLB (preserves vertex colors as texture)
 
 ### Recommended Workflow for Complete Rooms
 
-1. **Capture:** Take multiple photos from different angles
-2. **Generate:** Use Lyra or Gen3C for initial 3DGS
-3. **Convert:** Use MESH tab to create editable mesh
-4. **Enhance:** Add furniture with Hunyuan3D or TRELLIS.2
-5. **Composite:** Combine in Blender or Unity
+1. **Capture:** Take high-quality photos from key angles
+2. **Generate 3D:** Use SHARP or Lyra for 3D reconstruction
+3. **Create Video:** Use Gen3C to create walkthrough videos from photos
+4. **Convert:** Use MESH tab to convert 3DGS to editable mesh
+5. **Enhance:** Add furniture with Hunyuan3D or TRELLIS.2
+6. **Composite:** Combine in Blender or Unity
 
 ### Output Format Guide
 
