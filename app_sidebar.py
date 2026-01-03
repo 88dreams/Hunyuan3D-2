@@ -554,6 +554,8 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             with gr.Row(elem_classes=["button-grid"]):
                 nav_settings = gr.Button("Settings", elem_classes=["sidebar-nav"], elem_id="nav-settings", scale=1)
                 nav_update = gr.Button("Update", elem_classes=["sidebar-nav"], elem_id="nav-update", scale=1)
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_help = gr.Button("Help", elem_classes=["sidebar-nav"], elem_id="nav-help", scale=1)
             
             # System metrics at bottom
             gr.HTML('<div class="sidebar-category">SYSTEM</div>')
@@ -1042,7 +1044,294 @@ git pull origin main
 docker build -t <image> .
 ```
                                 """)
+                
+                # =============================================================
+                # HELP TAB
+                # =============================================================
+                with gr.TabItem("Help", id="help"):
+                    gr.HTML("""
+                        <div class="page-header">
+                            <h1>Model Documentation</h1>
+                            <p>Comprehensive guide to each 3D generation model and optimal settings for architectural interiors.</p>
+                        </div>
+                    """)
                     
+                    # SHARP Documentation
+                    with gr.Accordion("SHARP - Single-Image 3D Reconstruction", open=False):
+                        gr.Markdown("""
+## SHARP (Apple)
+
+**What it does:** SHARP reconstructs detailed 3D meshes from a single image using a feed-forward neural network. It excels at capturing fine geometric details and textures, producing high-quality meshes suitable for rendering and further editing.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Guidance Scale** | Controls adherence to input image | 1.0-20.0 | 7.5 |
+| **Inference Steps** | Diffusion steps (more = higher quality, slower) | 10-100 | 50 |
+| **Output Format** | GLB (textured mesh) or OBJ | glb/obj | glb |
+
+### Architectural Interior Settings
+
+For architectural interiors, SHARP works best with:
+
+```
+Seed: Any (for reproducibility, use fixed seed)
+Guidance Scale: 10.0-12.0 (higher for more faithful reconstruction)
+Inference Steps: 75-100 (maximize detail for complex scenes)
+Output Format: GLB (preserves textures)
+```
+
+**Tips for Architectural Interiors:**
+- Use high-resolution input images (1024x1024 minimum)
+- Ensure good lighting in source photo - avoid harsh shadows
+- Works best with single-room views, not panoramas
+- Ideal for furniture, fixtures, and room corners
+- May struggle with very large open spaces or complex reflections
+                        """)
+                    
+                    # Gen3C Documentation
+                    with gr.Accordion("GEN3C - Video-to-3D Generation", open=False):
+                        gr.Markdown("""
+## GEN3C (NVIDIA)
+
+**What it does:** Gen3C generates 3D Gaussian Splats from video input using camera pose estimation and multi-view synthesis. It creates immersive 3D scenes that can be rendered from novel viewpoints, ideal for walkthrough-style content.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Num Frames** | Number of video frames to process | 8-64 | 16 |
+| **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 7.5 |
+| **Camera Motion** | Predefined camera path type | orbit/zoom/pan | orbit |
+| **Output Format** | 3DGS PLY or video | ply/mp4 | ply |
+
+### Architectural Interior Settings
+
+For architectural interiors with Gen3C:
+
+```
+Seed: Fixed for consistency
+Num Frames: 32-48 (more frames = smoother reconstruction)
+Guidance Scale: 8.0-10.0
+Camera Motion: orbit (for room centers) or pan (for corridors)
+Output Format: PLY (for 3DGS editing)
+```
+
+**Tips for Architectural Interiors:**
+- Input video should have smooth, steady camera movement
+- Orbit shots around room center work best
+- Avoid fast movements or motion blur
+- 5-10 second clips are ideal
+- Works excellently for capturing spatial relationships
+- Best for living rooms, lobbies, and open-plan spaces
+                        """)
+                    
+                    # Lyra Documentation
+                    with gr.Accordion("LYRA - Image/Video to 3DGS/4DGS", open=False):
+                        gr.Markdown("""
+## LYRA (NVIDIA)
+
+**What it does:** Lyra generates high-quality 3D Gaussian Splats (3DGS) from single images or 4D Gaussian Splats (4DGS) from videos. It uses a sophisticated diffusion-based approach to create detailed, renderable 3D scenes with realistic lighting and materials.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Guidance Scale** | Controls adherence to input | 1.0-20.0 | 7.5 |
+| **Inference Steps** | Diffusion steps | 20-100 | 50 |
+| **SDG Steps** | Scene Diffusion Generation steps | 100-500 | 250 |
+| **Resolution** | Output resolution | 256-1024 | 512 |
+| **Mode** | 3DGS (image) or 4DGS (video) | 3dgs/4dgs | 3dgs |
+
+### Architectural Interior Settings
+
+For architectural interiors with Lyra:
+
+```
+Seed: Fixed for reproducibility
+Guidance Scale: 9.0-12.0 (higher for detailed interiors)
+Inference Steps: 75-100
+SDG Steps: 350-500 (maximize for complex scenes)
+Resolution: 512-1024 (higher for large spaces)
+Mode: 3DGS for still images
+```
+
+**Tips for Architectural Interiors:**
+- High-quality input images are critical
+- Works exceptionally well for detailed furniture and fixtures
+- SDG step is compute-intensive but crucial for quality
+- Output PLY can be converted to mesh via MESH tab
+- Ideal for: bedrooms, offices, detailed room corners
+- May require longer processing for very detailed scenes
+                        """)
+                    
+                    # TRELLIS Documentation
+                    with gr.Accordion("TRELLIS.2 - Structured 3D Generation", open=False):
+                        gr.Markdown("""
+## TRELLIS.2 (Microsoft)
+
+**What it does:** TRELLIS.2 generates structured 3D assets using a latent diffusion approach. It produces clean, well-organized meshes with consistent topology, making outputs ideal for further editing in 3D software.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 7.5 |
+| **Inference Steps** | Diffusion steps | 20-100 | 50 |
+| **Sparse Steps** | Sparse structure generation | 10-50 | 20 |
+| **SLAT Steps** | SLAT refinement steps | 10-50 | 20 |
+| **Output Format** | GLB, OBJ, or 3DGS | glb/obj/3dgs | glb |
+
+### Architectural Interior Settings
+
+For architectural interiors with TRELLIS.2:
+
+```
+Seed: Fixed for consistency
+Guidance Scale: 8.0-10.0
+Inference Steps: 50-75
+Sparse Steps: 25-30 (more for complex geometry)
+SLAT Steps: 25-30 (more for refined surfaces)
+Output Format: GLB (for textured meshes)
+```
+
+**Tips for Architectural Interiors:**
+- Produces cleaner meshes than diffusion-only methods
+- Excellent for furniture and architectural elements
+- Good topology makes outputs suitable for game engines
+- Works well with: chairs, tables, cabinets, fixtures
+- Less suited for entire room reconstructions
+- Best for individual objects within interiors
+                        """)
+                    
+                    # Hunyuan3D Documentation
+                    with gr.Accordion("HUNYUAN3D - Text/Image to 3D", open=False):
+                        gr.Markdown("""
+## HUNYUAN3D (Tencent)
+
+**What it does:** Hunyuan3D generates 3D models from text prompts or images using a multi-stage pipeline. It can create both meshes and Gaussian splats, offering flexibility in output format and quality.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Guidance Scale** | Controls prompt adherence | 1.0-20.0 | 7.5 |
+| **Inference Steps** | Diffusion steps | 20-100 | 50 |
+| **Octree Depth** | Mesh resolution (higher = more detail) | 6-10 | 8 |
+| **Remove Background** | Auto background removal | true/false | true |
+| **Output Format** | GLB, OBJ, or PLY | glb/obj/ply | glb |
+
+### Architectural Interior Settings
+
+For architectural interiors with Hunyuan3D:
+
+```
+Seed: Fixed for reproducibility
+Guidance Scale: 10.0-12.0 (higher for detailed objects)
+Inference Steps: 75-100
+Octree Depth: 9-10 (maximize for architectural detail)
+Remove Background: true (for object isolation)
+Output Format: GLB (for textured meshes)
+```
+
+**Tips for Architectural Interiors:**
+- Excellent for generating furniture from text descriptions
+- "Modern minimalist sofa, white leather, chrome legs"
+- "Art deco floor lamp, brass finish, geometric shade"
+- Works well for: furniture, decor, lighting fixtures
+- Can generate from reference images of real furniture
+- Combine with other models for complete room scenes
+                        """)
+                    
+                    # MESH Extraction Documentation
+                    with gr.Accordion("MESH - 3DGS to Mesh Conversion", open=False):
+                        gr.Markdown("""
+## MESH Extraction
+
+**What it does:** Converts 3D Gaussian Splat (3DGS) files to traditional mesh formats (GLB/OBJ) using Poisson surface reconstruction. This allows 3DGS outputs from Lyra, Gen3C, or other sources to be used in standard 3D software.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Input PLY** | Source 3DGS PLY file | file path | - |
+| **Poisson Depth** | Reconstruction detail level | 6-12 | 9 |
+| **Point Weight** | Influence of input points | 0.0-10.0 | 4.0 |
+| **Scale** | Output mesh scale | 0.1-10.0 | 1.0 |
+| **Output Format** | GLB or OBJ | glb/obj | glb |
+
+### Architectural Interior Settings
+
+For architectural interiors:
+
+```
+Poisson Depth: 10-11 (higher for detailed interiors)
+Point Weight: 3.0-5.0 (balance detail vs smoothness)
+Scale: 1.0 (maintain original scale)
+Output Format: GLB (preserves vertex colors as texture)
+```
+
+**Tips for Architectural Interiors:**
+- Higher Poisson depth = more detail but longer processing
+- Lower point weight = smoother surfaces (good for walls)
+- Higher point weight = more detail preservation (good for furniture)
+- Process individual objects separately for best results
+- Large room scans may need to be segmented first
+                        """)
+                    
+                    # General Tips Section
+                    with gr.Accordion("General Tips for Architectural Interiors", open=True):
+                        gr.Markdown("""
+## Workflow Recommendations
+
+### Best Model for Each Task
+
+| Task | Recommended Model | Why |
+|------|-------------------|-----|
+| **Single room photo → 3D** | SHARP or Lyra | High detail, good texture preservation |
+| **Walkthrough video → 3D** | Gen3C | Captures spatial relationships |
+| **Furniture generation** | Hunyuan3D | Text-to-3D for custom pieces |
+| **Clean mesh output** | TRELLIS.2 | Best topology for editing |
+| **3DGS to mesh** | MESH tab | Poisson reconstruction |
+
+### Input Image Guidelines
+
+1. **Resolution:** Minimum 1024x1024, ideally 2048x2048
+2. **Lighting:** Even, diffuse lighting without harsh shadows
+3. **Angle:** 3/4 view captures more depth information
+4. **Focus:** Sharp focus throughout, avoid depth-of-field blur
+5. **Content:** Single room or object, avoid mirrors/glass
+
+### Recommended Workflow for Complete Rooms
+
+1. **Capture:** Take multiple photos from different angles
+2. **Generate:** Use Lyra or Gen3C for initial 3DGS
+3. **Convert:** Use MESH tab to create editable mesh
+4. **Enhance:** Add furniture with Hunyuan3D or TRELLIS.2
+5. **Composite:** Combine in Blender or Unity
+
+### Output Format Guide
+
+| Format | Best For | Software Compatibility |
+|--------|----------|----------------------|
+| **GLB** | Textured meshes | Blender, Unity, Unreal, Web |
+| **OBJ** | Mesh editing | All 3D software |
+| **PLY** | Point clouds, 3DGS | Blender, specialized viewers |
+| **3DGS** | Real-time rendering | Gaussian splat viewers |
+
+### Performance Tips
+
+- Start with lower settings to test, then increase for final output
+- Use fixed seeds for reproducibility when iterating
+- Process during off-peak hours for faster RunPod response
+- Save intermediate outputs (PLY) before mesh conversion
+                        """)
    
     # =========================================================================
     # NAVIGATION EVENT HANDLERS
@@ -1051,7 +1340,7 @@ docker build -t <image> .
     # JavaScript to highlight active nav button
     highlight_js = """
     () => {
-        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings', 'nav-update'];
+        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings', 'nav-update', 'nav-help'];
         navButtons.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.classList.remove('nav-active');
@@ -1071,6 +1360,7 @@ docker build -t <image> .
     nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs], js=highlight_js % 'nav-mesh')
     nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs], js=highlight_js % 'nav-settings')
     nav_update.click(fn=lambda: gr.Tabs(selected="update"), outputs=[page_tabs], js=highlight_js % 'nav-update')
+    nav_help.click(fn=lambda: gr.Tabs(selected="help"), outputs=[page_tabs], js=highlight_js % 'nav-help')
     
     # =========================================================================
     # IMAGE INPUT HANDLERS
