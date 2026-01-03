@@ -16,6 +16,7 @@ print("DEBUG: STARTING 3D GENERATION STUDIO v2.2 (Sidebar UI) - Port 5684")
 import os
 import json
 import time
+from datetime import datetime
 from typing import Optional, Tuple, Union, Dict, Any
 from pathlib import Path
 
@@ -95,6 +96,14 @@ from utils import (
     start_monitoring,
     get_system_metrics,
     format_system_metrics,
+)
+
+from utils.version_tracker import (
+    check_all_versions,
+    format_version_check_status,
+    get_local_version,
+    query_runpod_versions,
+    update_local_versions_from_runpod,
 )
 
 
@@ -541,7 +550,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             
             with gr.Row(elem_classes=["button-grid"]):
                 nav_settings = gr.Button("Settings", elem_classes=["sidebar-nav"], elem_id="nav-settings", scale=1)
-                gr.Column(scale=1, min_width=0)  # Empty spacer
+                nav_update = gr.Button("Update", elem_classes=["sidebar-nav"], elem_id="nav-update", scale=1)
             
             # System metrics at bottom
             gr.HTML('<div class="sidebar-category">SYSTEM</div>')
@@ -877,45 +886,154 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.Markdown("### RunPod Endpoints")
                     gr.Markdown("Configure API credentials for each model. Credentials are saved locally.")
                     
-                    # All accordions open by default for full visibility
-                    with gr.Accordion("GEN3C / SHARP / Lyra / Mesh (Unified Endpoint)", open=True):
-                        with gr.Row():
-                            settings_gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
-                            settings_gen3c_key = gr.Textbox(value=DEFAULT_GEN3C_API_KEY, label="API Key", type="password")
-                        with gr.Row():
-                            settings_gen3c_test = gr.Button("Test Connection", size="sm")
-                            settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
-                        settings_gen3c_status = gr.Textbox(value="", interactive=False, max_lines=1)
+                    # Row 1: Gen3C/Sharp/Lyra and TRELLIS
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=300):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**GEN3C / SHARP / Lyra**")
+                                settings_gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
+                                settings_gen3c_key = gr.Textbox(value=DEFAULT_GEN3C_API_KEY, label="API Key", type="password")
+                                with gr.Row():
+                                    settings_gen3c_test = gr.Button("Test", size="sm")
+                                    settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_gen3c_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
+                        
+                        with gr.Column(scale=1, min_width=300):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**TRELLIS.2**")
+                                settings_trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint ID")
+                                settings_trellis_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
+                                with gr.Row():
+                                    settings_trellis_test = gr.Button("Test", size="sm")
+                                    settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_trellis_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                     
-                    with gr.Accordion("TRELLIS.2 (Separate Endpoint)", open=True):
-                        with gr.Row():
-                            settings_trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint ID")
-                            settings_trellis_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
-                        with gr.Row():
-                            settings_trellis_test = gr.Button("Test Connection", size="sm")
-                            settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
-                        settings_trellis_status = gr.Textbox(value="", interactive=False, max_lines=1)
+                    # Row 2: Hunyuan and AWS
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=300):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**Hunyuan3D**")
+                                settings_hunyuan_endpoint = gr.Textbox(value=DEFAULT_HUNYUAN_ENDPOINT, label="Endpoint ID")
+                                settings_hunyuan_key = gr.Textbox(value=DEFAULT_HUNYUAN_API_KEY, label="API Key", type="password")
+                                with gr.Row():
+                                    settings_hunyuan_test = gr.Button("Test", size="sm")
+                                    settings_hunyuan_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_hunyuan_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
+                        
+                        with gr.Column(scale=1, min_width=300):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**AWS S3**")
+                                aws_configured = "Configured" if os.environ.get("AWS_ACCESS_KEY_ID") else "Not configured"
+                                gr.Textbox(value=aws_configured, label="Status", interactive=False)
+                                gr.Markdown("S3 for files >30MB. Configure in:")
+                                gr.Markdown("`~/.config/3d_studio/aws_credentials.env`")
+                
+                # PAGE: UPDATE
+                with gr.TabItem("Update", id="update"):
+                    gr.HTML("""
+                        <div class="page-header">
+                            <h1>Update Tracker</h1>
+                            <p>Monitor upstream repository versions and manage updates for all models.</p>
+                        </div>
+                    """)
                     
-                    with gr.Accordion("Hunyuan3D (Separate Endpoint)", open=True):
-                        with gr.Row():
-                            settings_hunyuan_endpoint = gr.Textbox(value=DEFAULT_HUNYUAN_ENDPOINT, label="Endpoint ID")
-                            settings_hunyuan_key = gr.Textbox(value=DEFAULT_HUNYUAN_API_KEY, label="API Key", type="password")
-                        with gr.Row():
-                            settings_hunyuan_test = gr.Button("Test Connection", size="sm")
-                            settings_hunyuan_save = gr.Button("Save", size="sm", variant="primary")
-                        settings_hunyuan_status = gr.Textbox(value="", interactive=False, max_lines=1)
+                    with gr.Row():
+                        update_check_btn = gr.Button("Check Upstream", variant="primary", size="lg")
+                        query_deployed_btn = gr.Button("Query Deployed", variant="secondary", size="lg")
+                        update_status = gr.Textbox(value="Click 'Check Upstream' to scan GitHub, or 'Query Deployed' to check RunPod", 
+                                                   label="Status", interactive=False, scale=2)
                     
-                    with gr.Accordion("AWS S3 (Large File Transfers)", open=True):
-                        aws_configured = "Configured" if os.environ.get("AWS_ACCESS_KEY_ID") else "Not configured"
-                        gr.Textbox(value=aws_configured, label="Status", interactive=False)
-                        gr.Markdown("""
-                        S3 is used for files >30MB. Configure in `~/.config/3d_studio/aws_credentials.env`:
-                        ```
-                        AWS_ACCESS_KEY_ID=your_key
-                        AWS_SECRET_ACCESS_KEY=your_secret
-                        ```
-                        """)
-    
+                    gr.Markdown("### Version Comparison")
+                    
+                    # Version tracking table
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**SHARP** (Apple)")
+                                gr.Markdown("*Repository:* [apple/ml-sharp](https://github.com/apple/ml-sharp)")
+                                with gr.Row():
+                                    sharp_upstream = gr.Textbox(value="Not checked", label="Upstream", interactive=False)
+                                    sharp_local = gr.Textbox(value=get_local_version("sharp"), label="ARKRUNR Version", interactive=False)
+                                sharp_update_info = gr.Markdown("""
+**Update Method:** Docker rebuild | **Difficulty:** 🟢 Low  
+**Notes:** Pure inference model. Update by pulling latest repo and rebuilding Docker image.
+                                """)
+                        
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**GEN3C** (NVIDIA)")
+                                gr.Markdown("*Repository:* [nv-tlabs/GEN3C](https://github.com/nv-tlabs/GEN3C)")
+                                with gr.Row():
+                                    gen3c_upstream = gr.Textbox(value="Not checked", label="Upstream", interactive=False)
+                                    gen3c_local = gr.Textbox(value=get_local_version("gen3c"), label="ARKRUNR Version", interactive=False)
+                                gen3c_update_info = gr.Markdown("""
+**Update Method:** Docker rebuild | **Difficulty:** 🟡 Medium  
+**Notes:** Complex dependencies. Test thoroughly after updates. May require checkpoint re-download.
+                                """)
+                    
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**Lyra** (NVIDIA)")
+                                gr.Markdown("*Repository:* [nv-tlabs/LYRA](https://github.com/nv-tlabs/LYRA)")
+                                with gr.Row():
+                                    lyra_upstream = gr.Textbox(value="Not checked", label="Upstream", interactive=False)
+                                    lyra_local = gr.Textbox(value=get_local_version("lyra"), label="ARKRUNR Version", interactive=False)
+                                lyra_update_info = gr.Markdown("""
+**Update Method:** Docker rebuild + checkpoint sync | **Difficulty:** 🔴 High  
+**Notes:** Large checkpoints (~15GB). Hardcoded paths may need symlink updates. Test SDG step carefully.
+                                """)
+                        
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**TRELLIS.2** (Microsoft)")
+                                gr.Markdown("*Repository:* [microsoft/TRELLIS](https://github.com/microsoft/TRELLIS)")
+                                with gr.Row():
+                                    trellis_upstream = gr.Textbox(value="Not checked", label="Upstream", interactive=False)
+                                    trellis_local = gr.Textbox(value=get_local_version("trellis"), label="ARKRUNR Version", interactive=False)
+                                trellis_update_info = gr.Markdown("""
+**Update Method:** Docker rebuild | **Difficulty:** 🟡 Medium  
+**Notes:** Separate endpoint. Check for API changes in handler interface.
+                                """)
+                    
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**Hunyuan3D** (Tencent)")
+                                gr.Markdown("*Repository:* [Tencent/Hunyuan3D-2](https://github.com/Tencent/Hunyuan3D-2)")
+                                with gr.Row():
+                                    hunyuan_upstream = gr.Textbox(value="Not checked", label="Upstream", interactive=False)
+                                    hunyuan_local = gr.Textbox(value=get_local_version("hunyuan"), label="ARKRUNR Version", interactive=False)
+                                hunyuan_update_info = gr.Markdown("""
+**Update Method:** Docker rebuild OR local update | **Difficulty:** 🟢 Low  
+**Notes:** This fork repo. Can run locally or on RunPod. Pull upstream changes carefully.
+                                """)
+                        
+                        with gr.Column(scale=1, min_width=400):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**Update Guide**")
+                                gr.Markdown("""
+**General Process:**
+1. Check upstream for breaking changes
+2. Update Docker image on RunPod
+3. Test with simple inference
+4. Update version tracking below
+
+**RunPod Update Commands:**
+```bash
+# SSH to storage pod
+ssh runpod@<pod-ip>
+
+# Pull latest code
+cd /workspace/<model>
+git pull origin main
+
+# Rebuild if needed
+docker build -t <image> .
+```
+                                """)
+                    
+   
     # =========================================================================
     # NAVIGATION EVENT HANDLERS
     # =========================================================================
@@ -923,7 +1041,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     # JavaScript to highlight active nav button
     highlight_js = """
     () => {
-        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings'];
+        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings', 'nav-update'];
         navButtons.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.classList.remove('nav-active');
@@ -942,6 +1060,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
     nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs], js=highlight_js % 'nav-hunyuan')
     nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs], js=highlight_js % 'nav-mesh')
     nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs], js=highlight_js % 'nav-settings')
+    nav_update.click(fn=lambda: gr.Tabs(selected="update"), outputs=[page_tabs], js=highlight_js % 'nav-update')
     
     # =========================================================================
     # IMAGE INPUT HANDLERS
@@ -1190,6 +1309,108 @@ with gr.Blocks(title="3D Generation Studio") as demo:
         fn=lambda e, k: save_serverless_credentials(e, k, "hunyuan")[0],
         inputs=[settings_hunyuan_endpoint, settings_hunyuan_key],
         outputs=[settings_hunyuan_status],
+    )
+    
+    # =========================================================================
+    # UPDATE PAGE HANDLERS
+    # =========================================================================
+    
+    def check_versions_handler():
+        """Check all upstream versions (doesn't overwrite local versions)."""
+        results = check_all_versions()
+        status = format_version_check_status(results)
+        return (
+            results.get("sharp", {}).get("upstream", "Error"),
+            results.get("gen3c", {}).get("upstream", "Error"),
+            results.get("lyra", {}).get("upstream", "Error"),
+            results.get("trellis", {}).get("upstream", "Error"),
+            results.get("hunyuan", {}).get("upstream", "Error"),
+            f"Checked at {datetime.now().strftime('%H:%M:%S')} - {status}",
+        )
+    
+    update_check_btn.click(
+        fn=check_versions_handler,
+        outputs=[
+            sharp_upstream,
+            gen3c_upstream,
+            lyra_upstream,
+            trellis_upstream,
+            hunyuan_upstream,
+            update_status,
+        ],
+    )
+    
+    def query_deployed_handler():
+        """Query RunPod endpoints for deployed versions."""
+        # Get endpoint credentials from config
+        config = _load_runpod_config()
+        
+        unified_endpoint = config.get("gen3c_endpoint_id", "")
+        unified_api_key = config.get("gen3c_api_key", "")
+        trellis_endpoint = config.get("trellis_endpoint_id", "")
+        trellis_api_key = config.get("trellis_api_key", "")
+        hunyuan_endpoint = config.get("hunyuan_endpoint_id", "")
+        hunyuan_api_key = config.get("hunyuan_api_key", "")
+        
+        if not unified_endpoint or not unified_api_key:
+            return (
+                "Not configured",
+                "Not configured",
+                "Not configured",
+                "Not configured",
+                "Not configured",
+                "Error: Configure RunPod credentials in Settings first",
+            )
+        
+        # Query endpoints
+        results = query_runpod_versions(
+            unified_endpoint=unified_endpoint,
+            unified_api_key=unified_api_key,
+            trellis_endpoint=trellis_endpoint,
+            trellis_api_key=trellis_api_key,
+            hunyuan_endpoint=hunyuan_endpoint,
+            hunyuan_api_key=hunyuan_api_key,
+        )
+        
+        # Update local version tracking
+        update_local_versions_from_runpod(results)
+        
+        # Format results
+        def get_display(model):
+            info = results.get(model, {})
+            if info.get("error"):
+                return f"Error: {info['error']}"
+            return info.get("display", "Not available")
+        
+        status_parts = []
+        for model in ["sharp", "gen3c", "lyra", "trellis", "hunyuan"]:
+            info = results.get(model, {})
+            if info.get("error"):
+                status_parts.append(f"✗ {model.upper()}")
+            elif info.get("display") not in ["Not queried", "unknown"]:
+                status_parts.append(f"✓ {model.upper()}")
+            else:
+                status_parts.append(f"? {model.upper()}")
+        
+        return (
+            get_display("sharp"),
+            get_display("gen3c"),
+            get_display("lyra"),
+            get_display("trellis"),
+            get_display("hunyuan"),
+            f"Queried at {datetime.now().strftime('%H:%M:%S')} - {' | '.join(status_parts)}",
+        )
+    
+    query_deployed_btn.click(
+        fn=query_deployed_handler,
+        outputs=[
+            sharp_local,
+            gen3c_local,
+            lyra_local,
+            trellis_local,
+            hunyuan_local,
+            update_status,
+        ],
     )
     
     # =========================================================================

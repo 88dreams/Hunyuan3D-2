@@ -310,14 +310,74 @@ def run_hunyuan(
 
 
 # ============================================================================
+# VERSION QUERY
+# ============================================================================
+
+def get_git_version(repo_dir: str) -> Dict[str, str]:
+    """Get git commit information for a repository."""
+    import subprocess
+    
+    result = {"commit_sha": "unknown", "commit_date": "unknown", "branch": "unknown"}
+    
+    if not os.path.exists(repo_dir):
+        result["error"] = f"Directory not found: {repo_dir}"
+        return result
+    
+    try:
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if sha_result.returncode == 0:
+            result["commit_sha"] = sha_result.stdout.strip()
+        
+        date_result = subprocess.run(
+            ["git", "log", "-1", "--format=%ci"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if date_result.returncode == 0:
+            result["commit_date"] = date_result.stdout.strip()[:10]
+        
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if branch_result.returncode == 0:
+            result["branch"] = branch_result.stdout.strip()
+    except Exception as e:
+        result["error"] = str(e)
+    
+    if result.get("commit_sha") != "unknown" and result.get("commit_date") != "unknown":
+        result["display"] = f"{result['commit_sha']} ({result['commit_date']})"
+    else:
+        result["display"] = result.get("error", "Not installed")
+    
+    return result
+
+
+# ============================================================================
 # HANDLER
 # ============================================================================
 
 def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     RunPod Serverless Handler for Hunyuan3D.
+    
+    Supports action: "version" to query installed version.
     """
     job_input = job.get("input", {})
+    
+    # Check for version query action
+    action = job_input.get("action", "").lower()
+    if action == "version":
+        version_info = get_git_version(HUNYUAN_DIR)
+        return {
+            "status": "success",
+            "action": "version",
+            "model": "hunyuan",
+            "versions": {"hunyuan": version_info},
+            "message": "Version information retrieved successfully"
+        }
     
     # Validate installation
     if not validate_hunyuan():

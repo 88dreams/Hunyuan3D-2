@@ -6,8 +6,9 @@
 #
 # v2: Rebuild to fix initialization
 # v6: Upgrade transformers for DINOv3ViTModel support
+# v8: Based on v47 unified image with version query support
 
-FROM 88dreams/gen3c-runpod:v22
+FROM 88dreams/gen3c-runpod:v47
 
 # Upgrade transformers to get DINOv3ViTModel (required by TRELLIS.2)
 # The cosmos-predict1 env has an older version that doesn't include DINOv3

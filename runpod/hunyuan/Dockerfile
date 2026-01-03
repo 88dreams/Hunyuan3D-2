@@ -5,6 +5,7 @@
 # Models: Mini (9GB, faster) and Full (23GB, higher quality)
 #
 # v8: Use runpod base image instead of NVIDIA (smaller, better RunPod compatibility)
+# v10: Added version query support (action: "version")
 
 FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 

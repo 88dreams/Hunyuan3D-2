@@ -169,12 +169,12 @@ CUSTOM_CSS = """
     justify-content: center !important;
     width: 100% !important;
     margin: 0 !important;
-    padding: 10px 8px !important;
+    padding: 12px 8px !important;
     border-radius: 6px !important;
     border: 1px solid var(--border-color) !important;
     background: var(--bg-secondary) !important;
     color: var(--text-primary) !important;
-    font-size: 1.0em !important;
+    font-size: 1.05em !important;
     font-weight: 600 !important;
     text-align: center !important;
     cursor: pointer !important;
@@ -192,8 +192,8 @@ CUSTOM_CSS = """
 
 .sidebar .button-grid button {
     width: 100% !important;
-    padding: 10px 6px !important;
-    font-size: 0.85em !important;
+    padding: 12px 6px !important;
+    font-size: 1.0em !important;
 }
 
 .sidebar-nav button:hover,
@@ -299,6 +299,32 @@ CUSTOM_CSS = """
 .card-header .icon {
     font-size: 1.4em !important;
     margin-right: 10px !important;
+}
+
+/* ============================================
+   SETTINGS PAGE - 2-COLUMN LAYOUT
+   ============================================ */
+
+.settings-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 16px !important;
+    margin-bottom: 16px !important;
+}
+
+.settings-row > .gr-column {
+    flex: 1 1 50% !important;
+    max-width: 50% !important;
+}
+
+.settings-card {
+    height: 100% !important;
+}
+
+.settings-card p {
+    margin: 0 0 12px 0 !important;
+    font-size: 1.1em !important;
 }
 
 /* ============================================

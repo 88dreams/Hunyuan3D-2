@@ -227,6 +227,50 @@ def run_trellis(
 
 
 # ============================================================================
+# VERSION QUERY
+# ============================================================================
+
+def get_git_version(repo_dir: str) -> Dict[str, str]:
+    """Get git commit information for a repository."""
+    result = {"commit_sha": "unknown", "commit_date": "unknown", "branch": "unknown"}
+    
+    if not os.path.exists(repo_dir):
+        result["error"] = f"Directory not found: {repo_dir}"
+        return result
+    
+    try:
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if sha_result.returncode == 0:
+            result["commit_sha"] = sha_result.stdout.strip()
+        
+        date_result = subprocess.run(
+            ["git", "log", "-1", "--format=%ci"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if date_result.returncode == 0:
+            result["commit_date"] = date_result.stdout.strip()[:10]
+        
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if branch_result.returncode == 0:
+            result["branch"] = branch_result.stdout.strip()
+    except Exception as e:
+        result["error"] = str(e)
+    
+    if result.get("commit_sha") != "unknown" and result.get("commit_date") != "unknown":
+        result["display"] = f"{result['commit_sha']} ({result['commit_date']})"
+    else:
+        result["display"] = result.get("error", "Not installed")
+    
+    return result
+
+
+# ============================================================================
 # HANDLER
 # ============================================================================
 
@@ -237,6 +281,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     Expected input:
     {
         "input": {
+            "action": "version",  # Optional: returns installed version
             "image_base64": "...",  # Base64 encoded input image
             "output_name": "my_model",  # Optional output name
             "resolution": 1024,  # 512, 768, 1024, or 1536
@@ -249,6 +294,18 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     """
     job_input = job.get("input", {})
+    
+    # Check for version query action
+    action = job_input.get("action", "").lower()
+    if action == "version":
+        version_info = get_git_version(TRELLIS_DIR)
+        return {
+            "status": "success",
+            "action": "version",
+            "model": "trellis",
+            "versions": {"trellis": version_info},
+            "message": "Version information retrieved successfully"
+        }
     
     # Validate TRELLIS.2 installation
     if not validate_trellis():

@@ -175,6 +175,100 @@ def encode_file_if_small(file_path: str, max_size: int = MAX_BASE64_SIZE) -> Opt
         return None
 
 # =============================================================================
+# VERSION QUERY
+# =============================================================================
+
+def get_git_version(repo_dir: str) -> Dict[str, str]:
+    """
+    Get git commit information for a repository.
+    
+    Args:
+        repo_dir: Path to the git repository
+        
+    Returns:
+        Dict with commit_sha, commit_date, branch
+    """
+    result = {
+        "commit_sha": "unknown",
+        "commit_date": "unknown",
+        "branch": "unknown",
+    }
+    
+    if not os.path.exists(repo_dir):
+        result["error"] = f"Directory not found: {repo_dir}"
+        return result
+    
+    try:
+        # Get commit SHA (short)
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if sha_result.returncode == 0:
+            result["commit_sha"] = sha_result.stdout.strip()
+        
+        # Get commit date
+        date_result = subprocess.run(
+            ["git", "log", "-1", "--format=%ci"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if date_result.returncode == 0:
+            # Parse date and format as YYYY-MM-DD
+            full_date = date_result.stdout.strip()
+            result["commit_date"] = full_date[:10] if full_date else "unknown"
+        
+        # Get current branch
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if branch_result.returncode == 0:
+            result["branch"] = branch_result.stdout.strip()
+            
+    except subprocess.TimeoutExpired:
+        result["error"] = "Git command timed out"
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def get_all_versions() -> Dict[str, Any]:
+    """
+    Get version information for all installed models.
+    
+    Returns:
+        Dict with version info for each model
+    """
+    versions = {
+        "sharp": get_git_version(SHARP_DIR),
+        "gen3c": get_git_version(GEN3C_DIR),
+        "lyra": get_git_version(LYRA_DIR),
+        "trellis": get_git_version(TRELLIS_DIR),
+    }
+    
+    # Format for display
+    for model, info in versions.items():
+        if info.get("commit_sha") != "unknown" and info.get("commit_date") != "unknown":
+            info["display"] = f"{info['commit_sha']} ({info['commit_date']})"
+        elif info.get("commit_sha") != "unknown":
+            info["display"] = info["commit_sha"]
+        else:
+            info["display"] = info.get("error", "Not installed")
+    
+    return versions
+
+
+# =============================================================================
 # MODEL VALIDATION
 # =============================================================================
 
@@ -617,7 +711,10 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     RunPod serverless handler function.
     
     Input (job["input"]):
-        Common:
+        Special Actions:
+        - action: "version" - Returns installed versions of all models (no other params needed)
+        
+        Common (for generation):
         - model: "gen3c", "sharp", "lyra", or "trellis" (required)
         - image_base64: Base64 encoded input image (required)
         - output_name: Output file name (optional)
@@ -652,6 +749,19 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         job_input = job.get("input", {})
+        
+        # Check for special actions first
+        action = job_input.get("action", "").lower()
+        
+        # Version query - returns installed versions of all models
+        if action == "version":
+            versions = get_all_versions()
+            return {
+                "status": "success",
+                "action": "version",
+                "versions": versions,
+                "message": "Version information retrieved successfully"
+            }
         
         # Determine model type
         model = job_input.get("model", "gen3c").lower()
