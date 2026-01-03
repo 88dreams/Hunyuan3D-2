@@ -429,6 +429,10 @@ def handle_mesh_extraction(
     if not input_ply or not input_ply.strip():
         return "", "Error: No input PLY file specified", "❌ Missing input"
     
+    # Clean up dropdown value - remove format info in parentheses if present
+    if " (" in input_ply:
+        input_ply = input_ply.rsplit(" (", 1)[0]
+    
     if "SuGaR" in method or "Poisson" in method:
         result = run_sugar_extraction(
             input_ply=input_ply,
@@ -511,19 +515,18 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 sources=["upload", "clipboard"],
             )
             
-            with gr.Row():
+            with gr.Group(elem_classes=["scale-info-box"]):
                 image_scale = gr.Slider(
                     minimum=0.25, maximum=1.0, value=1.0, step=0.05,
                     label="Scale",
-                    scale=3,
                 )
-            
-            image_info = gr.Textbox(
-                value="No image loaded.",
-                show_label=False,
-                interactive=False,
-                max_lines=1,
-            )
+                image_info = gr.Textbox(
+                    value="No image loaded.",
+                    show_label=False,
+                    interactive=False,
+                    max_lines=1,
+                    elem_classes=["image-info-text"],
+                )
             
             input_video = gr.Video(
                 label="Source Video",
@@ -835,29 +838,36 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     
                     with gr.Row():
                         with gr.Column(scale=2):
-                            gr.Markdown("### Input PLY")
-                            mesh_ply_files = scan_for_ply_files()
-                            with gr.Row():
-                                mesh_ply_dropdown = gr.Dropdown(choices=mesh_ply_files, label="Select PLY", scale=3, allow_custom_value=True)
-                                mesh_refresh_btn = gr.Button("🔄", scale=0)
-                            mesh_ply_path = gr.Textbox(label="Or enter path", placeholder="/path/to/file.ply")
-                            mesh_format = gr.Radio(["Auto-detect", "Lyra", "SHARP", "Standard 3DGS"], value="Auto-detect", label="Format")
+                            with gr.Group():
+                                gr.Markdown("### Input PLY")
+                                mesh_ply_files = scan_for_ply_files()
+                                with gr.Row(elem_classes=["ply-input-row"]):
+                                    mesh_ply_dropdown = gr.Dropdown(
+                                        choices=mesh_ply_files, 
+                                        label="Select or enter PLY path", 
+                                        scale=5, 
+                                        allow_custom_value=True,
+                                        elem_classes=["ply-dropdown"],
+                                    )
+                                    mesh_refresh_btn = gr.Button("🔄", scale=0, elem_classes=["refresh-btn-inline"], min_width=40)
+                                mesh_format = gr.Radio(["Auto-detect", "Lyra", "SHARP", "Standard 3DGS"], value="Auto-detect", label="Format")
                             
-                            gr.Markdown("### Reconstruction Settings")
-                            with gr.Row():
-                                mesh_quality = gr.Dropdown(
-                                    ["High Poly (1M)", "Low Poly (200k)", "Custom"],
-                                    value="High Poly (1M)",
-                                    label="Quality",
-                                )
-                                mesh_poisson_depth = gr.Slider(6, 12, 10, step=1, label="Poisson Depth")
-                            mesh_decimate = gr.Number(0, label="Decimate to (faces, 0=none)")
+                            with gr.Group():
+                                gr.Markdown("### Reconstruction Settings")
+                                with gr.Row():
+                                    mesh_quality = gr.Dropdown(
+                                        ["High Poly (1M)", "Low Poly (200k)", "Custom"],
+                                        value="High Poly (1M)",
+                                        label="Quality",
+                                    )
+                                    mesh_poisson_depth = gr.Slider(6, 12, 10, step=1, label="Poisson Depth")
+                                mesh_decimate = gr.Number(0, label="Decimate to (faces, 0=none)")
                             
-                            gr.Markdown("### Output")
-                            with gr.Row():
-                                mesh_output_name = gr.Textbox(value="mesh_output", label="Name")
-                                mesh_output_format = gr.Dropdown(["GLB", "OBJ", "PLY"], value="GLB", label="Format")
-                            mesh_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Directory")
+                            with gr.Group():
+                                gr.Markdown("### Output Settings")
+                                mesh_output_name = gr.Textbox(value="mesh_output", label="Output Name")
+                                mesh_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                                mesh_output_format = gr.Dropdown(["GLB", "OBJ", "PLY"], value="GLB", label="Output Format")
                             
                             mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
                             mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
@@ -1236,7 +1246,7 @@ docker build -t <image> .
     mesh_extract_btn.click(
         fn=handle_mesh_extraction,
         inputs=[
-            mesh_ply_path, mesh_format,
+            mesh_ply_dropdown, mesh_format,
             gr.State("SuGaR"), gr.State("dn_consistency"),
             mesh_quality, mesh_poisson_depth, mesh_decimate,
             gr.State(False), gr.State("2048"), gr.State("short"),
@@ -1264,12 +1274,6 @@ docker build -t <image> .
         return gr.update(choices=scan_for_ply_files())
     
     mesh_refresh_btn.click(fn=refresh_mesh_ply, outputs=[mesh_ply_dropdown])
-    
-    mesh_ply_dropdown.change(
-        fn=lambda x: x.rsplit(" (", 1)[0] if x and " (" in x else (x or ""),
-        inputs=[mesh_ply_dropdown],
-        outputs=[mesh_ply_path],
-    )
     
     # =========================================================================
     # SETTINGS EVENT HANDLERS

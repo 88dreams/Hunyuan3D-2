@@ -92,14 +92,20 @@ CUSTOM_CSS = """
     max-width: 280px !important;
     background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%) !important;
     border-right: 1px solid var(--border-color) !important;
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100vh !important;
-    position: sticky !important;
-    top: 0 !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
+    display: block !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    position: relative !important;
+    overflow: visible !important;
     padding: 0 4px !important;
+    padding-bottom: 20px !important;
+}
+
+/* Ensure all sidebar content flows naturally */
+.sidebar > * {
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
 }
 
 /* Sidebar Input Section - compact */
@@ -121,6 +127,79 @@ CUSTOM_CSS = """
     padding: 12px !important;
 }
 
+/* Scale + Image Info combined box */
+.scale-info-box {
+    padding: 8px 12px !important;
+    margin: 4px 0 !important;
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+}
+
+.scale-info-box .gr-slider {
+    margin-bottom: 4px !important;
+}
+
+.image-info-text textarea,
+.image-info-text input {
+    font-size: 0.85em !important;
+    color: var(--text-muted) !important;
+    padding: 4px 8px !important;
+    min-height: 24px !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+/* PLY Input Row with inline refresh button */
+.ply-input-row {
+    align-items: center !important;
+    gap: 8px !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.ply-input-row > div {
+    background: transparent !important;
+}
+
+.ply-dropdown {
+    flex: 1 !important;
+}
+
+.refresh-btn-inline {
+    min-width: 44px !important;
+    max-width: 44px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    margin-top: 24px !important;  /* Align with dropdown input (accounts for label height) */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.refresh-btn-inline button {
+    min-width: 44px !important;
+    max-width: 44px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    font-size: 1.4em !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 6px !important;
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-color) !important;
+}
+
+.refresh-btn-inline:hover button,
+.refresh-btn-inline button:hover {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+}
+
 /* Button grid rows */
 .sidebar .button-grid {
     gap: 4px !important;
@@ -132,7 +211,8 @@ CUSTOM_CSS = """
 .sidebar .button-grid button {
     min-width: 0 !important;
     padding: 10px 6px !important;
-    font-size: 1.0em !important;
+    font-size: 1.15em !important;
+    text-transform: uppercase !important;
 }
 
 .sidebar-header {
@@ -152,7 +232,7 @@ CUSTOM_CSS = """
 
 .sidebar-category {
     padding: 8px 12px 6px 12px !important;
-    font-size: 1.1em !important;
+    font-size: 1.3em !important;
     font-weight: 700 !important;
     color: var(--accent-primary) !important;
     text-transform: uppercase !important;
@@ -160,6 +240,20 @@ CUSTOM_CSS = """
     border-bottom: 2px solid var(--accent-primary) !important;
     margin: 6px 8px 8px 8px !important;
     background: linear-gradient(90deg, rgba(255, 124, 0, 0.15) 0%, transparent 100%) !important;
+}
+
+/* Add spacing and divider ABOVE the parent container of category labels */
+.sidebar .html-container:has(.sidebar-category) {
+    margin-top: 12px !important;
+    padding-top: 12px !important;
+    border-top: 1px solid var(--border-color) !important;
+}
+
+/* First category (INPUT) container doesn't need top border/margin */
+.sidebar .html-container:has(.sidebar-category):first-of-type {
+    border-top: none !important;
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
 
 .sidebar-nav button,
@@ -193,7 +287,8 @@ CUSTOM_CSS = """
 .sidebar .button-grid button {
     width: 100% !important;
     padding: 12px 6px !important;
-    font-size: 1.0em !important;
+    font-size: 1.15em !important;
+    text-transform: uppercase !important;
 }
 
 .sidebar-nav button:hover,
