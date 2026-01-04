@@ -501,7 +501,9 @@ class RunPodServerlessClient:
         trajectory: str = "left",
         guidance: float = 1.0,
         foreground_masking: bool = True,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        movement_distance: float = 0.3,
+        camera_rotation: str = "center_facing"
     ) -> Dict[str, Any]:
         """
         Submit a job to the serverless endpoint.
@@ -514,6 +516,8 @@ class RunPodServerlessClient:
             guidance: Guidance scale (0.5-3.0)
             foreground_masking: Enable foreground masking
             seed: Random seed for reproducibility
+            movement_distance: How far the camera moves (0.1-1.0, default 0.3)
+            camera_rotation: How camera rotates (center_facing, no_rotation, trajectory_aligned)
             
         Returns:
             Dict with id (job_id) and status
@@ -537,6 +541,8 @@ class RunPodServerlessClient:
                 "trajectory": trajectory,
                 "guidance": guidance,
                 "foreground_masking": foreground_masking,
+                "movement_distance": movement_distance,
+                "camera_rotation": camera_rotation,
                 "return_base64": True
             }
         }
@@ -687,6 +693,8 @@ class RunPodServerlessClient:
         guidance: float = 1.0,
         foreground_masking: bool = True,
         seed: Optional[int] = None,
+        movement_distance: float = 0.3,
+        camera_rotation: str = "center_facing",
         poll_interval: int = 30,
         max_wait: int = 3600,
         progress_callback: Optional[Callable[[str, float], None]] = None
@@ -703,6 +711,8 @@ class RunPodServerlessClient:
             guidance: Guidance scale
             foreground_masking: Enable foreground masking
             seed: Random seed
+            movement_distance: How far the camera moves (0.1-1.0)
+            camera_rotation: How camera rotates (center_facing, no_rotation, trajectory_aligned)
             poll_interval: Seconds between status checks
             max_wait: Maximum wait time
             progress_callback: Optional progress callback
@@ -724,7 +734,9 @@ class RunPodServerlessClient:
                 trajectory=trajectory,
                 guidance=guidance,
                 foreground_masking=foreground_masking,
-                seed=seed
+                seed=seed,
+                movement_distance=movement_distance,
+                camera_rotation=camera_rotation
             )
         except Exception as e:
             return RunPodJobResult(

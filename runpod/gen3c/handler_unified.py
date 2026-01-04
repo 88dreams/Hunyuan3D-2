@@ -324,10 +324,23 @@ def run_gen3c(
     num_frames: int = 121,
     trajectory: str = "left",
     foreground_masking: bool = True,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    movement_distance: float = 0.3,
+    camera_rotation: str = "center_facing"
 ) -> str:
     """
     Run GEN3C inference.
+    
+    Args:
+        input_image_path: Path to input image
+        video_name: Name for output video
+        guidance: Guidance scale (0.5-3.0)
+        num_frames: Number of frames (121, 241, 361)
+        trajectory: Camera trajectory (left, right, up, down, zoom_in, zoom_out, etc.)
+        foreground_masking: Enable foreground masking
+        seed: Random seed
+        movement_distance: How far camera moves (0.1-1.0, default 0.3)
+        camera_rotation: How camera rotates (center_facing, no_rotation, trajectory_aligned)
     
     Returns:
         Path to the generated video file
@@ -343,6 +356,8 @@ def run_gen3c(
         "--guidance", str(guidance),
         "--num_video_frames", str(num_frames),
         "--trajectory", trajectory,
+        "--movement_distance", str(movement_distance),
+        "--camera_rotation", camera_rotation,
         "--offload_diffusion_transformer",
         "--offload_tokenizer",
         "--offload_text_encoder_model",
@@ -813,13 +828,24 @@ def handle_gen3c(job: Dict, job_input: Dict, input_path: str, return_base64: boo
     trajectory = job_input.get("trajectory", "left")
     foreground_masking = job_input.get("foreground_masking", True)
     seed = job_input.get("seed")
+    movement_distance = float(job_input.get("movement_distance", 0.3))
+    camera_rotation = job_input.get("camera_rotation", "center_facing")
     
     # Validate frames
     valid_frames = [121, 241, 361, 481]
     if num_frames not in valid_frames:
         return {"status": "error", "message": f"num_frames must be one of {valid_frames}"}
     
-    logger.info(f"GEN3C job: video_name={video_name}, frames={num_frames}, trajectory={trajectory}")
+    # Validate camera_rotation
+    valid_rotations = ["center_facing", "no_rotation", "trajectory_aligned"]
+    if camera_rotation not in valid_rotations:
+        camera_rotation = "center_facing"
+    
+    # Clamp movement_distance
+    movement_distance = max(0.1, min(1.0, movement_distance))
+    
+    logger.info(f"GEN3C job: video_name={video_name}, frames={num_frames}, trajectory={trajectory}, "
+                f"movement={movement_distance}, rotation={camera_rotation}")
     
     temp_output_path = run_gen3c(
         input_image_path=input_path,
@@ -828,7 +854,9 @@ def handle_gen3c(job: Dict, job_input: Dict, input_path: str, return_base64: boo
         num_frames=num_frames,
         trajectory=trajectory,
         foreground_masking=foreground_masking,
-        seed=seed
+        seed=seed,
+        movement_distance=movement_distance,
+        camera_rotation=camera_rotation
     )
     
     # Copy to network volume with model-specific subdirectory

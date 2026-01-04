@@ -163,6 +163,8 @@ def run_gen3c_serverless(
     video_name: str,
     seed: Optional[int],
     output_dir: str,
+    movement_distance: float = 0.3,
+    camera_rotation: str = "center_facing",
 ) -> Tuple[Optional[str], str, str]:
     """Run GEN3C on RunPod Serverless and return the generated video."""
     if not image_path:
@@ -191,6 +193,7 @@ def run_gen3c_serverless(
     logs.append(f"🚀 Starting RunPod Serverless GEN3C generation")
     logs.append(f"   Endpoint: {endpoint_id}")
     logs.append(f"   Frames: {frames_int}, Trajectory: {trajectory}")
+    logs.append(f"   Movement: {movement_distance}, Rotation: {camera_rotation}")
     logs.append(f"   Guidance: {guidance}, Foreground Mask: {foreground_masking}")
     
     # Create client
@@ -221,6 +224,8 @@ def run_gen3c_serverless(
             guidance=guidance,
             foreground_masking=foreground_masking,
             seed=seed if seed and seed > 0 else None,
+            movement_distance=movement_distance if movement_distance else 0.3,
+            camera_rotation=camera_rotation if camera_rotation else "center_facing",
             poll_interval=30,
             max_wait=3600,
             progress_callback=progress_callback

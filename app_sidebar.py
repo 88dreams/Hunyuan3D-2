@@ -216,6 +216,8 @@ def handle_gen3c_generation(
     guidance: float,
     frames: Union[str, int],
     trajectory: str,
+    movement_distance: float,
+    camera_rotation: str,
     foreground_mask: bool,
     video_name: str,
     seed: Optional[int],
@@ -235,6 +237,8 @@ def handle_gen3c_generation(
             guidance=guidance,
             frames=frames,
             trajectory=trajectory,
+            movement_distance=movement_distance,
+            camera_rotation=camera_rotation,
             foreground_masking=foreground_mask,
             video_name=video_name,
             seed=seed,
@@ -635,7 +639,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.HTML("""
                         <div class="page-header">
                             <h1>GEN3C</h1>
-                            <p>NVIDIA's 3D-consistent video generation from a single image. Creates orbital camera videos.</p>
+                            <p>NVIDIA's 3D-consistent video generation from a single image. Creates camera-controlled videos with 3D consistency.</p>
                         </div>
                     """)
                     
@@ -645,14 +649,26 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 gr.Markdown("### Video Settings")
                                 with gr.Row():
                                     gen3c_trajectory = gr.Dropdown(
-                                        choices=["orbit", "left", "right", "up", "down", "zoom_in", "zoom_out"],
-                                        value="orbit",
+                                        choices=["left", "right", "up", "down", "zoom_in", "zoom_out", "clockwise", "counterclockwise"],
+                                        value="left",
                                         label="Camera Trajectory",
                                     )
                                     gen3c_frames = gr.Dropdown(
-                                        choices=["61", "121", "241"],
+                                        choices=["121", "241", "361"],
                                         value="121",
-                                        label="Frames",
+                                        label="Frames (121*N - 1)",
+                                    )
+                                with gr.Row():
+                                    gen3c_movement_distance = gr.Slider(
+                                        minimum=0.1, maximum=1.0, value=0.3, step=0.05,
+                                        label="Movement Distance",
+                                        info="How far camera moves (0.1=subtle, 1.0=dramatic)"
+                                    )
+                                    gen3c_camera_rotation = gr.Dropdown(
+                                        choices=["center_facing", "no_rotation", "trajectory_aligned"],
+                                        value="center_facing",
+                                        label="Camera Rotation",
+                                        info="How camera rotates during movement"
                                     )
                                 with gr.Row():
                                     gen3c_guidance = gr.Slider(minimum=0.5, maximum=5.0, value=1.0, label="Guidance")
@@ -1420,7 +1436,9 @@ Output Format: GLB (preserves vertex colors as texture)
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
             gen3c_endpoint, gen3c_api_key,
-            gen3c_guidance, gen3c_frames, gen3c_trajectory, gen3c_foreground,
+            gen3c_guidance, gen3c_frames, gen3c_trajectory,
+            gen3c_movement_distance, gen3c_camera_rotation,
+            gen3c_foreground,
             gen3c_video_name, gen3c_seed, gen3c_output_dir,
         ],
         outputs=[output_video, gen3c_logs, gen3c_progress],
