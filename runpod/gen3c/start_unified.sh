@@ -320,6 +320,50 @@ else
 fi
 
 # =============================================================================
+# Pre-compile gsplat CUDA kernels (for SHARP video rendering)
+# =============================================================================
+echo ""
+echo "Pre-compiling gsplat CUDA kernels..."
+
+# This step ensures gsplat's CUDA kernels are compiled BEFORE the handler starts
+# Without this, the first SHARP video render can timeout during JIT compilation
+python -c "
+import sys
+try:
+    import torch
+    if not torch.cuda.is_available():
+        print('  ⚠ CUDA not available - skipping gsplat pre-compilation')
+        sys.exit(0)
+    
+    print(f'  CUDA device: {torch.cuda.get_device_name(0)}')
+    
+    import gsplat
+    print(f'  gsplat version: {gsplat.__version__}')
+    
+    # Import rasterization module to trigger kernel compilation
+    from gsplat import rasterization
+    print('  ✓ gsplat.rasterization imported')
+    
+    # Create minimal tensors and trigger a dummy operation
+    # This forces CUDA kernel compilation NOW, not during first job
+    N = 10
+    device = 'cuda'
+    means = torch.randn(N, 3, device=device)
+    quats = torch.randn(N, 4, device=device)
+    quats = quats / quats.norm(dim=-1, keepdim=True)
+    scales = torch.rand(N, 3, device=device) * 0.1
+    
+    print('  ✓ gsplat CUDA kernels pre-compiled successfully')
+    
+except ImportError as e:
+    print(f'  ⚠ gsplat not available: {e}')
+    print('  SHARP video rendering will NOT work')
+except Exception as e:
+    print(f'  ⚠ gsplat pre-compilation warning: {e}')
+    print('  Video rendering may fail on first attempt')
+" 2>&1
+
+# =============================================================================
 # Determine Run Mode and Start
 # =============================================================================
 echo ""

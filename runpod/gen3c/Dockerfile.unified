@@ -12,8 +12,8 @@
 #   - TRELLIS.2: Image to 3D with O-Voxel representation (Microsoft)
 #   - SHARP: Image to 3D Gaussian Splatting (Apple)
 #
-# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v48 .
-# Push:  docker push 88dreams/gen3c-runpod:v48
+# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v49 .
+# Push:  docker push 88dreams/gen3c-runpod:v49
 #
 # v23: Updated Lyra dependencies (gsplat commit failed to build)
 # v24: Fixed Lyra validation, reverted gsplat to stable 1.4.0
@@ -23,6 +23,8 @@
 # v35: Fix nvcc compiler-bindir conflict by setting CC/CXX/CUDAHOSTCXX to system gcc
 # v36: Fix PLY output path detection - search Lyra's default output directories
 # v39: Add SuGaR mesh extraction support (3DGS -> GLB/OBJ)
+# v49: Actually pre-compile gsplat CUDA kernels (fixes intermittent video rendering)
+#      Add handler startup environment checks for gsplat availability
 #
 # =============================================================================
 

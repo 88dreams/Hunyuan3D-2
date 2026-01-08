@@ -959,9 +959,15 @@ class UnifiedServerlessClient:
         self,
         image_path: str,
         output_name: str = "sharp_output",
-        render_video: bool = False
+        render_video: bool = False,
+        trajectory_type: str = "rotate_forward",
+        num_steps: int = 60,
+        num_repeats: int = 1,
+        max_disparity: float = 0.08,
+        max_zoom: float = 0.15,
+        lookat_mode: str = "point",
     ) -> Dict[str, Any]:
-        """Submit a SHARP job."""
+        """Submit a SHARP job with optional video rendering and trajectory parameters."""
         with open(image_path, "rb") as f:
             image_base64 = base64.b64encode(f.read()).decode()
         
@@ -971,6 +977,12 @@ class UnifiedServerlessClient:
                 "image_base64": image_base64,
                 "output_name": output_name,
                 "render_video": render_video,
+                "trajectory_type": trajectory_type,
+                "num_steps": num_steps,
+                "num_repeats": num_repeats,
+                "max_disparity": max_disparity,
+                "max_zoom": max_zoom,
+                "lookat_mode": lookat_mode,
                 "return_base64": True
             }
         }
@@ -1471,8 +1483,14 @@ class UnifiedServerlessClient:
         output_dir: str,
         output_name: str = "sharp_output",
         render_video: bool = False,
+        trajectory_type: str = "rotate_forward",
+        num_steps: int = 60,
+        num_repeats: int = 1,
+        max_disparity: float = 0.08,
+        max_zoom: float = 0.15,
+        lookat_mode: str = "point",
         poll_interval: int = 10,
-        max_wait: int = 600,
+        max_wait: Optional[int] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None
     ) -> RunPodJobResult:
         """
@@ -1483,13 +1501,24 @@ class UnifiedServerlessClient:
             output_dir: Directory to save output
             output_name: Base name for output files
             render_video: Whether to render video trajectory
+            trajectory_type: Camera trajectory type (rotate_forward, rotate, swipe, shake)
+            num_steps: Number of frames in video
+            num_repeats: Number of trajectory loops
+            max_disparity: Maximum lateral camera offset
+            max_zoom: Maximum forward camera movement
+            lookat_mode: Camera focus mode (point, ahead)
             poll_interval: Seconds between status checks
-            max_wait: Maximum wait time
+            max_wait: Maximum wait time (default: 600s for PLY only, 1800s with video)
             progress_callback: Optional progress callback
             
         Returns:
             RunPodJobResult with PLY (and optionally video) output
         """
+        # Use longer timeout when video rendering is requested
+        # Video rendering can take 15+ minutes on cold start (gsplat kernel compilation)
+        if max_wait is None:
+            max_wait = 1800 if render_video else 600  # 30 min with video, 10 min without
+        
         start_time = time.time()
         logs = []
         
@@ -1499,7 +1528,13 @@ class UnifiedServerlessClient:
             submit_result = self.submit_sharp_job(
                 image_path=image_path,
                 output_name=output_name,
-                render_video=render_video
+                render_video=render_video,
+                trajectory_type=trajectory_type,
+                num_steps=num_steps,
+                num_repeats=num_repeats,
+                max_disparity=max_disparity,
+                max_zoom=max_zoom,
+                lookat_mode=lookat_mode,
             )
         except Exception as e:
             return RunPodJobResult(

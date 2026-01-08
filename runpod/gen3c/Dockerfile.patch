@@ -1,0 +1,28 @@
+# =============================================================================
+# Patch Dockerfile - Incremental updates on top of unified image
+# =============================================================================
+# 
+# Use this for quick updates that only change handler/startup scripts.
+# For full rebuilds, use Dockerfile.unified instead.
+#
+# Usage:
+#   1. Update BASE_VERSION below to the current stable version
+#   2. Build: docker build -f Dockerfile.patch -t 88dreams/gen3c-runpod:vXX .
+#   3. Push:  docker push 88dreams/gen3c-runpod:vXX
+#
+# Current: v50 (based on v48 unified base)
+# =============================================================================
+
+# Change this to the base version you want to patch
+FROM 88dreams/gen3c-runpod:v48
+
+# Update the handler with enhanced diagnostics
+COPY handler_unified.py /workspace/handler.py
+
+# Update the startup script with gsplat pre-compilation
+COPY start_unified.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# Keep the same startup command
+CMD ["/workspace/start.sh"]
+

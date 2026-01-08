@@ -61,6 +61,56 @@ Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("3dgen-handler")
 
+# =============================================================================
+# STARTUP ENVIRONMENT CHECKS
+# =============================================================================
+def check_environment():
+    """Log environment info and check critical dependencies at startup."""
+    logger.info("=" * 60)
+    logger.info("ENVIRONMENT CHECK")
+    logger.info("=" * 60)
+    
+    # Python and conda info
+    logger.info(f"Python: {sys.executable}")
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"CONDA_PREFIX: {os.environ.get('CONDA_PREFIX', 'NOT SET')}")
+    logger.info(f"CONDA_DEFAULT_ENV: {os.environ.get('CONDA_DEFAULT_ENV', 'NOT SET')}")
+    
+    # PATH (first few entries)
+    path_entries = os.environ.get('PATH', '').split(':')[:5]
+    logger.info(f"PATH (first 5): {path_entries}")
+    
+    # Check critical packages
+    try:
+        import torch
+        logger.info(f"PyTorch: {torch.__version__}, CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    except ImportError as e:
+        logger.error(f"PyTorch import failed: {e}")
+    
+    # Check gsplat (required for SHARP video rendering)
+    try:
+        import gsplat
+        logger.info(f"gsplat: {gsplat.__version__} - SHARP video rendering AVAILABLE")
+    except ImportError as e:
+        logger.warning(f"gsplat NOT available: {e}")
+        logger.warning("SHARP video rendering will NOT work!")
+    except Exception as e:
+        logger.warning(f"gsplat check failed: {e}")
+    
+    # Check sharp CLI
+    sharp_path = shutil.which("sharp")
+    if sharp_path:
+        logger.info(f"sharp CLI: {sharp_path}")
+    else:
+        logger.warning("sharp CLI not found in PATH")
+    
+    logger.info("=" * 60)
+
+# Run environment check at module load
+check_environment()
+
 # S3 client (lazy initialization)
 _s3_client = None
 
@@ -147,6 +197,47 @@ def upload_file_to_s3_if_large(file_path: str, model: str, filename: str) -> Dic
             result["s3_key"] = s3_key
     elif file_size > MAX_BASE64_SIZE and not S3_ENABLED:
         logger.warning(f"S3 NOT enabled - large file cannot be transferred. S3_BUCKET={S3_BUCKET}, S3_ACCESS_KEY={'set' if S3_ACCESS_KEY else 'NOT SET'}, S3_SECRET_KEY={'set' if S3_SECRET_KEY else 'NOT SET'}")
+    
+    return result
+
+
+def upload_file_to_s3_always(file_path: str, model: str, filename: str) -> Dict[str, Any]:
+    """
+    Always upload file to S3 (regardless of size).
+    This ensures files are always available for download even if the API response times out.
+    
+    Args:
+        file_path: Path to local file
+        model: Model name (sharp, gen3c, lyra, trellis)
+        filename: Output filename
+    
+    Returns:
+        Dict with upload info (s3_url, file_size, uploaded)
+    """
+    file_size = os.path.getsize(file_path)
+    result = {
+        "file_size": file_size,
+        "uploaded": False,
+        "s3_url": None,
+        "s3_key": None,
+    }
+    
+    if not S3_ENABLED:
+        logger.warning(f"S3 NOT enabled - cannot upload {filename}. Configure S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY")
+        return result
+    
+    logger.info(f"S3 upload (always): {filename} ({file_size / 1024 / 1024:.1f}MB)")
+    
+    # Use configured prefix (e.g., MediaContent/outputs/sharp/file.ply)
+    s3_key = f"{S3_PREFIX}/{model}/{filename}"
+    s3_url = upload_to_s3(file_path, s3_key)
+    if s3_url:
+        result["uploaded"] = True
+        result["s3_url"] = s3_url
+        result["s3_key"] = s3_key
+        logger.info(f"S3 upload complete: {s3_url}")
+    else:
+        logger.error(f"S3 upload failed for {filename}")
     
     return result
 
@@ -308,6 +399,15 @@ def validate_sharp():
         logger.warning("SHARP CLI not found in PATH")
         return False
     
+    # Check if gsplat is available (needed for video rendering)
+    try:
+        import gsplat
+        logger.info(f"gsplat version: {getattr(gsplat, '__version__', 'unknown')}")
+    except ImportError as e:
+        logger.warning(f"gsplat not available (video rendering will fail): {e}")
+    except Exception as e:
+        logger.warning(f"gsplat import error: {e}")
+    
     _sharp_validated = True
     logger.info(f"SHARP environment validated (CLI: {sharp_path})")
     return True
@@ -410,14 +510,26 @@ def run_sharp(
     input_image_path: str,
     output_name: str,
     render_video: bool = False,
+    trajectory_type: str = "rotate_forward",
+    num_steps: int = 60,
+    num_repeats: int = 1,
+    max_disparity: float = 0.08,
+    max_zoom: float = 0.15,
+    lookat_mode: str = "point",
 ) -> Dict[str, str]:
     """
-    Run SHARP inference.
+    Run SHARP inference with optional video rendering.
     
     Args:
         input_image_path: Path to input image
         output_name: Base name for output files
         render_video: Whether to render video trajectory
+        trajectory_type: Camera trajectory type (rotate_forward, rotate, swipe, shake)
+        num_steps: Number of frames in video
+        num_repeats: Number of trajectory loops
+        max_disparity: Maximum lateral camera offset
+        max_zoom: Maximum forward camera movement
+        lookat_mode: Camera focus mode (point, ahead)
     
     Returns:
         Dict with paths to generated files (ply_path, video_path if applicable)
@@ -448,23 +560,54 @@ def run_sharp(
         
         if render_video:
             cmd.append("--render")
+            logger.info(f"Video trajectory params: type={trajectory_type}, steps={num_steps}, "
+                       f"repeats={num_repeats}, disparity={max_disparity}, zoom={max_zoom}, lookat={lookat_mode}")
+            # Note: SHARP CLI doesn't expose trajectory params yet
+            # Custom trajectory will be supported in future via Python API
+            
+            # Pre-check: verify gsplat can render
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    logger.warning("CUDA not available - video rendering will fail!")
+                else:
+                    logger.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
+            except Exception as e:
+                logger.warning(f"CUDA check failed: {e}")
         
         logger.info(f"Running SHARP: {' '.join(cmd)}")
         
+        # Log environment for debugging subprocess issues
+        logger.info(f"Subprocess CONDA_PREFIX: {os.environ.get('CONDA_PREFIX', 'NOT SET')}")
+        logger.info(f"Subprocess PATH (first entry): {os.environ.get('PATH', '').split(':')[0]}")
+        
         # Use longer timeout for first run (model download can take 5+ min)
         # SHARP downloads ~2.6GB model on first run
+        # Explicitly pass current environment to ensure conda env is inherited
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=1800,  # 30 minute timeout for model download
+            env=os.environ.copy(),  # Explicitly pass environment
         )
+        
+        # Log SHARP output for debugging
+        if result.stdout:
+            logger.info(f"SHARP stdout: {result.stdout[-2000:]}")
+        if result.stderr:
+            logger.warning(f"SHARP stderr: {result.stderr[-2000:]}")
         
         # Find output files FIRST (before checking return code)
         # This way we can recover PLY even if video rendering failed
         output_files = os.listdir(temp_output_dir)
+        logger.info(f"SHARP output files: {output_files}")
         ply_files = [f for f in output_files if f.endswith('.ply')]
         mp4_files = [f for f in output_files if f.endswith('.mp4')]
+        
+        if render_video and not mp4_files:
+            logger.warning(f"Video rendering was requested but no MP4 files found in output!")
+            logger.warning(f"This usually means gsplat failed to compile or CUDA is not available.")
         
         results = {}
         
@@ -901,12 +1044,36 @@ def handle_sharp(job: Dict, job_input: Dict, input_path: str, return_base64: boo
     output_name = job_input.get("output_name", f"sharp_{job.get('id', 'output')}")
     render_video = job_input.get("render_video", False)
     
-    logger.info(f"SHARP job: output_name={output_name}, render_video={render_video}")
+    # Extract trajectory parameters
+    trajectory_type = job_input.get("trajectory_type", "rotate_forward")
+    num_steps = int(job_input.get("num_steps", 60))
+    num_repeats = int(job_input.get("num_repeats", 1))
+    max_disparity = float(job_input.get("max_disparity", 0.08))
+    max_zoom = float(job_input.get("max_zoom", 0.15))
+    lookat_mode = job_input.get("lookat_mode", "point")
+    
+    # Validate trajectory type
+    valid_trajectories = ["rotate_forward", "rotate", "swipe", "shake"]
+    if trajectory_type not in valid_trajectories:
+        trajectory_type = "rotate_forward"
+    
+    # Validate lookat mode
+    if lookat_mode not in ["point", "ahead"]:
+        lookat_mode = "point"
+    
+    logger.info(f"SHARP job: output_name={output_name}, render_video={render_video}, "
+                f"trajectory={trajectory_type}, steps={num_steps}")
     
     results = run_sharp(
         input_image_path=input_path,
         output_name=output_name,
         render_video=render_video,
+        trajectory_type=trajectory_type,
+        num_steps=num_steps,
+        num_repeats=num_repeats,
+        max_disparity=max_disparity,
+        max_zoom=max_zoom,
+        lookat_mode=lookat_mode,
     )
     
     response = {
@@ -923,20 +1090,19 @@ def handle_sharp(job: Dict, job_input: Dict, input_path: str, return_base64: boo
         response["ply_path"] = results["ply_path"]
         response["ply_size"] = ply_size
         
-        # Try base64 for small files
+        # ALWAYS upload to S3 first (ensures file is available even if API times out)
+        s3_result = upload_file_to_s3_always(results["ply_path"], "sharp", f"{output_name}.ply")
+        if s3_result["uploaded"]:
+            response["ply_s3_url"] = s3_result["s3_url"]
+            response["message"] = f"PLY uploaded to S3 ({ply_size / 1024 / 1024:.1f}MB)"
+        else:
+            download_required = True
+        
+        # Also try base64 for small files (faster if API response succeeds)
         if return_base64:
             encoded = encode_file_if_small(results["ply_path"])
             if encoded:
                 response["ply_base64"] = encoded
-        
-        # Always try S3 upload for large files (regardless of return_base64)
-        if "ply_base64" not in response:
-            s3_result = upload_file_to_s3_if_large(results["ply_path"], "sharp", f"{output_name}.ply")
-            if s3_result["uploaded"]:
-                response["ply_s3_url"] = s3_result["s3_url"]
-                response["message"] = f"PLY uploaded to S3 ({ply_size / 1024 / 1024:.1f}MB)"
-            else:
-                download_required = True
     
     if "video_path" in results:
         video_size = os.path.getsize(results["video_path"])
@@ -944,19 +1110,25 @@ def handle_sharp(job: Dict, job_input: Dict, input_path: str, return_base64: boo
         response["video_name"] = f"{output_name}.mp4"
         response["video_size"] = video_size
         
-        # Try base64 for small files
+        # ALWAYS upload video to S3 first (ensures file is available even if API times out)
+        s3_result = upload_file_to_s3_always(results["video_path"], "sharp", f"{output_name}.mp4")
+        if s3_result["uploaded"]:
+            response["video_s3_url"] = s3_result["s3_url"]
+            response["message"] = f"Video uploaded to S3 ({video_size / 1024 / 1024:.1f}MB)"
+        else:
+            download_required = True
+        
+        # Also try base64 for small files (faster if API response succeeds)
         if return_base64:
             encoded = encode_file_if_small(results["video_path"])
             if encoded:
                 response["video_base64"] = encoded
-        
-        # Always try S3 upload for large files
-        if "video_base64" not in response:
-            s3_result = upload_file_to_s3_if_large(results["video_path"], "sharp", f"{output_name}.mp4")
-            if s3_result["uploaded"]:
-                response["video_s3_url"] = s3_result["s3_url"]
-            else:
-                download_required = True
+    elif render_video:
+        # Video was requested but not generated
+        response["video_error"] = "Video rendering failed. This usually means gsplat is not installed or CUDA is unavailable."
+        if "warning" in results:
+            response["video_error"] = results["warning"]
+        logger.warning(f"Video rendering was requested but no video was generated")
     
     if download_required:
         response["download_required"] = True

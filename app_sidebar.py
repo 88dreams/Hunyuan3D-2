@@ -176,10 +176,16 @@ def handle_sharp_generation(
     render_video: bool,
     output_name: str,
     output_dir: str,
+    trajectory_type: str = "rotate_forward",
+    num_steps: int = 60,
+    num_repeats: int = 1,
+    max_disparity: float = 0.08,
+    max_zoom: float = 0.15,
+    lookat_mode: str = "point",
     log_params: bool = True,
     encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str]:
-    """Handle SHARP generation."""
+    """Handle SHARP generation with optional video rendering."""
     scale_value = clamp_scale_value(image_scale)
     scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
@@ -209,13 +215,25 @@ def handle_sharp_generation(
                 output_name=effective_output_name,
                 output_dir=output_dir,
                 render_video=render_video,
+                trajectory_type=trajectory_type,
+                num_steps=int(num_steps),
+                num_repeats=int(num_repeats),
+                max_disparity=float(max_disparity),
+                max_zoom=float(max_zoom),
+                lookat_mode=lookat_mode,
             )
         else:
             result = run_sharp_local(
                 image_path=effective_image_path,
                 output_name=effective_output_name,
                 output_dir=output_dir,
-                render_video=False,
+                render_video=render_video,
+                trajectory_type=trajectory_type,
+                num_steps=int(num_steps),
+                num_repeats=int(num_repeats),
+                max_disparity=float(max_disparity),
+                max_zoom=float(max_zoom),
+                lookat_mode=lookat_mode,
             )
         
         # Log experiment if enabled and successful
@@ -1000,29 +1018,125 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.HTML("""
                         <div class="page-header">
                             <h1>SHARP</h1>
-                            <p>Apple's fast 3D Gaussian Splatting from a single image. Generates PLY in ~60 seconds.</p>
+                            <p>Apple's fast 3D Gaussian Splatting from a single image. Generates PLY in ~60 seconds, optional video rendering.</p>
                         </div>
                     """)
                     
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            with gr.Group():
-                                gr.Markdown("### Output Settings")
-                                sharp_output_name = gr.Textbox(value="sharp_output", label="Output Name")
-                                sharp_output_dir = gr.Textbox(value=SHARP_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                    with gr.Tabs():
+                        # TAB: Generate PLY
+                        with gr.Tab("Generate"):
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    with gr.Group():
+                                        gr.Markdown("### Output Settings")
+                                        sharp_output_name = gr.Textbox(value="sharp_output", label="Output Name")
+                                        sharp_output_dir = gr.Textbox(value=SHARP_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                                    
+                                    sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
+                                    sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                
+                                with gr.Column(scale=1):
+                                    sharp_3d_viewer = gr.Model3D(
+                                        label="3D Preview",
+                                        height=400,
+                                        clear_color=[0.1, 0.1, 0.1, 1.0],
+                                    )
                             
-                            sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
-                            sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            with gr.Accordion("📋 Logs", open=False):
+                                sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                         
-                        with gr.Column(scale=1):
-                            sharp_3d_viewer = gr.Model3D(
-                                label="3D Preview",
-                                height=400,
-                                clear_color=[0.1, 0.1, 0.1, 1.0],
-                            )
-                    
-                    with gr.Accordion("📋 Logs", open=False):
-                        sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
+                        # TAB: Render Video
+                        with gr.Tab("Render Video"):
+                            gr.Markdown("""
+                            **Video Rendering** creates a camera trajectory video from a SHARP PLY file.
+                            Requires CUDA GPU (RunPod recommended). Can be done during generation or from existing PLY.
+                            """)
+                            
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    with gr.Group():
+                                        gr.Markdown("### Input")
+                                        sharp_video_mode = gr.Radio(
+                                            choices=["Generate PLY + Video", "Render from existing PLY"],
+                                            value="Generate PLY + Video",
+                                            label="Mode",
+                                        )
+                                        sharp_video_ply_path = gr.Textbox(
+                                            label="PLY Path (for existing PLY mode)",
+                                            placeholder="Path to .ply file",
+                                            visible=False,
+                                        )
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Trajectory Settings")
+                                        sharp_trajectory_type = gr.Dropdown(
+                                            choices=["rotate_forward", "rotate", "swipe", "shake"],
+                                            value="rotate_forward",
+                                            label="Trajectory Type",
+                                            info="Camera movement pattern"
+                                        )
+                                        with gr.Row():
+                                            sharp_num_steps = gr.Slider(
+                                                minimum=30, maximum=180, value=60, step=10,
+                                                label="Frames",
+                                                info="Number of frames in video"
+                                            )
+                                            sharp_num_repeats = gr.Slider(
+                                                minimum=1, maximum=4, value=1, step=1,
+                                                label="Repeats",
+                                                info="Number of trajectory loops"
+                                            )
+                                        with gr.Row():
+                                            sharp_max_disparity = gr.Slider(
+                                                minimum=0.02, maximum=0.20, value=0.08, step=0.01,
+                                                label="Lateral Offset",
+                                                info="Max horizontal/vertical movement"
+                                            )
+                                            sharp_max_zoom = gr.Slider(
+                                                minimum=0.05, maximum=0.40, value=0.15, step=0.05,
+                                                label="Zoom/Forward",
+                                                info="Max forward movement"
+                                            )
+                                        sharp_lookat_mode = gr.Dropdown(
+                                            choices=["point", "ahead"],
+                                            value="point",
+                                            label="Look-At Mode",
+                                            info="Camera focus behavior"
+                                        )
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Output")
+                                        sharp_video_output_name = gr.Textbox(value="sharp_video", label="Video Name")
+                                        sharp_video_output_dir = gr.Textbox(value=SHARP_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                                    
+                                    sharp_render_video_btn = gr.Button("Render Video", variant="primary", size="lg")
+                                    sharp_video_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                
+                                with gr.Column(scale=1):
+                                    sharp_video_preview = gr.Video(
+                                        label="Video Preview",
+                                        height=400,
+                                    )
+                            
+                            with gr.Accordion("📋 Trajectory Types Explained", open=False):
+                                gr.Markdown("""
+                                | Type | Description |
+                                |------|-------------|
+                                | **rotate_forward** | Circular rotation with forward zoom (default, best for most scenes) |
+                                | **rotate** | Pure circular rotation around the scene center |
+                                | **swipe** | Left-to-right horizontal pan |
+                                | **shake** | Horizontal shake followed by vertical shake |
+                                
+                                **Parameters:**
+                                - **Frames**: Total frames in video (60 = ~2s at 30fps)
+                                - **Repeats**: How many times to loop the trajectory
+                                - **Lateral Offset**: How far camera moves sideways (higher = more dramatic)
+                                - **Zoom/Forward**: How far camera moves forward (higher = more zoom effect)
+                                - **Look-At Mode**: "point" keeps camera focused on scene center, "ahead" looks straight ahead
+                                """)
+                            
+                            with gr.Accordion("📋 Logs", open=False):
+                                sharp_video_logs = gr.Textbox(label="Render Logs", lines=8, interactive=False)
                 
                 # PAGE: GEN3C
                 with gr.TabItem("GEN3C", id="gen3c"):
@@ -1521,38 +1635,59 @@ docker build -t <image> .
                     """)
                     
                     # SHARP Documentation
-                    with gr.Accordion("SHARP - Single-Image 3D Reconstruction", open=False):
+                    with gr.Accordion("SHARP - Single-Image 3D Gaussian Splatting", open=False):
                         gr.Markdown("""
 ## SHARP (Apple)
 
-**What it does:** SHARP reconstructs detailed 3D meshes from a single image using a feed-forward neural network. It excels at capturing fine geometric details and textures, producing high-quality meshes suitable for rendering and further editing.
+**What it does:** SHARP generates 3D Gaussian Splatting (3DGS) representations from a single image in under 1 second. The output is a PLY file containing Gaussian splats that can be rendered in real-time using 3DGS viewers. SHARP also supports optional video rendering to visualize the 3D reconstruction with camera movement.
 
-### Key Settings
+**Key features:**
+- Fastest single-image to 3DGS (sub-second inference)
+- Metric scale output (real-world units)
+- Optional video trajectory rendering (CUDA GPU required)
+
+### Output Format
+
+SHARP outputs standard 3DGS PLY files compatible with various Gaussian Splatting viewers:
+- Contains: positions, spherical harmonics (colors), scales, rotations, opacities
+- Coordinate system: OpenCV (x right, y down, z forward)
+- Color space: sRGB (converted from internal linearRGB for compatibility)
+
+### Video Rendering Options
 
 | Setting | Description | Range | Default |
 |---------|-------------|-------|---------|
-| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
-| **Guidance Scale** | Controls adherence to input image | 1.0-20.0 | 7.5 |
-| **Inference Steps** | Diffusion steps (more = higher quality, slower) | 10-100 | 50 |
-| **Output Format** | GLB (textured mesh) or OBJ | glb/obj | glb |
+| **Trajectory Type** | Camera movement pattern | rotate_forward, rotate, swipe, shake | rotate_forward |
+| **Frames** | Number of video frames | 30-180 | 60 |
+| **Repeats** | Trajectory loop count | 1-4 | 1 |
+| **Lateral Offset** | Max horizontal/vertical movement | 0.02-0.20 | 0.08 |
+| **Zoom/Forward** | Max forward camera movement | 0.05-0.40 | 0.15 |
+| **Look-At Mode** | Camera focus behavior | point, ahead | point |
+
+### Trajectory Types Explained
+
+| Type | Description | Best For |
+|------|-------------|----------|
+| **rotate_forward** | Circular rotation + forward zoom | Most scenes (default) |
+| **rotate** | Pure circular rotation | Objects, centered subjects |
+| **swipe** | Left-to-right horizontal pan | Wide scenes, panoramas |
+| **shake** | Horizontal then vertical shake | Dynamic preview |
 
 ### Architectural Interior Settings
 
-For architectural interiors, SHARP works best with:
-
 ```
-Seed: Any (for reproducibility, use fixed seed)
-Guidance Scale: 10.0-12.0 (higher for more faithful reconstruction)
-Inference Steps: 75-100 (maximize detail for complex scenes)
-Output Format: GLB (preserves textures)
+Trajectory: rotate_forward (shows depth well)
+Frames: 90-120 (smooth, longer preview)
+Lateral Offset: 0.06-0.10 (moderate movement)
+Zoom/Forward: 0.10-0.20 (subtle zoom effect)
+Look-At: point (keeps focus on room center)
 ```
 
 **Tips for Architectural Interiors:**
-- Use high-resolution input images (1024x1024 minimum)
-- Ensure good lighting in source photo - avoid harsh shadows
-- Works best with single-room views, not panoramas
-- Ideal for furniture, fixtures, and room corners
-- May struggle with very large open spaces or complex reflections
+- SHARP excels at capturing room geometry and furniture
+- Use high-resolution input images for best detail
+- Video rendering requires CUDA GPU (use RunPod)
+- The 3DGS output can be converted to mesh using the MESH tab
                         """)
                     
                     # Gen3C Documentation
@@ -2168,9 +2303,83 @@ Min Component Ratio: 1% (default)
             input_image, image_scale, gr.State("RunPod Serverless"),
             settings_gen3c_endpoint, settings_gen3c_key, gr.State(False),
             sharp_output_name, sharp_output_dir,
+            gr.State("rotate_forward"), gr.State(60), gr.State(1),
+            gr.State(0.08), gr.State(0.15), gr.State("point"),
             global_log_params, global_encode_params,
         ],
         outputs=[output_display, sharp_logs, sharp_progress, sharp_3d_viewer],
+    )
+    
+    # SHARP Video Mode Toggle - show/hide PLY path input
+    def toggle_sharp_video_mode(mode):
+        """Toggle visibility of PLY path input based on mode."""
+        return gr.update(visible=mode == "Render from existing PLY")
+    
+    sharp_video_mode.change(
+        fn=toggle_sharp_video_mode,
+        inputs=[sharp_video_mode],
+        outputs=[sharp_video_ply_path],
+    )
+    
+    # SHARP Video Render Handler
+    def handle_sharp_video_render(
+        mode, ply_path, image_path, image_scale,
+        endpoint_id, api_key,
+        trajectory_type, num_steps, num_repeats,
+        max_disparity, max_zoom, lookat_mode,
+        output_name, output_dir,
+        log_params, encode_params,
+    ):
+        """Handle SHARP video rendering - either from new generation or existing PLY."""
+        if mode == "Render from existing PLY":
+            # Render from existing PLY (not yet supported via CLI)
+            return None, "⚠️ Rendering from existing PLY is not yet supported via SHARP CLI.\nPlease use 'Generate PLY + Video' mode.", "Not supported"
+        else:
+            # Generate PLY + Video
+            result = handle_sharp_generation(
+                image_path=image_path,
+                image_scale=image_scale,
+                exec_mode="RunPod Serverless",
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                render_video=True,
+                output_name=output_name,
+                output_dir=output_dir,
+                trajectory_type=trajectory_type,
+                num_steps=int(num_steps),
+                num_repeats=int(num_repeats),
+                max_disparity=float(max_disparity),
+                max_zoom=float(max_zoom),
+                lookat_mode=lookat_mode,
+                log_params=log_params,
+                encode_params=encode_params,
+            )
+            output_path, logs, progress = result
+            
+            # Check if we got a video file
+            video_path = None
+            if output_path and output_path.endswith('.mp4'):
+                video_path = output_path
+            elif output_path:
+                # Check if video was generated alongside PLY
+                potential_video = output_path.replace('.ply', '.mp4')
+                if os.path.exists(potential_video):
+                    video_path = potential_video
+            
+            return video_path, logs, progress
+    
+    sharp_render_video_btn.click(
+        fn=handle_sharp_video_render,
+        inputs=[
+            sharp_video_mode, sharp_video_ply_path,
+            input_image, image_scale,
+            settings_gen3c_endpoint, settings_gen3c_key,
+            sharp_trajectory_type, sharp_num_steps, sharp_num_repeats,
+            sharp_max_disparity, sharp_max_zoom, sharp_lookat_mode,
+            sharp_video_output_name, sharp_video_output_dir,
+            global_log_params, global_encode_params,
+        ],
+        outputs=[sharp_video_preview, sharp_video_logs, sharp_video_progress],
     )
     
     # =========================================================================

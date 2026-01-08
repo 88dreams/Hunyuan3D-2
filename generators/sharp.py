@@ -68,6 +68,12 @@ def run_sharp_local(
     output_name: str,
     output_dir: str,
     render_video: bool = False,
+    trajectory_type: str = "rotate_forward",
+    num_steps: int = 60,
+    num_repeats: int = 1,
+    max_disparity: float = 0.08,
+    max_zoom: float = 0.15,
+    lookat_mode: str = "point",
 ) -> Tuple[Optional[str], str, str]:
     """
     Run SHARP locally to generate 3D Gaussian Splatting PLY from a single image.
@@ -77,6 +83,12 @@ def run_sharp_local(
         output_name: Base name for output files
         output_dir: Directory to save outputs
         render_video: Whether to render a video trajectory (CUDA only)
+        trajectory_type: Camera trajectory type (rotate_forward, rotate, swipe, shake)
+        num_steps: Number of frames in video
+        num_repeats: Number of trajectory loops
+        max_disparity: Maximum lateral camera offset
+        max_zoom: Maximum forward camera movement
+        lookat_mode: Camera focus mode (point, ahead)
     
     Returns:
         Tuple of (output_path, logs, progress_status)
@@ -112,6 +124,9 @@ def run_sharp_local(
     logs.append(f"   Input: {os.path.basename(image_path)}")
     logs.append(f"   Output: {base_name}")
     logs.append(f"   Render video: {render_video}")
+    if render_video:
+        logs.append(f"   Trajectory: {trajectory_type}, {num_steps} frames, {num_repeats}x repeat")
+        logs.append(f"   Disparity: {max_disparity}, Zoom: {max_zoom}, LookAt: {lookat_mode}")
     
     try:
         # Copy input image to temp directory (SHARP expects a directory)
@@ -230,6 +245,12 @@ def run_sharp_runpod(
     output_name: str,
     output_dir: str,
     render_video: bool = True,
+    trajectory_type: str = "rotate_forward",
+    num_steps: int = 60,
+    num_repeats: int = 1,
+    max_disparity: float = 0.08,
+    max_zoom: float = 0.15,
+    lookat_mode: str = "point",
 ) -> Tuple[Optional[str], str, str]:
     """
     Run SHARP on RunPod Serverless for video rendering.
@@ -241,6 +262,12 @@ def run_sharp_runpod(
         output_name: Base name for output files
         output_dir: Directory to save outputs
         render_video: Whether to render video trajectory
+        trajectory_type: Camera trajectory type (rotate_forward, rotate, swipe, shake)
+        num_steps: Number of frames in video
+        num_repeats: Number of trajectory loops
+        max_disparity: Maximum lateral camera offset
+        max_zoom: Maximum forward camera movement
+        lookat_mode: Camera focus mode (point, ahead)
     
     Returns:
         Tuple of (output_path, logs, progress_status)
@@ -268,6 +295,9 @@ def run_sharp_runpod(
     logs.append(f"   Input: {os.path.basename(image_path)}")
     logs.append(f"   Output: {base_name}")
     logs.append(f"   Render video: {render_video}")
+    if render_video:
+        logs.append(f"   Trajectory: {trajectory_type}, {num_steps} frames, {num_repeats}x repeat")
+        logs.append(f"   Disparity: {max_disparity}, Zoom: {max_zoom}, LookAt: {lookat_mode}")
     logs.append(f"   Endpoint: {endpoint_id}")
     
     try:
@@ -281,6 +311,12 @@ def run_sharp_runpod(
             output_dir=resolved_output_dir,
             output_name=base_name,
             render_video=render_video,
+            trajectory_type=trajectory_type,
+            num_steps=num_steps,
+            num_repeats=num_repeats,
+            max_disparity=max_disparity,
+            max_zoom=max_zoom,
+            lookat_mode=lookat_mode,
             poll_interval=10,
             max_wait=600,  # 10 minute timeout for SHARP
             progress_callback=progress_callback,
