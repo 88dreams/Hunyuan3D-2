@@ -268,13 +268,14 @@ def run_hunyuan(
     pipeline = get_pipeline(model_type)
     
     # Adaptive settings based on model
+    # Allow user-specified resolution up to 512, with sensible defaults
     if model_type == "mini":
-        if octree_resolution > 380:
-            octree_resolution = 380
+        # Mini model can handle higher resolutions
+        octree_resolution = min(octree_resolution, 512)
         num_chunks = 6000
     else:
-        if octree_resolution > 360:
-            octree_resolution = 360
+        # Full model - cap at 450 for stability
+        octree_resolution = min(octree_resolution, 450)
         num_chunks = 5000
     
     logger.info(f"Running inference: steps={steps}, guidance={guidance_scale}, resolution={octree_resolution}")
@@ -398,8 +399,12 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     
     # Check model_variant first (from client), then fall back to model
     model_type = job_input.get("model_variant") or job_input.get("model", "mini")
-    if model_type not in ["mini", "full"]:
-        model_type = "mini"
+    # Normalize model type - handle various formats
+    model_type = model_type.lower() if model_type else "mini"
+    if "full" in model_type:
+        model_type = "full"
+    else:
+        model_type = "mini"  # Default to mini for any other value including "turbo"
     
     guidance_scale = job_input.get("guidance_scale", 9.0)
     steps = job_input.get("steps", 40)

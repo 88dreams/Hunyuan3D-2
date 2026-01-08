@@ -12,8 +12,8 @@
 #   - TRELLIS.2: Image to 3D with O-Voxel representation (Microsoft)
 #   - SHARP: Image to 3D Gaussian Splatting (Apple)
 #
-# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v39 .
-# Push:  docker push 88dreams/gen3c-runpod:v39
+# Build: docker build -f Dockerfile.unified -t 88dreams/gen3c-runpod:v48 .
+# Push:  docker push 88dreams/gen3c-runpod:v48
 #
 # v23: Updated Lyra dependencies (gsplat commit failed to build)
 # v24: Fixed Lyra validation, reverted gsplat to stable 1.4.0

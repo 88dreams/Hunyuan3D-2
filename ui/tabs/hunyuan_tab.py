@@ -104,9 +104,9 @@ def create_hunyuan_tab(
     with gr.Group() as memory_settings:
         gr.Markdown("#### Memory Optimization (Local only)")
         with gr.Row():
-            fp16 = gr.Checkbox(value=True, label="FP16")
-            attention_slicing = gr.Checkbox(value=True, label="Attention Slicing")
-            cpu_offload = gr.Checkbox(value=True, label="CPU Offload")
+            fp16 = gr.Checkbox(value=False, label="FP16")
+            attention_slicing = gr.Checkbox(value=False, label="Attention Slicing")
+            cpu_offload = gr.Checkbox(value=False, label="CPU Offload")
         remove_bg = gr.Checkbox(value=True, label="Remove Background")
     
     # Output Settings

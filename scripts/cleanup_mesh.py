@@ -17,7 +17,10 @@ Usage:
 
 import argparse
 import sys
+import json
+import csv
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, Any
 
 # Check for trimesh
@@ -30,6 +33,97 @@ except ImportError:
     print("Warning: trimesh not installed. Install with: pip install trimesh")
 
 
+def save_parameter_log(
+    output_path: str,
+    params: Dict[str, Any],
+    stats: Dict[str, Any],
+    save_json: bool = True,
+) -> Dict[str, str]:
+    """
+    Save cleanup parameters using centralized experiment logger.
+    
+    Creates:
+    1. JSON sidecar file (output_name.mesh_cleanup.json) - full parameters
+    2. Appends to CSV log (/srv/searidge_share/outputs/logs/mesh_cleanup.csv)
+    
+    Args:
+        output_path: Path to the output mesh file
+        params: Dictionary of parameters used
+        stats: Dictionary of cleanup statistics/results
+        save_json: Whether to save JSON sidecar file
+    
+    Returns:
+        Dictionary with paths to created log files
+    """
+    try:
+        from scripts.experiment_logger import log_mesh_cleanup_experiment
+    except ImportError:
+        # Fallback if running standalone
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from experiment_logger import log_mesh_cleanup_experiment
+    
+    # Calculate reduction percentage
+    input_tris = stats.get("input_triangles", 1)
+    output_tris = stats.get("output_triangles", 0)
+    reduction_pct = round(100 * (1 - output_tris / max(input_tris, 1)), 1)
+    
+    results = {
+        "input_triangles": input_tris,
+        "output_triangles": output_tris,
+        "reduction_percent": reduction_pct,
+        "components_removed": stats.get("components_removed", 0),
+        "is_watertight": stats.get("is_watertight", False),
+        "is_winding_consistent": stats.get("is_winding_consistent", False),
+    }
+    
+    return log_mesh_cleanup_experiment(
+        output_path=output_path,
+        input_file=params.get("input_path", ""),
+        target_triangles=params.get("target_triangles", 0),
+        pre_smooth=params.get("smooth_iterations", 0),
+        preserve_detail=params.get("preserve_detail", False),
+        post_smooth=params.get("post_decimate_smooth", 0),
+        remove_components=params.get("remove_small_components", True),
+        fix_normals=params.get("fix_normals", True),
+        fill_holes=params.get("fill_holes", False),
+        aggressive=params.get("aggressive", False),
+        min_ratio=params.get("min_component_ratio", 0.01),
+        results=results,
+        save_json=save_json,
+    )
+
+
+def generate_param_filename(
+    base_name: str,
+    target_triangles: int,
+    preserve_detail: bool,
+    post_decimate_smooth: int,
+    ext: str = ".glb",
+) -> str:
+    """
+    Generate a filename that encodes key parameters for quick reference.
+    
+    Format: basename_t{triangles}k_pd{0/1}_ps{smooth}.ext
+    Example: kitchen_t300k_pd1_ps2.glb
+    
+    Args:
+        base_name: Original file name (without extension)
+        target_triangles: Target triangle count
+        preserve_detail: Whether preserve_detail is enabled
+        post_decimate_smooth: Post-decimation smoothing passes
+        ext: File extension
+    
+    Returns:
+        Filename with encoded parameters
+    """
+    tris_k = f"{target_triangles // 1000}k" if target_triangles > 0 else "orig"
+    pd = "1" if preserve_detail else "0"
+    ps = post_decimate_smooth
+    
+    return f"{base_name}_t{tris_k}_pd{pd}_ps{ps}{ext}"
+
+
 def cleanup_mesh(
     input_path: str,
     output_path: str,
@@ -40,6 +134,10 @@ def cleanup_mesh(
     fill_holes: bool = False,
     smooth_iterations: int = 1,
     aggressive: bool = False,
+    preserve_detail: bool = False,
+    post_decimate_smooth: int = 0,
+    log_params: bool = True,
+    encode_params_in_filename: bool = False,
 ) -> Dict[str, Any]:
     """
     Clean up a mesh for use in Unity/ArkRunr.
@@ -52,8 +150,12 @@ def cleanup_mesh(
         min_component_ratio: Minimum ratio of faces for a component to be kept
         fix_normals: Recompute and fix normals
         fill_holes: Attempt to fill holes (can be aggressive)
-        smooth_iterations: Number of Laplacian smoothing passes
+        smooth_iterations: Number of Laplacian smoothing passes (BEFORE decimation)
         aggressive: Enable aggressive cleanup (more decimation, hole filling)
+        preserve_detail: Use slower but higher quality decimation that preserves detail
+        post_decimate_smooth: Smoothing passes AFTER decimation (softens hard edges)
+        log_params: Save parameter log (JSON sidecar + CSV experiment log)
+        encode_params_in_filename: Modify output filename to include key params
     
     Returns:
         Dictionary with cleanup statistics
@@ -176,22 +278,40 @@ def cleanup_mesh(
             reduction = 1.0 - (target_triangles / len(mesh.faces))
             reduction = max(0.01, min(0.99, reduction))  # Clamp to valid range
             
-            # Try fast_simplification first (much faster)
-            try:
-                import fast_simplification
-                simplified_vertices, simplified_faces = fast_simplification.simplify(
-                    mesh.vertices, mesh.faces, target_reduction=reduction
-                )
-                mesh = trimesh.Trimesh(vertices=simplified_vertices, faces=simplified_faces)
-                print(f"  Decimated to {len(mesh.faces):,} triangles (fast_simplification)")
-            except ImportError:
-                # Fall back to trimesh's built-in (slower)
+            if preserve_detail:
+                # Use quadric decimation which better preserves detail and edges
+                print(f"  Using quadric decimation (preserve_detail=True)...")
                 mesh = mesh.simplify_quadric_decimation(target_triangles)
-                print(f"  Decimated to {len(mesh.faces):,} triangles (quadric)")
-            
-            stats["operations"].append(f"Decimated to {len(mesh.faces):,} triangles")
+                print(f"  Decimated to {len(mesh.faces):,} triangles (quadric - detail preserved)")
+                stats["operations"].append(f"Decimated to {len(mesh.faces):,} triangles (quadric)")
+            else:
+                # Try fast_simplification first (much faster but less quality)
+                try:
+                    import fast_simplification
+                    simplified_vertices, simplified_faces = fast_simplification.simplify(
+                        mesh.vertices, mesh.faces, target_reduction=reduction
+                    )
+                    mesh = trimesh.Trimesh(vertices=simplified_vertices, faces=simplified_faces)
+                    print(f"  Decimated to {len(mesh.faces):,} triangles (fast_simplification)")
+                    stats["operations"].append(f"Decimated to {len(mesh.faces):,} triangles (fast)")
+                except ImportError:
+                    # Fall back to trimesh's built-in (slower but better quality)
+                    mesh = mesh.simplify_quadric_decimation(target_triangles)
+                    print(f"  Decimated to {len(mesh.faces):,} triangles (quadric)")
+                    stats["operations"].append(f"Decimated to {len(mesh.faces):,} triangles (quadric)")
         except Exception as e:
             print(f"  Warning: Decimation failed: {e}")
+    
+    # Step 6: Post-decimation smoothing (softens hard edges from decimation)
+    if post_decimate_smooth > 0:
+        print(f"[Cleanup] Step 6: Post-decimation smoothing ({post_decimate_smooth} iterations)...")
+        try:
+            # Use gentler smoothing with lower lambda to preserve shape
+            trimesh.smoothing.filter_laplacian(mesh, iterations=post_decimate_smooth, lamb=0.3)
+            stats["operations"].append(f"Post-decimate smoothed ({post_decimate_smooth} iterations)")
+            print(f"  Applied {post_decimate_smooth} post-decimation smoothing passes")
+        except Exception as e:
+            print(f"  Warning: Post-decimation smoothing failed: {e}")
     
     # Final stats
     stats["output_vertices"] = len(mesh.vertices)
@@ -200,25 +320,40 @@ def cleanup_mesh(
     stats["is_winding_consistent"] = mesh.is_winding_consistent
     
     # Step 6: Export
+    # Optionally encode params in filename
+    output_path = Path(output_path)
+    if encode_params_in_filename:
+        new_name = generate_param_filename(
+            output_path.stem.replace("-CLEAN", "").replace("_cleaned", ""),
+            target_triangles,
+            preserve_detail,
+            post_decimate_smooth,
+            output_path.suffix,
+        )
+        output_path = output_path.parent / new_name
+    
     print(f"[Cleanup] Saving: {output_path}")
     
     # Determine format from extension
-    output_ext = Path(output_path).suffix.lower()
+    output_ext = output_path.suffix.lower()
     
     if output_ext == ".glb":
         # Export as GLB (binary glTF)
-        mesh.export(output_path, file_type="glb")
+        mesh.export(str(output_path), file_type="glb")
     elif output_ext == ".gltf":
-        mesh.export(output_path, file_type="gltf")
+        mesh.export(str(output_path), file_type="gltf")
     elif output_ext == ".obj":
-        mesh.export(output_path, file_type="obj")
+        mesh.export(str(output_path), file_type="obj")
     elif output_ext == ".ply":
-        mesh.export(output_path, file_type="ply")
+        mesh.export(str(output_path), file_type="ply")
     elif output_ext == ".stl":
-        mesh.export(output_path, file_type="stl")
+        mesh.export(str(output_path), file_type="stl")
     else:
         # Default to GLB
-        mesh.export(output_path, file_type="glb")
+        mesh.export(str(output_path), file_type="glb")
+    
+    # Update stats with final output path
+    stats["output_file"] = str(output_path)
     
     print(f"\n[Cleanup] Complete!")
     print(f"  Input:  {stats['input_triangles']:,} triangles")
@@ -226,6 +361,25 @@ def cleanup_mesh(
     print(f"  Reduction: {100 * (1 - stats['output_triangles'] / stats['input_triangles']):.1f}%")
     print(f"  Watertight: {stats['is_watertight']}")
     print(f"  Consistent winding: {stats['is_winding_consistent']}")
+    
+    # Save parameter log for experiment tracking
+    if log_params:
+        params = {
+            "input_path": input_path,
+            "output_path": str(output_path),
+            "target_triangles": target_triangles,
+            "smooth_iterations": smooth_iterations,
+            "preserve_detail": preserve_detail,
+            "post_decimate_smooth": post_decimate_smooth,
+            "remove_small_components": remove_small_components,
+            "min_component_ratio": min_component_ratio,
+            "fix_normals": fix_normals,
+            "fill_holes": fill_holes,
+            "aggressive": aggressive,
+        }
+        log_files = save_parameter_log(str(output_path), params, stats, save_json=True)
+        stats["param_log"] = log_files.get("json", "")
+        stats["csv_log"] = log_files.get("csv", "")
     
     return stats
 
@@ -327,8 +481,18 @@ Examples:
   # Custom settings
   python cleanup_mesh.py input.glb output.glb --target-triangles 100000 --smooth 2
   
+  # High quality cleanup (preserves detail, softens edges after decimation)
+  python cleanup_mesh.py input.glb output.glb --target-triangles 300000 --preserve-detail --post-smooth 2
+  
+  # Minimal cleanup (just fix normals and remove artifacts, no decimation)
+  python cleanup_mesh.py input.glb output.glb --target-triangles 0 --smooth 0
+  
   # Export to different format
   python cleanup_mesh.py input.glb output.obj
+  
+  # Parameter testing with auto-named output files
+  python cleanup_mesh.py input.glb --encode-params --target-triangles 300000 --preserve-detail --post-smooth 2
+  # Creates: input_t300k_pd1_ps2.glb + input_t300k_pd1_ps2.glb.cleanup.json
 """
     )
     
@@ -344,6 +508,12 @@ Examples:
     parser.add_argument("--aggressive", action="store_true",
                         help="Aggressive cleanup (more decimation, hole filling)")
     
+    parser.add_argument("--preserve-detail", action="store_true",
+                        help="Use slower quadric decimation that better preserves detail and edges")
+    
+    parser.add_argument("--post-smooth", type=int, default=0,
+                        help="Smoothing iterations AFTER decimation to soften hard edges (default: 0)")
+    
     parser.add_argument("--no-remove-components", action="store_true",
                         help="Don't remove small disconnected components")
     
@@ -354,10 +524,17 @@ Examples:
                         help="Fill holes in mesh")
     
     parser.add_argument("--smooth", type=int, default=1,
-                        help="Smoothing iterations (0 = none, default: 1)")
+                        help="Smoothing iterations BEFORE decimation (0 = none, default: 1)")
     
     parser.add_argument("--min-component-ratio", type=float, default=0.01,
                         help="Minimum component size ratio (default: 0.01 = 1%%)")
+    
+    # Logging options
+    parser.add_argument("--no-log", action="store_true",
+                        help="Don't save parameter log (JSON sidecar + CSV)")
+    
+    parser.add_argument("--encode-params", action="store_true",
+                        help="Encode key params in output filename (e.g., input_t300k_pd1_ps2.glb)")
     
     args = parser.parse_args()
     
@@ -376,8 +553,11 @@ Examples:
         return
     
     if not args.output:
-        # Default output name
-        output_path = input_path.with_stem(input_path.stem + "_cleaned")
+        # Default output name - if encoding params, use input dir
+        if args.encode_params:
+            output_path = input_path.parent / (input_path.stem + ".glb")
+        else:
+            output_path = input_path.with_stem(input_path.stem + "_cleaned")
     else:
         output_path = Path(args.output)
     
@@ -391,6 +571,10 @@ Examples:
         fill_holes=args.fill_holes,
         smooth_iterations=args.smooth,
         aggressive=args.aggressive,
+        preserve_detail=args.preserve_detail,
+        post_decimate_smooth=args.post_smooth,
+        log_params=not args.no_log,
+        encode_params_in_filename=args.encode_params,
     )
 
 

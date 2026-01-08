@@ -1,0 +1,10 @@
+# Quick update Dockerfile - uses existing v8 image as base
+# Only copies updated handler and inference scripts
+# v9: Remove unsupported sparse_steps/slat_steps parameters
+
+FROM 88dreams/trellis-runpod:v8
+
+# Copy updated handler and inference script (with sparse_steps/slat_steps removed)
+COPY handler_trellis.py /workspace/handler.py
+COPY trellis_inference.py /workspace/trellis_inference.py
+

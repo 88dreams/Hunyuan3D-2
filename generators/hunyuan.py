@@ -353,8 +353,14 @@ def run_hunyuan_runpod(
     if not endpoint_id or not api_key:
         return None, "Error: RunPod credentials required", "❌ Missing credentials"
     
-    # Determine model type
-    model_type = "full" if "Full" in model_choice else "mini"
+    # Determine model type - handle both UI formats ("full"/"mini"/"turbo" or "Full Model"/"Mini Model")
+    model_choice_lower = model_choice.lower() if model_choice else "mini"
+    if "full" in model_choice_lower:
+        model_type = "full"
+    elif "turbo" in model_choice_lower:
+        model_type = "turbo"
+    else:
+        model_type = "mini"
     
     logs.append(f"[Hunyuan3D] Model: {model_type}")
     logs.append(f"[Hunyuan3D] Steps: {steps}, Guidance: {guidance_scale}")

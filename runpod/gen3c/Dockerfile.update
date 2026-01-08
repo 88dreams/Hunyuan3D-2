@@ -1,0 +1,11 @@
+# Quick update Dockerfile - uses existing image as base
+# Only updates the handler file with new Gen3C parameters
+FROM 88dreams/gen3c-runpod:v47
+
+# Copy updated handler with movement_distance and camera_rotation support
+COPY handler_unified.py /workspace/handler.py
+
+# Update version label
+LABEL version="v48"
+LABEL description="Added movement_distance and camera_rotation parameters to Gen3C"
+

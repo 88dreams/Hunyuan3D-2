@@ -176,29 +176,68 @@ def handle_sharp_generation(
     render_video: bool,
     output_name: str,
     output_dir: str,
+    log_params: bool = True,
+    encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str]:
     """Handle SHARP generation."""
     scale_value = clamp_scale_value(image_scale)
     scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
     
+    # Generate parameter-encoded filename if requested
+    # Note: SHARP doesn't expose many params in UI, so encoding is minimal
+    effective_output_name = output_name
+    if encode_params:
+        try:
+            from scripts.experiment_logger import sharp_param_filename
+            encoded_name = sharp_param_filename(
+                base_name=output_name,
+                guidance=7.5,  # Default - not exposed in UI
+                steps=50,  # Default - not exposed in UI
+                ext=""  # No extension
+            )
+            effective_output_name = encoded_name.rstrip(".")
+        except Exception as e:
+            print(f"[SHARP] Warning: Could not encode params in filename: {e}")
+    
     try:
         if "RunPod" in exec_mode:
-            return run_sharp_runpod(
+            result = run_sharp_runpod(
                 image_path=effective_image_path,
                 endpoint_id=endpoint_id,
                 api_key=api_key,
-                output_name=output_name,
+                output_name=effective_output_name,
                 output_dir=output_dir,
                 render_video=render_video,
             )
         else:
-            return run_sharp_local(
+            result = run_sharp_local(
                 image_path=effective_image_path,
-                output_name=output_name,
+                output_name=effective_output_name,
                 output_dir=output_dir,
                 render_video=False,
             )
+        
+        # Log experiment if enabled and successful
+        output_path, logs, progress = result
+        if log_params and output_path and os.path.exists(output_path):
+            try:
+                from scripts.experiment_logger import log_sharp_experiment
+                log_files = log_sharp_experiment(
+                    output_path=output_path,
+                    input_image=effective_image_path or "",
+                    seed=0,  # SHARP doesn't expose seed in current UI
+                    guidance_scale=7.5,  # Default
+                    inference_steps=50,  # Default
+                    output_format=os.path.splitext(output_path)[1],
+                    results={"success": True, "exec_mode": exec_mode},
+                    save_json=True,
+                )
+                logs += f"\n📋 Logged to: {log_files.get('csv', 'N/A')}"
+            except Exception as e:
+                logs += f"\n⚠️ Logging failed: {e}"
+        
+        return result
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -222,6 +261,8 @@ def handle_gen3c_generation(
     video_name: str,
     seed: Optional[int],
     output_dir: str,
+    log_params: bool = True,
+    encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str]:
     """Handle GEN3C generation."""
     scale_value = clamp_scale_value(image_scale)
@@ -229,8 +270,23 @@ def handle_gen3c_generation(
     effective_image_path = scaled_path or image_path
     resolved_output_dir = output_dir.strip() if output_dir else GEN3C_DEFAULT_OUTPUT_DIR
     
+    # Generate parameter-encoded filename if requested
+    effective_video_name = video_name
+    if encode_params:
+        try:
+            from scripts.experiment_logger import gen3c_param_filename
+            encoded_name = gen3c_param_filename(
+                base_name=video_name,
+                frames=int(frames) if frames else 121,
+                trajectory=trajectory,
+                ext=""  # No extension
+            )
+            effective_video_name = encoded_name.rstrip(".")
+        except Exception as e:
+            print(f"[Gen3C] Warning: Could not encode params in filename: {e}")
+    
     try:
-        return run_gen3c_serverless(
+        result = run_gen3c_serverless(
             image_path=effective_image_path,
             endpoint_id=endpoint_id,
             api_key=api_key,
@@ -240,10 +296,39 @@ def handle_gen3c_generation(
             movement_distance=movement_distance,
             camera_rotation=camera_rotation,
             foreground_masking=foreground_mask,
-            video_name=video_name,
+            video_name=effective_video_name,
             seed=seed,
             output_dir=resolved_output_dir,
         )
+        
+        # Log experiment if enabled and successful
+        output_path, logs, progress = result
+        if log_params and output_path and os.path.exists(output_path):
+            try:
+                from scripts.experiment_logger import log_gen3c_experiment
+                # Parse camera rotation
+                try:
+                    cam_rot = float(camera_rotation) if camera_rotation else 0.0
+                except (ValueError, TypeError):
+                    cam_rot = 0.0
+                
+                log_files = log_gen3c_experiment(
+                    output_path=output_path,
+                    input_image=effective_image_path or "",
+                    seed=int(seed) if seed else 0,
+                    num_frames=int(frames) if frames else 121,
+                    guidance_scale=guidance,
+                    trajectory=trajectory,
+                    camera_rotation=cam_rot,
+                    movement_distance=movement_distance,
+                    results={"success": True, "foreground_mask": foreground_mask},
+                    save_json=True,
+                )
+                logs += f"\n📋 Logged to: {log_files.get('csv', 'N/A')}"
+            except Exception as e:
+                logs += f"\n⚠️ Logging failed: {e}"
+        
+        return output_path, logs, progress
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -269,6 +354,8 @@ def handle_lyra_generation(
     output_dir: str,
     output_ply: bool,
     output_video: bool,
+    log_params: bool = True,
+    encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str, str]:
     """Handle Lyra generation."""
     scale_value = clamp_scale_value(image_scale)
@@ -283,6 +370,21 @@ def handle_lyra_generation(
         effective_video_path = video_path
         temp_scaled = None
     
+    # Generate parameter-encoded filename if requested
+    effective_output_name = output_name
+    if encode_params:
+        try:
+            from scripts.experiment_logger import lyra_param_filename
+            encoded_name = lyra_param_filename(
+                base_name=output_name,
+                guidance=7.5,  # Default - not exposed in UI
+                sdg_steps=250,  # Default - not exposed in UI
+                ext=""  # No extension
+            )
+            effective_output_name = encoded_name.rstrip(".")
+        except Exception as e:
+            print(f"[Lyra] Warning: Could not encode params in filename: {e}")
+    
     try:
         result = run_lyra_runpod(
             image_path=effective_image_path,
@@ -296,7 +398,7 @@ def handle_lyra_generation(
             foreground_masking=foreground_masking,
             num_gaussians=num_gaussians,
             seed=int(seed) if seed else None,
-            output_name=output_name,
+            output_name=effective_output_name,
             output_dir=output_dir,
             output_ply=output_ply,
             output_video=output_video,
@@ -304,6 +406,32 @@ def handle_lyra_generation(
         
         output_path, logs, progress = result
         ply_path = output_path if output_path and output_path.endswith(".ply") else ""
+        
+        # Log experiment if enabled and successful
+        if log_params and output_path and os.path.exists(output_path):
+            try:
+                from scripts.experiment_logger import log_lyra_experiment
+                log_files = log_lyra_experiment(
+                    output_path=output_path,
+                    input_image=effective_image_path or effective_video_path or "",
+                    seed=int(seed) if seed else 0,
+                    guidance_scale=7.5,  # Default - Lyra doesn't expose this
+                    inference_steps=50,  # Default
+                    sdg_steps=250,  # Default
+                    resolution=512,  # Default
+                    mode="3dgs" if is_static else "4dgs",
+                    results={
+                        "success": True,
+                        "generation_mode": generation_mode,
+                        "num_views": num_views,
+                        "num_gaussians": num_gaussians,
+                    },
+                    save_json=True,
+                )
+                logs += f"\n📋 Logged to: {log_files.get('csv', 'N/A')}"
+            except Exception as e:
+                logs += f"\n⚠️ Logging failed: {e}"
+        
         return output_path, logs, progress, ply_path
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
@@ -324,24 +452,74 @@ def handle_trellis_generation(
     output_name: str,
     output_dir: str,
     output_format: str,
+    log_params: bool = True,
+    encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str]:
     """Handle TRELLIS.2 generation."""
     scale_value = clamp_scale_value(image_scale)
     scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
     
+    # Generate parameter-encoded filename if requested
+    effective_output_name = output_name
+    if encode_params:
+        try:
+            from scripts.experiment_logger import trellis_param_filename
+            # Parse resolution
+            try:
+                res_int = int(resolution) if resolution else 1024
+            except (ValueError, TypeError):
+                res_int = 1024
+            
+            encoded_name = trellis_param_filename(
+                base_name=output_name,
+                resolution=res_int,
+                guidance=guidance_scale,
+                ext=""  # No extension
+            )
+            effective_output_name = encoded_name.rstrip(".")
+        except Exception as e:
+            print(f"[Trellis] Warning: Could not encode params in filename: {e}")
+    
     try:
-        return run_trellis_runpod(
+        result = run_trellis_runpod(
             image_path=effective_image_path,
             endpoint_id=endpoint_id,
             api_key=api_key,
             resolution=resolution,
             guidance_scale=guidance_scale,
             seed=int(seed) if seed else None,
-            output_name=output_name,
+            output_name=effective_output_name,
             output_dir=output_dir,
             output_format=output_format,
         )
+        
+        # Log experiment if enabled and successful
+        output_path, logs, progress = result
+        if log_params and output_path and os.path.exists(output_path):
+            try:
+                from scripts.experiment_logger import log_trellis_experiment
+                # Parse resolution
+                try:
+                    res_int = int(resolution) if resolution else 1024
+                except (ValueError, TypeError):
+                    res_int = 1024
+                
+                log_files = log_trellis_experiment(
+                    output_path=output_path,
+                    input_image=effective_image_path or "",
+                    seed=int(seed) if seed else 0,
+                    resolution=res_int,
+                    guidance_scale=guidance_scale,
+                    output_format=output_format,
+                    results={"success": True},
+                    save_json=True,
+                )
+                logs += f"\n📋 Logged to: {log_files.get('csv', 'N/A')}"
+            except Exception as e:
+                logs += f"\n⚠️ Logging failed: {e}"
+        
+        return output_path, logs, progress
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -367,15 +545,36 @@ def handle_hunyuan_generation(
     remove_background: bool,
     output_name: str,
     save_location: str,
+    log_params: bool = True,
+    encode_params: bool = False,
 ) -> Tuple[Optional[str], str, str]:
     """Handle Hunyuan3D generation."""
     scale_value = clamp_scale_value(image_scale)
     scaled_path, temp_scaled = maybe_downscale_image(image_path, scale_value)
     effective_image_path = scaled_path or image_path
 
+    # Generate parameter-encoded filename if requested
+    effective_output_name = output_name
+    if encode_params:
+        try:
+            from scripts.experiment_logger import hunyuan_param_filename
+            # Generate encoded filename (without extension - the generator adds .glb)
+            encoded_name = hunyuan_param_filename(
+                base_name=output_name,
+                guidance=guidance_scale,
+                octree=int(octree_resolution) if octree_resolution else 380,
+                steps=int(steps) if steps else 40,
+                ext=""  # No extension, generator adds it
+            )
+            # Remove any trailing dots from the name
+            effective_output_name = encoded_name.rstrip(".")
+        except Exception as e:
+            print(f"[Hunyuan] Warning: Could not encode params in filename: {e}")
+            effective_output_name = output_name
+
     try:
         if exec_mode == "RunPod Serverless":
-            return run_hunyuan_runpod(
+            result = run_hunyuan_runpod(
                 image_path=effective_image_path,
                 endpoint_id=endpoint_id,
                 api_key=api_key,
@@ -385,11 +584,11 @@ def handle_hunyuan_generation(
                 octree_resolution=int(octree_resolution) if octree_resolution else 380,
                 seed=int(seed) if seed else None,
                 remove_background=remove_background,
-                output_name=output_name,
+                output_name=effective_output_name,
                 output_dir=save_location,
             )
         else:
-            return run_hunyuan(
+            result = run_hunyuan(
                 image_path=effective_image_path,
                 guidance_scale=guidance_scale,
                 steps=steps,
@@ -399,9 +598,32 @@ def handle_hunyuan_generation(
                 attention_slicing=attention_slicing,
                 cpu_offload=cpu_offload,
                 remove_background=remove_background,
-                output_name=output_name,
+                output_name=effective_output_name,
                 save_location=save_location,
             )
+        
+        # Log experiment if enabled and successful
+        output_path, logs, progress = result
+        if log_params and output_path and os.path.exists(output_path):
+            try:
+                from scripts.experiment_logger import log_hunyuan_experiment
+                log_files = log_hunyuan_experiment(
+                    output_path=output_path,
+                    input_image=effective_image_path or "",
+                    seed=int(seed) if seed else 0,
+                    guidance_scale=guidance_scale,
+                    inference_steps=steps,
+                    octree_depth=int(octree_resolution) if octree_resolution else 380,
+                    model_type=model_choice,
+                    remove_bg=remove_background,
+                    results={"success": True, "exec_mode": exec_mode},
+                    save_json=True,
+                )
+                logs += f"\n📋 Logged to: {log_files.get('csv', 'N/A')}"
+            except Exception as e:
+                logs += f"\n⚠️ Logging failed: {e}"
+        
+        return output_path, logs, progress
     finally:
         if temp_scaled and os.path.exists(temp_scaled):
             try:
@@ -470,6 +692,159 @@ def handle_mesh_extraction(
     return output_path or "", logs, status
 
 
+def handle_mesh_analyze(
+    file_input,
+    path_input: str,
+) -> Tuple[str, str]:
+    """Analyze a mesh file and return statistics."""
+    # Determine input path
+    if file_input is not None:
+        input_path = file_input.name if hasattr(file_input, 'name') else str(file_input)
+    elif path_input and path_input.strip():
+        input_path = path_input.strip()
+    else:
+        return "No input file specified", "❌ Missing input"
+    
+    if not os.path.exists(input_path):
+        return f"File not found: {input_path}", "❌ File not found"
+    
+    try:
+        # Import the cleanup script functions
+        from scripts.cleanup_mesh import analyze_mesh, TRIMESH_AVAILABLE
+        
+        if not TRIMESH_AVAILABLE:
+            return "trimesh not installed. Install with: pip install trimesh", "❌ Missing dependency"
+        
+        stats = analyze_mesh(input_path)
+        
+        # Format analysis results
+        result_lines = [
+            f"File: {os.path.basename(input_path)}",
+            f"",
+            f"Geometry:",
+            f"  Vertices: {stats['vertices']:,}",
+            f"  Triangles: {stats['triangles']:,}",
+            f"  Components: {stats['components']}",
+            f"",
+            f"Size:",
+            f"  X: {stats['size'][0]:.3f}",
+            f"  Y: {stats['size'][1]:.3f}",
+            f"  Z: {stats['size'][2]:.3f}",
+            f"",
+            f"Quality:",
+            f"  Watertight: {'✅' if stats['is_watertight'] else '❌'}",
+            f"  Consistent Winding: {'✅' if stats['is_winding_consistent'] else '❌'}",
+        ]
+        
+        if stats.get('issues'):
+            result_lines.append("")
+            result_lines.append("Issues Found:")
+            for issue in stats['issues']:
+                result_lines.append(f"  ⚠️ {issue}")
+        else:
+            result_lines.append("")
+            result_lines.append("✅ No issues detected")
+        
+        return "\n".join(result_lines), "✅ Analysis complete"
+        
+    except Exception as e:
+        return f"Error analyzing mesh: {str(e)}", f"❌ {str(e)}"
+
+
+def handle_mesh_cleanup(
+    file_input,
+    path_input: str,
+    target_triangles: int,
+    smooth_iterations: int,
+    preserve_detail: bool,
+    post_decimate_smooth: int,
+    remove_components: bool,
+    fix_normals: bool,
+    fill_holes: bool,
+    aggressive: bool,
+    min_component_ratio: float,
+    output_name: str,
+    output_dir: str,
+    output_format: str,
+    log_params: bool,
+    encode_params: bool,
+) -> Tuple[str, str, str]:
+    """Clean up a mesh file."""
+    # Determine input path
+    if file_input is not None:
+        input_path = file_input.name if hasattr(file_input, 'name') else str(file_input)
+    elif path_input and path_input.strip():
+        input_path = path_input.strip()
+    else:
+        return "", "No input file specified", "❌ Missing input"
+    
+    if not os.path.exists(input_path):
+        return "", f"File not found: {input_path}", "❌ File not found"
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Build output path
+    ext = output_format.lower()
+    output_path = os.path.join(output_dir, f"{output_name}.{ext}")
+    
+    try:
+        # Import the cleanup script functions
+        from scripts.cleanup_mesh import cleanup_mesh, TRIMESH_AVAILABLE
+        
+        if not TRIMESH_AVAILABLE:
+            return "", "trimesh not installed. Install with: pip install trimesh", "❌ Missing dependency"
+        
+        stats = cleanup_mesh(
+            input_path=input_path,
+            output_path=output_path,
+            target_triangles=int(target_triangles),
+            remove_small_components=remove_components,
+            min_component_ratio=min_component_ratio,
+            fix_normals=fix_normals,
+            fill_holes=fill_holes,
+            smooth_iterations=int(smooth_iterations),
+            aggressive=aggressive,
+            preserve_detail=preserve_detail,
+            post_decimate_smooth=int(post_decimate_smooth),
+            log_params=log_params,
+            encode_params_in_filename=encode_params,
+        )
+        
+        # Get actual output path (may have been modified if encode_params)
+        actual_output = stats.get('output_file', output_path)
+        
+        # Format log output
+        log_lines = [
+            f"Input: {stats['input_triangles']:,} triangles",
+            f"Output: {stats['output_triangles']:,} triangles",
+            f"Reduction: {100 * (1 - stats['output_triangles'] / stats['input_triangles']):.1f}%",
+            f"",
+            f"Operations performed:",
+        ]
+        for op in stats.get('operations', []):
+            log_lines.append(f"  - {op}")
+        
+        log_lines.append("")
+        log_lines.append(f"Components removed: {stats.get('components_removed', 0)}")
+        log_lines.append(f"Watertight: {'✅' if stats.get('is_watertight') else '❌'}")
+        log_lines.append(f"Consistent winding: {'✅' if stats.get('is_winding_consistent') else '❌'}")
+        
+        # Add parameter log info
+        if log_params and 'param_log' in stats:
+            log_lines.append("")
+            log_lines.append(f"📋 Parameter log: {stats['param_log']}")
+            log_lines.append(f"📊 Experiment CSV: {stats.get('csv_log', '/srv/searidge_share/outputs/logs/mesh_cleanup.csv')}")
+        log_lines.append("")
+        log_lines.append(f"Saved to: {output_path}")
+        
+        return output_path, "\n".join(log_lines), "✅ Cleanup complete!"
+        
+    except Exception as e:
+        import traceback
+        return "", f"Error: {str(e)}\n\n{traceback.format_exc()}", f"❌ {str(e)}"
+
+
 # =============================================================================
 # SIDEBAR NAVIGATION STRUCTURE
 # =============================================================================
@@ -530,6 +905,23 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     interactive=False,
                     max_lines=1,
                     elem_classes=["image-info-text"],
+                )
+            
+            # Logging controls (applies to all models)
+            with gr.Accordion("📋 Experiment Logging", open=False, elem_classes=["logging-accordion"]):
+                global_log_params = gr.Checkbox(
+                    value=True, 
+                    label="Log Parameters",
+                    info="Save JSON + CSV logs"
+                )
+                global_encode_params = gr.Checkbox(
+                    value=False,
+                    label="Encode in Filename",
+                    info="Add params to output name"
+                )
+                gr.Markdown(
+                    "📁 CSV logs: `/srv/searidge_share/outputs/logs/`",
+                    elem_classes=["log-path-info"]
                 )
             
             input_video = gr.Video(
@@ -621,15 +1013,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
                             sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
-                        
-                        with gr.Column(scale=1):
-                            with gr.Accordion("🔌 RunPod Connection", open=False):
-                                sharp_endpoint = gr.Textbox(value=DEFAULT_SHARP_ENDPOINT, label="Endpoint ID")
-                                sharp_api_key = gr.Textbox(value=DEFAULT_SHARP_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    sharp_check_btn = gr.Button("Check", size="sm")
-                                    sharp_save_btn = gr.Button("Save", size="sm")
-                                sharp_status = gr.Textbox(value="", label="Connection", interactive=False, max_lines=1)
                     
                     with gr.Accordion("📋 Logs", open=False):
                         sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
@@ -682,15 +1065,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             gen3c_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
                             gen3c_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
-                        
-                        with gr.Column(scale=1):
-                            with gr.Accordion("🔌 RunPod Connection", open=False):
-                                gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
-                                gen3c_api_key = gr.Textbox(value=DEFAULT_GEN3C_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    gen3c_check_btn = gr.Button("Check", size="sm")
-                                    gen3c_save_btn = gr.Button("Save", size="sm")
-                                gen3c_status = gr.Textbox(value="", label="Connection", interactive=False, max_lines=1)
                     
                     with gr.Accordion("📋 Logs", open=False):
                         gen3c_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
@@ -734,15 +1108,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     lyra_generate_btn = gr.Button("Generate 3DGS", variant="primary", size="lg")
                                     lyra_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
-                                
-                                with gr.Column(scale=1):
-                                    with gr.Accordion("🔌 RunPod", open=False):
-                                        lyra_endpoint = gr.Textbox(value=DEFAULT_LYRA_ENDPOINT, label="Endpoint")
-                                        lyra_api_key = gr.Textbox(value=DEFAULT_LYRA_API_KEY, label="API Key", type="password")
-                                        with gr.Row():
-                                            lyra_check_btn = gr.Button("Check", size="sm")
-                                            lyra_save_btn = gr.Button("Save", size="sm")
-                                        lyra_status = gr.Textbox(value="", interactive=False, max_lines=1)
                             
                             with gr.Accordion("📋 Logs", open=False):
                                 lyra_logs = gr.Textbox(lines=8, interactive=False)
@@ -786,15 +1151,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             trellis_generate_btn = gr.Button("Generate 3D", variant="primary", size="lg")
                             trellis_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
-                        
-                        with gr.Column(scale=1):
-                            with gr.Accordion("🔌 RunPod", open=False):
-                                trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint")
-                                trellis_api_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    trellis_check_btn = gr.Button("Check", size="sm")
-                                    trellis_save_btn = gr.Button("Save", size="sm")
-                                trellis_status = gr.Textbox(value="", interactive=False, max_lines=1)
                     
                     with gr.Accordion("📋 Logs", open=False):
                         trellis_logs = gr.Textbox(lines=8, interactive=False)
@@ -810,7 +1166,12 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     
                     with gr.Row():
                         with gr.Column(scale=2):
-                            hunyuan_model = gr.Dropdown(["mini", "turbo", "full"], value="mini", label="Model")
+                            hunyuan_model = gr.Dropdown(
+                                ["mini", "full"], 
+                                value="mini", 
+                                label="Model",
+                                info="mini: faster (2-5 min), full: higher quality (5-15 min)"
+                            )
                             
                             with gr.Accordion("⚙️ Advanced", open=False):
                                 with gr.Row():
@@ -820,9 +1181,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     hunyuan_octree = gr.Slider(256, 512, 380, step=1, label="Octree Resolution")
                                     hunyuan_seed = gr.Number(None, label="Seed", precision=0)
                                 with gr.Row():
-                                    hunyuan_fp16 = gr.Checkbox(True, label="FP16")
-                                    hunyuan_attn_slice = gr.Checkbox(True, label="Attention Slicing")
-                                    hunyuan_cpu_offload = gr.Checkbox(True, label="CPU Offload")
+                                    hunyuan_fp16 = gr.Checkbox(False, label="FP16")
+                                    hunyuan_attn_slice = gr.Checkbox(False, label="Attention Slicing")
+                                    hunyuan_cpu_offload = gr.Checkbox(False, label="CPU Offload")
                                 hunyuan_remove_bg = gr.Checkbox(True, label="Remove Background")
                             
                             with gr.Group():
@@ -832,15 +1193,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             hunyuan_exec_mode = gr.Radio(["RunPod Serverless", "Local"], value="RunPod Serverless", label="Mode", visible=False)
                             hunyuan_generate_btn = gr.Button("Generate Mesh", variant="primary", size="lg")
                             hunyuan_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
-                        
-                        with gr.Column(scale=1):
-                            with gr.Accordion("🔌 RunPod", open=False):
-                                hunyuan_endpoint = gr.Textbox(value=DEFAULT_HUNYUAN_ENDPOINT, label="Endpoint")
-                                hunyuan_api_key = gr.Textbox(value=DEFAULT_HUNYUAN_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    hunyuan_check_btn = gr.Button("Check", size="sm")
-                                    hunyuan_save_btn = gr.Button("Save", size="sm")
-                                hunyuan_status = gr.Textbox(value="", interactive=False, max_lines=1)
                     
                     with gr.Accordion("📋 Logs", open=False):
                         hunyuan_logs = gr.Textbox(lines=8, interactive=False)
@@ -849,58 +1201,128 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 with gr.TabItem("Mesh", id="mesh"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>Mesh Extraction</h1>
-                            <p>Convert 3D Gaussian Splatting to GLB mesh using Poisson surface reconstruction.</p>
+                            <h1>Mesh Tools</h1>
+                            <p>Extract meshes from 3DGS and clean up generated meshes for production use.</p>
                         </div>
                     """)
                     
-                    with gr.Row():
-                        with gr.Column(scale=2):
-                            with gr.Group():
-                                gr.Markdown("### Input PLY")
-                                mesh_ply_files = scan_for_ply_files()
-                                with gr.Row(elem_classes=["ply-input-row"]):
-                                    mesh_ply_dropdown = gr.Dropdown(
-                                        choices=mesh_ply_files, 
-                                        label="Select or enter PLY path", 
-                                        scale=5, 
-                                        allow_custom_value=True,
-                                        elem_classes=["ply-dropdown"],
-                                    )
-                                    mesh_refresh_btn = gr.Button("🔄", scale=0, elem_classes=["refresh-btn-inline"], min_width=40)
-                                mesh_format = gr.Radio(["Auto-detect", "Lyra", "SHARP", "Standard 3DGS"], value="Auto-detect", label="Format")
+                    with gr.Tabs():
+                        with gr.Tab("Extract"):
+                            with gr.Row():
+                                with gr.Column(scale=2):
+                                    with gr.Group():
+                                        gr.Markdown("### Input PLY")
+                                        mesh_ply_files = scan_for_ply_files()
+                                        with gr.Row(elem_classes=["ply-input-row"]):
+                                            mesh_ply_dropdown = gr.Dropdown(
+                                                choices=mesh_ply_files, 
+                                                label="Select or enter PLY path", 
+                                                scale=5, 
+                                                allow_custom_value=True,
+                                                elem_classes=["ply-dropdown"],
+                                            )
+                                            mesh_refresh_btn = gr.Button("🔄", scale=0, elem_classes=["refresh-btn-inline"], min_width=40)
+                                        mesh_format = gr.Radio(["Auto-detect", "Lyra", "SHARP", "Standard 3DGS"], value="Auto-detect", label="Format")
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Reconstruction Settings")
+                                        with gr.Row():
+                                            mesh_quality = gr.Dropdown(
+                                                ["High Poly (1M)", "Low Poly (200k)", "Custom"],
+                                                value="High Poly (1M)",
+                                                label="Quality",
+                                            )
+                                            mesh_poisson_depth = gr.Slider(6, 12, 10, step=1, label="Poisson Depth")
+                                        mesh_decimate = gr.Number(0, label="Decimate to (faces, 0=none)")
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Output Settings")
+                                        mesh_output_name = gr.Textbox(value="mesh_output", label="Output Name")
+                                        mesh_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                                        mesh_output_format = gr.Dropdown(["GLB", "OBJ", "PLY"], value="GLB", label="Output Format")
+                                    
+                                    mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
+                                    mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                             
-                            with gr.Group():
-                                gr.Markdown("### Reconstruction Settings")
-                                with gr.Row():
-                                    mesh_quality = gr.Dropdown(
-                                        ["High Poly (1M)", "Low Poly (200k)", "Custom"],
-                                        value="High Poly (1M)",
-                                        label="Quality",
-                                    )
-                                    mesh_poisson_depth = gr.Slider(6, 12, 10, step=1, label="Poisson Depth")
-                                mesh_decimate = gr.Number(0, label="Decimate to (faces, 0=none)")
-                            
-                            with gr.Group():
-                                gr.Markdown("### Output Settings")
-                                mesh_output_name = gr.Textbox(value="mesh_output", label="Output Name")
-                                mesh_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Output Directory")
-                                mesh_output_format = gr.Dropdown(["GLB", "OBJ", "PLY"], value="GLB", label="Output Format")
-                            
-                            mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
-                            mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            with gr.Accordion("📋 Logs", open=False):
+                                mesh_logs = gr.Textbox(lines=8, interactive=False)
                         
-                        with gr.Column(scale=1):
-                            with gr.Accordion("🔌 RunPod", open=False):
-                                mesh_endpoint = gr.Textbox(value=DEFAULT_MESH_ENDPOINT, label="Endpoint")
-                                mesh_api_key = gr.Textbox(value=DEFAULT_MESH_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    mesh_check_btn = gr.Button("Check", size="sm")
-                                    mesh_save_btn = gr.Button("Save", size="sm")
-                                mesh_status = gr.Textbox(value="", interactive=False, max_lines=1)
-                    
-                    with gr.Accordion("📋 Logs", open=False):
-                        mesh_logs = gr.Textbox(lines=8, interactive=False)
+                        with gr.Tab("Cleanup"):
+                            gr.Markdown("### Clean Up Generated Meshes")
+                            gr.Markdown("Remove artifacts, fix normals, decimate, and prepare meshes for Unity/Blender.")
+                            
+                            with gr.Row():
+                                with gr.Column(scale=2):
+                                    with gr.Group():
+                                        gr.Markdown("### Input Mesh")
+                                        cleanup_input = gr.File(
+                                            label="Drop mesh file (GLB, OBJ, PLY, STL)",
+                                            file_types=[".glb", ".gltf", ".obj", ".ply", ".stl"],
+                                        )
+                                        cleanup_input_path = gr.Textbox(
+                                            label="Or enter path",
+                                            placeholder="/path/to/mesh.glb",
+                                        )
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Cleanup Options")
+                                        with gr.Row():
+                                            cleanup_target_tris = gr.Slider(
+                                                minimum=0, maximum=500000, value=150000, step=10000,
+                                                label="Target Triangles (0=no decimation)",
+                                                info="Set to 0 to skip decimation entirely",
+                                            )
+                                            cleanup_smooth = gr.Slider(
+                                                minimum=0, maximum=5, value=0, step=1,
+                                                label="Pre-Decimation Smooth",
+                                                info="Smoothing BEFORE decimation (0 recommended)",
+                                            )
+                                        with gr.Row():
+                                            cleanup_preserve_detail = gr.Checkbox(True, label="Preserve Detail", 
+                                                info="Use higher quality decimation (slower but better edges)")
+                                            cleanup_post_smooth = gr.Slider(
+                                                minimum=0, maximum=5, value=2, step=1,
+                                                label="Post-Decimation Smooth",
+                                                info="Smoothing AFTER decimation (softens hard edges)",
+                                            )
+                                        with gr.Row():
+                                            cleanup_remove_components = gr.Checkbox(True, label="Remove Small Components")
+                                            cleanup_fix_normals = gr.Checkbox(True, label="Fix Normals")
+                                        with gr.Row():
+                                            cleanup_fill_holes = gr.Checkbox(False, label="Fill Holes")
+                                            cleanup_aggressive = gr.Checkbox(False, label="Aggressive Mode")
+                                        cleanup_min_ratio = gr.Slider(
+                                            minimum=0.001, maximum=0.1, value=0.01, step=0.001,
+                                            label="Min Component Ratio (keep components > this % of total)",
+                                        )
+                                    
+                                    with gr.Group():
+                                        gr.Markdown("### Output")
+                                        cleanup_output_name = gr.Textbox(value="cleaned_mesh", label="Output Name")
+                                        cleanup_output_dir = gr.Textbox(value=MESH_DEFAULT_OUTPUT_DIR, label="Output Directory")
+                                        cleanup_output_format = gr.Dropdown(["GLB", "OBJ", "PLY", "STL"], value="GLB", label="Format")
+                                        with gr.Row():
+                                            cleanup_log_params = gr.Checkbox(True, label="Log Parameters", 
+                                                info="Save JSON sidecar + CSV experiment log")
+                                            cleanup_encode_params = gr.Checkbox(False, label="Encode in Filename",
+                                                info="Add params to filename (e.g., mesh_t300k_pd1_ps2.glb)")
+                                    
+                                    with gr.Row():
+                                        cleanup_analyze_btn = gr.Button("Analyze", variant="secondary", size="lg")
+                                        cleanup_run_btn = gr.Button("Clean Up", variant="primary", size="lg")
+                                    cleanup_status = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                
+                                with gr.Column(scale=1):
+                                    gr.Markdown("### Analysis Results")
+                                    cleanup_analysis = gr.Textbox(
+                                        label="Mesh Info",
+                                        lines=12,
+                                        interactive=False,
+                                        placeholder="Click 'Analyze' to inspect mesh...",
+                                    )
+                            
+                            with gr.Accordion("📋 Cleanup Log", open=False):
+                                cleanup_logs = gr.Textbox(lines=8, interactive=False)
                 
                 # PAGE: SETTINGS
                 with gr.TabItem("Settings", id="settings"):
@@ -1195,30 +1617,25 @@ Mode: 3DGS for still images
                         gr.Markdown("""
 ## TRELLIS.2 (Microsoft)
 
-**What it does:** TRELLIS.2 generates structured 3D assets using a latent diffusion approach. It produces clean, well-organized meshes with consistent topology, making outputs ideal for further editing in 3D software.
+**What it does:** TRELLIS.2 generates structured 3D assets using a two-stage latent diffusion approach with O-Voxel representation. It produces clean, well-organized meshes with consistent topology and PBR materials, making outputs ideal for further editing in 3D software and game engines.
 
 ### Key Settings
 
 | Setting | Description | Range | Default |
 |---------|-------------|-------|---------|
-| **Seed** | Random seed for reproducibility | 0-999999 | 42 |
+| **Resolution** | Voxel resolution for generation | 512, 1024 | 1024 |
 | **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 7.5 |
-| **Inference Steps** | Diffusion steps | 20-100 | 50 |
-| **Sparse Steps** | Sparse structure generation | 10-50 | 20 |
-| **SLAT Steps** | SLAT refinement steps | 10-50 | 20 |
-| **Output Format** | GLB, OBJ, or 3DGS | glb/obj/3dgs | glb |
+| **Seed** | Random seed for reproducibility | 0-999999 | Random |
+| **Output Format** | GLB (with PBR), OBJ, or PLY | GLB/OBJ/PLY | GLB |
 
 ### Architectural Interior Settings
 
 For architectural interiors with TRELLIS.2:
 
 ```
-Seed: Fixed for consistency
+Resolution: 1024 (maximize detail)
 Guidance Scale: 8.0-10.0
-Inference Steps: 50-75
-Sparse Steps: 25-30 (more for complex geometry)
-SLAT Steps: 25-30 (more for refined surfaces)
-Output Format: GLB (for textured meshes)
+Output Format: GLB (preserves PBR materials)
 ```
 
 **Tips for Architectural Interiors:**
@@ -1226,6 +1643,7 @@ Output Format: GLB (for textured meshes)
 - Excellent for furniture and architectural elements
 - Good topology makes outputs suitable for game engines
 - Works well with: chairs, tables, cabinets, fixtures
+- PBR materials include Base Color, Roughness, Metallic, Opacity
 - Less suited for entire room reconstructions
 - Best for individual objects within interiors
                         """)
@@ -1233,32 +1651,144 @@ Output Format: GLB (for textured meshes)
                     # Hunyuan3D Documentation
                     with gr.Accordion("HUNYUAN3D - Text/Image to 3D", open=False):
                         gr.Markdown("""
-## HUNYUAN3D (Tencent)
+## HUNYUAN3D 2.1 (Tencent)
 
-**What it does:** Hunyuan3D generates 3D models from text prompts or images using a multi-stage pipeline. It can create both meshes and Gaussian splats, offering flexibility in output format and quality.
+**What it does:** Hunyuan3D 2.1 generates high-fidelity 3D models from images using a scalable diffusion-based pipeline. It features production-ready **Physically-Based Rendering (PBR)** materials with realistic light interactions (metallic reflections, subsurface scattering). Based on [Hunyuan3D-2.1](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1).
+
+**Models Available:**
+- **Mini Model (Faster):** 3.3B parameters, ~10 GB VRAM, 2-5 minutes
+- **Full Model (Higher Quality):** Requires ~29 GB VRAM, 5-15 minutes
 
 ### Key Settings
 
 | Setting | Description | Range | Default |
 |---------|-------------|-------|---------|
 | **Seed** | Random seed for reproducibility | 0-999999 | 42 |
-| **Guidance Scale** | Controls prompt adherence | 1.0-20.0 | 7.5 |
-| **Inference Steps** | Diffusion steps | 20-100 | 50 |
-| **Octree Depth** | Mesh resolution (higher = more detail) | 6-10 | 8 |
-| **Remove Background** | Auto background removal | true/false | true |
-| **Output Format** | GLB, OBJ, or PLY | glb/obj/ply | glb |
+| **Guidance Scale** | Controls adherence to input image | 1.0-15.0 | 9.0 |
+| **Inference Steps** | Diffusion sampling steps | 10-100 | 40 |
+| **Octree Resolution** | Mesh detail level (higher = more detail, slower) | 128-512 | 380 |
+| **Remove Background** | Auto background removal before processing | true/false | true |
+
+### Memory Optimization Options (Local Mode Only)
+
+These options help run Hunyuan3D on GPUs with limited VRAM. They are only relevant for **Local** execution mode - RunPod Serverless handles memory management automatically.
+
+| Setting | Description | VRAM Savings | Trade-off |
+|---------|-------------|--------------|-----------|
+| **FP16** | Half-precision floating point | ~50% | Minimal quality loss |
+| **Attention Slicing** | Process attention in chunks | ~25-40% | Slower generation |
+| **CPU Offload** | Move unused layers to RAM | ~60-70% | Much slower |
+
+---
+
+#### FP16 (Half Precision)
+
+**What it does:** Converts model weights and computations from 32-bit (FP32) to 16-bit (FP16) floating point numbers.
+
+**Technical details:**
+- Uses `torch.float16` dtype instead of `torch.float32`
+- Each number uses 2 bytes instead of 4 bytes
+- Supported natively by modern NVIDIA GPUs (Tensor Cores)
+
+**Benefits:**
+- Reduces VRAM usage by approximately **50%**
+- Often **faster** on GPUs with Tensor Cores (RTX 20/30/40 series)
+- Minimal impact on output quality for most use cases
+
+**When to use:**
+- ✅ **Always enable** unless you have 24GB+ VRAM and notice quality issues
+- ✅ Safe for all architectural interior work
+- ⚠️ Very rare edge cases may show minor artifacts in fine details
+
+---
+
+#### Attention Slicing
+
+**What it does:** Splits the attention computation into smaller sequential chunks instead of computing it all at once.
+
+**Technical details:**
+- The attention mechanism in diffusion models requires storing large intermediate matrices
+- Attention slicing processes these in smaller "slices" sequentially
+- Calls `pipeline.enable_attention_slicing()` on the diffusers pipeline
+
+**Benefits:**
+- Reduces **peak** VRAM usage by ~25-40%
+- Allows running on GPUs that would otherwise run out of memory
+
+**Trade-offs:**
+- Generation takes **longer** (10-30% slower)
+- Sequential processing can't be parallelized
+
+**When to use:**
+- ✅ Enable if you get OOM (Out of Memory) errors with just FP16
+- ✅ Good for 8-12 GB GPUs running Mini Model
+- ❌ Disable if you have plenty of VRAM and want faster generation
+
+---
+
+#### CPU Offload
+
+**What it does:** Moves model layers to system RAM when not actively being used, then moves them back to GPU when needed.
+
+**Technical details:**
+- Uses `pipeline.enable_sequential_cpu_offload()` from diffusers
+- Only the currently active layer stays on GPU
+- Other layers wait in system RAM
+
+**Benefits:**
+- **Dramatically** reduces VRAM requirements (can run on 6-8 GB GPUs)
+- Makes it possible to run large models on consumer GPUs
+
+**Trade-offs:**
+- **Significantly slower** (2-5x longer generation time)
+- Requires sufficient system RAM (16GB+ recommended)
+- Heavy CPU-GPU data transfer overhead
+
+**When to use:**
+- ✅ Only as a **last resort** for very limited VRAM (6-8 GB GPUs)
+- ✅ When you need to run Full Model but only have 12 GB VRAM
+- ❌ Avoid if possible - use RunPod Serverless instead for faster results
+
+---
+
+### VRAM Requirements
+
+| Configuration | Approximate VRAM | Generation Time |
+|--------------|------------------|-----------------|
+| Full Model (no optimization) | 29 GB | 5-10 min |
+| Full Model + FP16 | ~15 GB | 5-10 min |
+| Full Model + FP16 + Attention Slicing | ~10-12 GB | 7-15 min |
+| Mini Model (no optimization) | 21 GB | 2-5 min |
+| Mini Model + FP16 | ~10 GB | 2-5 min |
+| Mini Model + FP16 + Attention Slicing | ~6-8 GB | 3-7 min |
+| Any + CPU Offload | ~6-8 GB | 15-30 min |
+
+### Recommended Settings by GPU
+
+| GPU VRAM | Recommended Configuration |
+|----------|--------------------------|
+| 24GB+ (RTX 4090, A100) | FP16 ON, others OFF |
+| 16GB (RTX 4080, A4000) | FP16 ON, Attention Slicing ON |
+| 12GB (RTX 3080, 4070) | FP16 ON, Attention Slicing ON, Mini Model |
+| 8GB (RTX 3070, 4060) | All ON, Mini Model only |
+| <8GB | Use RunPod Serverless instead |
 
 ### Architectural Interior Settings
 
 For architectural interiors with Hunyuan3D:
 
 ```
+Model: Mini Model (Faster) for iteration, Full Model for final
 Seed: Fixed for reproducibility
 Guidance Scale: 10.0-12.0 (higher for detailed objects)
-Inference Steps: 75-100
-Octree Depth: 9-10 (maximize for architectural detail)
+Inference Steps: 40-60 (higher for complex shapes)
+Octree Resolution: 380-450 (balance detail vs speed)
 Remove Background: true (for object isolation)
-Output Format: GLB (for textured meshes)
+
+Memory (if running locally):
+FP16: ON (always recommended)
+Attention Slicing: ON if needed
+CPU Offload: OFF unless necessary
 ```
 
 **Tips for Architectural Interiors:**
@@ -1268,6 +1798,7 @@ Output Format: GLB (for textured meshes)
 - Works well for: furniture, decor, lighting fixtures
 - Can generate from reference images of real furniture
 - Combine with other models for complete room scenes
+- Use RunPod Serverless to avoid local VRAM limitations
                         """)
                     
                     # MESH Extraction Documentation
@@ -1304,6 +1835,108 @@ Output Format: GLB (preserves vertex colors as texture)
 - Higher point weight = more detail preservation (good for furniture)
 - Process individual objects separately for best results
 - Large room scans may need to be segmented first
+                        """)
+                    
+                    # MESH Cleanup Documentation
+                    with gr.Accordion("MESH CLEANUP - Prepare Meshes for Production", open=False):
+                        gr.Markdown("""
+## Mesh Cleanup
+
+**What it does:** Cleans up meshes generated by AI models (Hunyuan3D, SHARP, TRELLIS.2, etc.) for use in Unity, Blender, or other production environments. Addresses common issues like floating artifacts, excessive polygon counts, and inconsistent normals.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Target Triangles** | Reduce mesh to this triangle count (0 = no decimation) | 0-500,000 | 150,000 |
+| **Pre-Decimation Smooth** | Smoothing BEFORE decimation | 0-5 | 0 |
+| **Preserve Detail** | Use higher quality decimation algorithm | on/off | on |
+| **Post-Decimation Smooth** | Smoothing AFTER decimation (softens hard edges) | 0-5 | 2 |
+| **Remove Small Components** | Delete disconnected floating artifacts | on/off | on |
+| **Fix Normals** | Recompute and fix inconsistent normals | on/off | on |
+| **Fill Holes** | Attempt to close holes in mesh | on/off | off |
+| **Aggressive Mode** | Enable all cleanup options with stronger settings | on/off | off |
+| **Min Component Ratio** | Keep components with at least this % of total faces | 0.1%-10% | 1% |
+
+### Understanding Each Option
+
+**Target Triangles:**
+- 500,000: High detail, large file size
+- 300,000: Recommended for detailed architectural interiors
+- 150,000: Good balance for most uses
+- 50,000: Low poly, fast rendering, mobile-friendly
+- 0: No decimation, keep original triangle count
+
+**Preserve Detail (NEW - IMPORTANT):**
+When ON, uses quadric decimation which better preserves important edges and detail. Slower but produces much better results. **Always keep ON for architectural interiors.**
+
+When OFF, uses fast_simplification which is faster but creates more faceted/sharp edges.
+
+**Pre-Decimation Smooth:**
+Smoothing applied BEFORE decimation. Generally keep at 0 - smoothing before decimation can blur important details.
+
+**Post-Decimation Smooth (NEW - IMPORTANT):**
+Smoothing applied AFTER decimation. This is the key to softening the hard/faceted edges that decimation creates.
+- 0: No post-smoothing (keep sharp decimated edges)
+- 1-2: Light smoothing (recommended for architectural)
+- 3-4: Moderate smoothing (good for organic shapes)
+- 5: Heavy smoothing (may over-smooth)
+
+**Remove Small Components:**
+AI-generated meshes often have floating artifacts - small disconnected pieces that appear as noise. This option removes components smaller than the Min Component Ratio threshold.
+
+**Fix Normals:**
+Ensures all face normals point outward consistently. Essential for proper lighting in game engines.
+
+**Fill Holes:**
+Attempts to close gaps in the mesh. Use with caution - can create unwanted geometry on intentionally open surfaces.
+
+**Aggressive Mode:**
+Enables: 100k triangle target, 2+ smoothing passes, hole filling, 2% component threshold. Use for heavily problematic meshes.
+
+### Architectural Interior Settings
+
+For architectural interior meshes (RECOMMENDED):
+
+```
+Target Triangles: 250,000-350,000 (preserve detail)
+Pre-Decimation Smooth: 0 (don't blur before decimation)
+Preserve Detail: ON (critical for quality)
+Post-Decimation Smooth: 2 (soften decimation artifacts)
+Remove Small Components: ON (clean up artifacts)
+Fix Normals: ON (essential for lighting)
+Fill Holes: OFF (preserve intentional openings like windows)
+Aggressive Mode: OFF
+Min Component Ratio: 1% (default)
+```
+
+**Why these settings work:**
+- Higher triangle target (300k vs 150k) preserves more detail
+- Preserve Detail ON uses better decimation algorithm
+- Post-decimation smoothing softens the hard edges created by decimation
+- No pre-decimation smoothing keeps original detail intact
+
+**Tips for Architectural Interiors:**
+- **Problem: Faceted/sharp edges after cleanup** → Increase Post-Decimation Smooth to 2-3
+- **Problem: Lost too much detail** → Increase Target Triangles to 300k-400k
+- **Problem: Edges still too sharp** → Enable Preserve Detail
+- Higher triangle counts for detailed furniture, lower for walls
+- Always fix normals for proper lighting in Unity/Unreal
+- Use Analyze first to check mesh quality before cleanup
+- For very large meshes, consider splitting into separate objects first
+
+### Analyze vs Clean Up
+
+**Analyze Button:**
+- Inspects mesh without modifying
+- Shows: vertices, triangles, components, size, watertight status
+- Identifies issues: floating components, holes, high poly count
+- Use this first to understand what cleanup is needed
+
+**Clean Up Button:**
+- Applies selected cleanup operations
+- Saves cleaned mesh to output location
+- Shows reduction statistics and operations performed
                         """)
                     
                     # General Tips Section
@@ -1409,22 +2042,11 @@ Output Format: GLB (preserves vertex colors as texture)
         fn=handle_sharp_generation,
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
-            sharp_endpoint, sharp_api_key, gr.State(False),
+            settings_gen3c_endpoint, settings_gen3c_key, gr.State(False),
             sharp_output_name, sharp_output_dir,
+            global_log_params, global_encode_params,
         ],
         outputs=[output_display, sharp_logs, sharp_progress],
-    )
-    
-    sharp_check_btn.click(
-        fn=check_serverless_status,
-        inputs=[sharp_endpoint, sharp_api_key],
-        outputs=[sharp_status],
-    )
-    
-    sharp_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "sharp")[0],
-        inputs=[sharp_endpoint, sharp_api_key],
-        outputs=[sharp_status],
     )
     
     # =========================================================================
@@ -1435,25 +2057,14 @@ Output Format: GLB (preserves vertex colors as texture)
         fn=handle_gen3c_generation,
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
-            gen3c_endpoint, gen3c_api_key,
+            settings_gen3c_endpoint, settings_gen3c_key,
             gen3c_guidance, gen3c_frames, gen3c_trajectory,
             gen3c_movement_distance, gen3c_camera_rotation,
             gen3c_foreground,
             gen3c_video_name, gen3c_seed, gen3c_output_dir,
+            global_log_params, global_encode_params,
         ],
         outputs=[output_video, gen3c_logs, gen3c_progress],
-    )
-    
-    gen3c_check_btn.click(
-        fn=check_serverless_status,
-        inputs=[gen3c_endpoint, gen3c_api_key],
-        outputs=[gen3c_status],
-    )
-    
-    gen3c_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "gen3c")[0],
-        inputs=[gen3c_endpoint, gen3c_api_key],
-        outputs=[gen3c_status],
     )
     
     # =========================================================================
@@ -1464,26 +2075,15 @@ Output Format: GLB (preserves vertex colors as texture)
         fn=handle_lyra_generation,
         inputs=[
             input_image, input_video, image_scale,
-            lyra_endpoint, lyra_api_key,
+            settings_gen3c_endpoint, settings_gen3c_key,
             lyra_mode, lyra_views, lyra_motion,
             lyra_multi_traj, lyra_fg_mask,
             lyra_gaussians, lyra_seed,
             lyra_output_name, lyra_output_dir,
             lyra_out_ply, lyra_out_video,
+            global_log_params, global_encode_params,
         ],
         outputs=[output_display, lyra_logs, lyra_progress, lyra_ply_path],
-    )
-    
-    lyra_check_btn.click(
-        fn=check_lyra_status,
-        inputs=[lyra_endpoint, lyra_api_key],
-        outputs=[lyra_status],
-    )
-    
-    lyra_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "lyra")[0],
-        inputs=[lyra_endpoint, lyra_api_key],
-        outputs=[lyra_status],
     )
     
     # Lyra PLY dropdown
@@ -1506,23 +2106,12 @@ Output Format: GLB (preserves vertex colors as texture)
         fn=handle_trellis_generation,
         inputs=[
             input_image, image_scale,
-            trellis_endpoint, trellis_api_key,
+            settings_trellis_endpoint, settings_trellis_key,
             trellis_resolution, trellis_guidance, trellis_seed,
             trellis_output_name, trellis_output_dir, trellis_format,
+            global_log_params, global_encode_params,
         ],
         outputs=[output_display, trellis_logs, trellis_progress],
-    )
-    
-    trellis_check_btn.click(
-        fn=check_trellis_status,
-        inputs=[trellis_endpoint, trellis_api_key],
-        outputs=[trellis_status],
-    )
-    
-    trellis_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "trellis")[0],
-        inputs=[trellis_endpoint, trellis_api_key],
-        outputs=[trellis_status],
     )
     
     # =========================================================================
@@ -1533,25 +2122,14 @@ Output Format: GLB (preserves vertex colors as texture)
         fn=handle_hunyuan_generation,
         inputs=[
             input_image, image_scale, hunyuan_exec_mode,
-            hunyuan_endpoint, hunyuan_api_key,
+            settings_hunyuan_endpoint, settings_hunyuan_key,
             hunyuan_guidance, hunyuan_steps, hunyuan_seed, hunyuan_octree,
             hunyuan_model,
             hunyuan_fp16, hunyuan_attn_slice, hunyuan_cpu_offload, hunyuan_remove_bg,
             hunyuan_output_name, hunyuan_output_dir,
+            global_log_params, global_encode_params,
         ],
         outputs=[output_display, hunyuan_logs, hunyuan_progress],
-    )
-    
-    hunyuan_check_btn.click(
-        fn=check_hunyuan_runpod_status,
-        inputs=[hunyuan_endpoint, hunyuan_api_key],
-        outputs=[hunyuan_status],
-    )
-    
-    hunyuan_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "hunyuan")[0],
-        inputs=[hunyuan_endpoint, hunyuan_api_key],
-        outputs=[hunyuan_status],
     )
     
     # =========================================================================
@@ -1567,21 +2145,9 @@ Output Format: GLB (preserves vertex colors as texture)
             gr.State(False), gr.State("2048"), gr.State("short"),
             gr.State(0.01), gr.State(32),
             mesh_output_name, mesh_output_format, mesh_output_dir,
-            mesh_endpoint, mesh_api_key,
+            settings_gen3c_endpoint, settings_gen3c_key,
         ],
         outputs=[output_display, mesh_logs, mesh_progress],
-    )
-    
-    mesh_check_btn.click(
-        fn=check_sugar_status,
-        inputs=[mesh_endpoint, mesh_api_key],
-        outputs=[mesh_status],
-    )
-    
-    mesh_save_btn.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "mesh_extraction")[0],
-        inputs=[mesh_endpoint, mesh_api_key],
-        outputs=[mesh_status],
     )
     
     # Mesh PLY dropdown
@@ -1589,6 +2155,57 @@ Output Format: GLB (preserves vertex colors as texture)
         return gr.update(choices=scan_for_ply_files())
     
     mesh_refresh_btn.click(fn=refresh_mesh_ply, outputs=[mesh_ply_dropdown])
+    
+    # =========================================================================
+    # MESH CLEANUP EVENT HANDLERS
+    # =========================================================================
+    
+    def get_cleanup_output_name(file_input, path_input):
+        """Generate default output name from input file."""
+        import os
+        if file_input is not None:
+            input_path = file_input.name if hasattr(file_input, 'name') else str(file_input)
+        elif path_input and path_input.strip():
+            input_path = path_input.strip()
+        else:
+            return "cleaned_mesh"
+        
+        # Get base name without extension
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        return f"{base_name}-CLEAN"
+    
+    cleanup_input.change(
+        fn=lambda f: get_cleanup_output_name(f, None),
+        inputs=[cleanup_input],
+        outputs=[cleanup_output_name],
+    )
+    
+    cleanup_input_path.change(
+        fn=lambda p: get_cleanup_output_name(None, p),
+        inputs=[cleanup_input_path],
+        outputs=[cleanup_output_name],
+    )
+    
+    cleanup_analyze_btn.click(
+        fn=handle_mesh_analyze,
+        inputs=[cleanup_input, cleanup_input_path],
+        outputs=[cleanup_analysis, cleanup_status],
+    )
+    
+    cleanup_run_btn.click(
+        fn=handle_mesh_cleanup,
+        inputs=[
+            cleanup_input, cleanup_input_path,
+            cleanup_target_tris, cleanup_smooth,
+            cleanup_preserve_detail, cleanup_post_smooth,
+            cleanup_remove_components, cleanup_fix_normals,
+            cleanup_fill_holes, cleanup_aggressive,
+            cleanup_min_ratio,
+            cleanup_output_name, cleanup_output_dir, cleanup_output_format,
+            cleanup_log_params, cleanup_encode_params,
+        ],
+        outputs=[output_display, cleanup_logs, cleanup_status],
+    )
     
     # =========================================================================
     # SETTINGS EVENT HANDLERS
