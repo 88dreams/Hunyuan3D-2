@@ -63,9 +63,18 @@ class PipelineConfig:
         self.target_triangles = 100000
         self.smooth_iterations = 2
         
-        # Paths
-        self.workspace = Path("/workspace/sv3d_2dgs")
-        self.two_dgs_path = Path("/workspace/2d-gaussian-splatting")
+        # Paths - Use network volume if available, otherwise /workspace
+        if Path("/runpod-volume/sv3d_2dgs").exists():
+            # Network volume installation
+            self.workspace = Path("/runpod-volume/sv3d_2dgs")
+            self.two_dgs_path = Path("/runpod-volume/sv3d_2dgs/2d-gaussian-splatting")
+            # Set model cache
+            os.environ['HF_HOME'] = str(self.workspace / "models" / "huggingface")
+            os.environ['TRANSFORMERS_CACHE'] = str(self.workspace / "models" / "huggingface")
+        else:
+            # Fallback to /workspace
+            self.workspace = Path("/workspace/sv3d_2dgs")
+            self.two_dgs_path = Path("/workspace/2d-gaussian-splatting")
 
 
 # =============================================================================

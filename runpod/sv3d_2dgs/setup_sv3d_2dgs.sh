@@ -1,17 +1,26 @@
 #!/bin/bash
 # =============================================================================
-# SV3D + 2DGS Setup Script for RunPod
+# SV3D + 2DGS Setup Script for RunPod (Network Volume Installation)
 # =============================================================================
 #
-# This script sets up the environment for SV3D multi-view generation and
-# 2DGS training on a RunPod pod.
+# This script installs SV3D and 2DGS on your RunPod network volume WITHOUT
+# interfering with existing installations (Gen3C, Lyra, SHARP, etc.).
+#
+# Key features:
+#   - Installs to /runpod-volume/sv3d_2dgs/ (separate directory)
+#   - Creates new conda environment "sv3d-2dgs" (not cosmos-predict1)
+#   - Does NOT modify existing environments or installations
+#   - Persists across pod restarts (on network volume)
 #
 # Usage:
-#   1. Start a RunPod pod with PyTorch template (A6000 or A100 recommended)
+#   1. Start a RunPod pod with your network volume mounted
 #   2. SSH into the pod or use web terminal
 #   3. Run: bash setup_sv3d_2dgs.sh
 #
-# Estimated time: 15-20 minutes
+# After setup, activate with:
+#   conda activate sv3d-2dgs
+#
+# Estimated time: 20-30 minutes (first run), ~2 minutes (subsequent runs)
 #
 # =============================================================================
 
@@ -19,39 +28,154 @@ set -e  # Exit on error
 
 echo "=============================================="
 echo "  SV3D + 2DGS Environment Setup"
+echo "  (Network Volume Installation)"
 echo "=============================================="
 echo ""
-echo "This will install:"
-echo "  - SV3D (Stable Video 3D) for multi-view generation"
-echo "  - 2DGS (2D Gaussian Splatting) for 3D reconstruction"
-echo "  - Depth Anything V2 for depth estimation"
-echo "  - Supporting libraries for mesh extraction"
+
+# -----------------------------------------------------------------------------
+# Configuration - EDIT THESE IF NEEDED
+# -----------------------------------------------------------------------------
+
+# Network volume mount point (standard RunPod location)
+VOLUME_PATH="/runpod-volume"
+
+# Installation directory (separate from existing installs)
+SV3D_2DGS_ROOT="${VOLUME_PATH}/sv3d_2dgs"
+
+# Conda environment name (separate from cosmos-predict1)
+CONDA_ENV_NAME="sv3d-2dgs"
+
+# 2DGS repository location
+TWO_DGS_DIR="${SV3D_2DGS_ROOT}/2d-gaussian-splatting"
+
+# Working directories
+INPUTS_DIR="${SV3D_2DGS_ROOT}/inputs"
+OUTPUTS_DIR="${SV3D_2DGS_ROOT}/outputs"
+MODELS_DIR="${SV3D_2DGS_ROOT}/models"
+SCRIPTS_DIR="${SV3D_2DGS_ROOT}/scripts"
+
+# -----------------------------------------------------------------------------
+# Check Prerequisites
+# -----------------------------------------------------------------------------
+
+echo "Checking prerequisites..."
+
+# Check if network volume is mounted
+if [ ! -d "${VOLUME_PATH}" ]; then
+    echo "❌ ERROR: Network volume not found at ${VOLUME_PATH}"
+    echo "   Make sure your network volume is mounted."
+    echo "   On RunPod, this should be automatic if you have a volume attached."
+    exit 1
+fi
+
+echo "✓ Network volume found at ${VOLUME_PATH}"
+
+# Check available space
+AVAILABLE_SPACE=$(df -BG "${VOLUME_PATH}" | tail -1 | awk '{print $4}' | sed 's/G//')
+echo "  Available space: ${AVAILABLE_SPACE}GB"
+
+if [ "${AVAILABLE_SPACE}" -lt 30 ]; then
+    echo "⚠ WARNING: Less than 30GB available. You may run out of space."
+    echo "   SV3D + 2DGS requires ~25GB for models and dependencies."
+    read -p "Continue anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Check if conda is available
+if ! command -v conda &> /dev/null; then
+    echo "❌ ERROR: conda not found. Please use a RunPod template with conda."
+    exit 1
+fi
+
+echo "✓ Conda found"
+
+# Show existing installations (for awareness)
 echo ""
-echo "Estimated time: 15-20 minutes"
+echo "Existing installations on volume:"
+ls -la ${VOLUME_PATH}/ 2>/dev/null | grep -E "^d" | awk '{print "  - " $NF}' || echo "  (none)"
 echo ""
 
 # -----------------------------------------------------------------------------
-# Configuration
+# Create Directory Structure
 # -----------------------------------------------------------------------------
 
-WORKSPACE="/workspace"
-SV3D_2DGS_DIR="${WORKSPACE}/sv3d_2dgs"
-TWO_DGS_DIR="${WORKSPACE}/2d-gaussian-splatting"
+echo "Creating directory structure..."
 
-# Create workspace directories
-mkdir -p ${SV3D_2DGS_DIR}
-mkdir -p ${SV3D_2DGS_DIR}/inputs
-mkdir -p ${SV3D_2DGS_DIR}/outputs
-mkdir -p ${SV3D_2DGS_DIR}/models
+mkdir -p "${SV3D_2DGS_ROOT}"
+mkdir -p "${INPUTS_DIR}"
+mkdir -p "${OUTPUTS_DIR}"
+mkdir -p "${MODELS_DIR}"
+mkdir -p "${SCRIPTS_DIR}"
 
-cd ${WORKSPACE}
+echo "✓ Directories created:"
+echo "    Root:    ${SV3D_2DGS_ROOT}"
+echo "    Inputs:  ${INPUTS_DIR}"
+echo "    Outputs: ${OUTPUTS_DIR}"
+echo "    Models:  ${MODELS_DIR}"
+echo "    Scripts: ${SCRIPTS_DIR}"
 
 # -----------------------------------------------------------------------------
-# Step 1: System Dependencies
+# Check if Already Installed
+# -----------------------------------------------------------------------------
+
+INSTALL_MARKER="${SV3D_2DGS_ROOT}/.installed"
+
+if [ -f "${INSTALL_MARKER}" ]; then
+    echo ""
+    echo "=============================================="
+    echo "  Installation already exists!"
+    echo "=============================================="
+    echo ""
+    echo "SV3D + 2DGS is already installed on this volume."
+    echo ""
+    echo "To use it, run:"
+    echo "  source ${SV3D_2DGS_ROOT}/activate.sh"
+    echo ""
+    echo "To re-install from scratch, delete the marker file:"
+    echo "  rm ${INSTALL_MARKER}"
+    echo "  bash setup_sv3d_2dgs.sh"
+    echo ""
+    
+    # Still make sure the conda env is activated
+    source $(conda info --base)/etc/profile.d/conda.sh
+    conda activate ${CONDA_ENV_NAME} 2>/dev/null || true
+    
+    exit 0
+fi
+
+# -----------------------------------------------------------------------------
+# Step 1: Create Conda Environment
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[1/7] Installing system dependencies..."
+echo "[1/7] Creating conda environment: ${CONDA_ENV_NAME}"
+echo "----------------------------------------------"
+
+# Initialize conda for this shell
+source $(conda info --base)/etc/profile.d/conda.sh
+
+# Check if environment already exists
+if conda env list | grep -q "^${CONDA_ENV_NAME} "; then
+    echo "  Environment exists, activating..."
+    conda activate ${CONDA_ENV_NAME}
+else
+    echo "  Creating new environment..."
+    conda create -n ${CONDA_ENV_NAME} python=3.10 -y -q
+    conda activate ${CONDA_ENV_NAME}
+fi
+
+echo "✓ Conda environment ready: ${CONDA_ENV_NAME}"
+echo "  Python: $(python --version)"
+
+# -----------------------------------------------------------------------------
+# Step 2: System Dependencies
+# -----------------------------------------------------------------------------
+
+echo ""
+echo "[2/7] Installing system dependencies..."
 echo "----------------------------------------------"
 
 apt-get update -qq
@@ -65,22 +189,29 @@ apt-get install -y -qq \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    colmap \
     > /dev/null 2>&1
+
+# COLMAP (optional, for premium multi-photo path)
+apt-get install -y -qq colmap > /dev/null 2>&1 || echo "  (COLMAP not available, skipping)"
 
 echo "✓ System dependencies installed"
 
 # -----------------------------------------------------------------------------
-# Step 2: Python Dependencies (Core)
+# Step 3: Python Dependencies (Core)
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[2/7] Installing core Python dependencies..."
+echo "[3/7] Installing core Python dependencies..."
 echo "----------------------------------------------"
 
 pip install --upgrade pip -q
 
 # Core ML libraries
+pip install -q \
+    torch==2.1.0 \
+    torchvision==0.16.0 \
+    --index-url https://download.pytorch.org/whl/cu118
+
 pip install -q \
     numpy>=1.24.0 \
     scipy>=1.11.0 \
@@ -93,11 +224,11 @@ pip install -q \
 echo "✓ Core Python dependencies installed"
 
 # -----------------------------------------------------------------------------
-# Step 3: SV3D Dependencies
+# Step 4: SV3D Dependencies
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[3/7] Installing SV3D dependencies..."
+echo "[4/7] Installing SV3D dependencies..."
 echo "----------------------------------------------"
 
 pip install -q \
@@ -112,21 +243,19 @@ pip install -q rembg[gpu]
 echo "✓ SV3D dependencies installed"
 
 # -----------------------------------------------------------------------------
-# Step 4: Clone and Install 2DGS
+# Step 5: Clone and Install 2DGS
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[4/7] Cloning and installing 2D Gaussian Splatting..."
+echo "[5/7] Cloning and installing 2D Gaussian Splatting..."
 echo "----------------------------------------------"
 
-cd ${WORKSPACE}
-
 if [ -d "${TWO_DGS_DIR}" ]; then
-    echo "2DGS directory exists, pulling latest..."
+    echo "  2DGS directory exists, pulling latest..."
     cd ${TWO_DGS_DIR}
     git pull
 else
-    echo "Cloning 2DGS repository..."
+    echo "  Cloning 2DGS repository..."
     git clone https://github.com/hbb1/2d-gaussian-splatting.git ${TWO_DGS_DIR}
     cd ${TWO_DGS_DIR}
 fi
@@ -135,73 +264,88 @@ fi
 pip install -q -r requirements.txt
 
 # Build CUDA extensions
-echo "Building 2DGS CUDA extensions (this may take a few minutes)..."
+echo "  Building 2DGS CUDA extensions (this may take a few minutes)..."
 pip install -q submodules/diff-gaussian-rasterization-2d
 pip install -q submodules/simple-knn
 
 echo "✓ 2DGS installed"
 
 # -----------------------------------------------------------------------------
-# Step 5: Depth Estimation Dependencies
-# -----------------------------------------------------------------------------
-
-echo ""
-echo "[5/7] Installing depth estimation dependencies..."
-echo "----------------------------------------------"
-
-pip install -q \
-    einops>=0.7.0 \
-    timm>=0.9.0
-
-echo "✓ Depth estimation dependencies installed"
-
-# -----------------------------------------------------------------------------
 # Step 6: Mesh Processing Dependencies
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[6/7] Installing mesh processing dependencies..."
+echo "[6/7] Installing depth estimation and mesh processing..."
 echo "----------------------------------------------"
 
+# Depth estimation
+pip install -q \
+    einops>=0.7.0 \
+    timm>=0.9.0
+
+# Mesh processing
 pip install -q \
     trimesh>=4.0.0 \
     open3d>=0.17.0 \
     pymeshlab>=2023.12
 
-echo "✓ Mesh processing dependencies installed"
+echo "✓ Depth and mesh dependencies installed"
 
 # -----------------------------------------------------------------------------
-# Step 7: Download Models (Optional - uncomment to pre-download)
+# Step 7: Download Models
 # -----------------------------------------------------------------------------
 
 echo ""
-echo "[7/7] Pre-downloading models..."
+echo "[7/7] Pre-downloading models to network volume..."
 echo "----------------------------------------------"
 
-# Pre-download SV3D model
-echo "Downloading SV3D model (this may take a few minutes)..."
+# Set Hugging Face cache to network volume
+export HF_HOME="${MODELS_DIR}/huggingface"
+export TRANSFORMERS_CACHE="${MODELS_DIR}/huggingface"
+mkdir -p "${HF_HOME}"
+
+# Download SV3D model
+echo "  Downloading SV3D model (this may take several minutes)..."
 python -c "
+import os
+os.environ['HF_HOME'] = '${HF_HOME}'
+os.environ['TRANSFORMERS_CACHE'] = '${HF_HOME}'
 from diffusers import StableVideo3DPipeline
 import torch
-print('Downloading SV3D...')
+print('    Downloading SV3D...')
 pipe = StableVideo3DPipeline.from_pretrained(
     'stabilityai/sv3d',
     torch_dtype=torch.float16,
     variant='fp16',
+    cache_dir='${HF_HOME}',
 )
-print('SV3D downloaded successfully!')
+print('    SV3D downloaded successfully!')
+del pipe
 "
 
-# Pre-download Depth Anything V2
-echo "Downloading Depth Anything V2..."
+# Download Depth Anything V2
+echo "  Downloading Depth Anything V2..."
 python -c "
+import os
+os.environ['HF_HOME'] = '${HF_HOME}'
+os.environ['TRANSFORMERS_CACHE'] = '${HF_HOME}'
 from transformers import pipeline
-print('Downloading Depth Anything V2...')
+print('    Downloading Depth Anything V2...')
 pipe = pipeline('depth-estimation', model='depth-anything/Depth-Anything-V2-Large-hf')
-print('Depth Anything V2 downloaded successfully!')
+print('    Depth Anything V2 downloaded successfully!')
+del pipe
 "
 
-echo "✓ Models downloaded"
+# Download rembg model
+echo "  Downloading rembg model..."
+python -c "
+from rembg import new_session
+print('    Downloading rembg model...')
+session = new_session('u2net')
+print('    rembg model downloaded!')
+"
+
+echo "✓ Models downloaded to ${MODELS_DIR}"
 
 # -----------------------------------------------------------------------------
 # Create Helper Scripts
@@ -211,15 +355,44 @@ echo ""
 echo "Creating helper scripts..."
 echo "----------------------------------------------"
 
-# Create a quick test script
-cat > ${SV3D_2DGS_DIR}/quick_test.py << 'TESTSCRIPT'
+# Create activation script
+cat > ${SV3D_2DGS_ROOT}/activate.sh << 'ACTIVATE_SCRIPT'
+#!/bin/bash
+# Activate the SV3D + 2DGS environment
+# Usage: source /runpod-volume/sv3d_2dgs/activate.sh
+
+# Set paths
+export SV3D_2DGS_ROOT="/runpod-volume/sv3d_2dgs"
+export TWO_DGS_PATH="${SV3D_2DGS_ROOT}/2d-gaussian-splatting"
+export HF_HOME="${SV3D_2DGS_ROOT}/models/huggingface"
+export TRANSFORMERS_CACHE="${SV3D_2DGS_ROOT}/models/huggingface"
+
+# Activate conda environment
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate sv3d-2dgs
+
+echo "SV3D + 2DGS environment activated!"
+echo "  Root: ${SV3D_2DGS_ROOT}"
+echo "  2DGS: ${TWO_DGS_PATH}"
+echo "  Models: ${HF_HOME}"
+ACTIVATE_SCRIPT
+
+chmod +x ${SV3D_2DGS_ROOT}/activate.sh
+
+# Create quick test script
+cat > ${SCRIPTS_DIR}/quick_test.py << 'TESTSCRIPT'
 #!/usr/bin/env python3
 """
 Quick test to verify SV3D and 2DGS installation.
 """
 
 import sys
+import os
 import torch
+
+# Set model cache
+os.environ['HF_HOME'] = '/runpod-volume/sv3d_2dgs/models/huggingface'
+os.environ['TRANSFORMERS_CACHE'] = '/runpod-volume/sv3d_2dgs/models/huggingface'
 
 def test_sv3d():
     """Test SV3D can load."""
@@ -322,9 +495,21 @@ if __name__ == "__main__":
     sys.exit(main())
 TESTSCRIPT
 
-chmod +x ${SV3D_2DGS_DIR}/quick_test.py
+chmod +x ${SCRIPTS_DIR}/quick_test.py
 
 echo "✓ Helper scripts created"
+
+# -----------------------------------------------------------------------------
+# Create Installation Marker
+# -----------------------------------------------------------------------------
+
+cat > ${INSTALL_MARKER} << MARKER
+Installation completed: $(date)
+Conda environment: ${CONDA_ENV_NAME}
+Python version: $(python --version)
+PyTorch version: $(python -c "import torch; print(torch.__version__)")
+CUDA available: $(python -c "import torch; print(torch.cuda.is_available())")
+MARKER
 
 # -----------------------------------------------------------------------------
 # Summary
@@ -335,22 +520,34 @@ echo "=============================================="
 echo "  Setup Complete!"
 echo "=============================================="
 echo ""
-echo "Installation locations:"
-echo "  - Workspace:     ${SV3D_2DGS_DIR}"
-echo "  - 2DGS:          ${TWO_DGS_DIR}"
-echo "  - Inputs:        ${SV3D_2DGS_DIR}/inputs"
-echo "  - Outputs:       ${SV3D_2DGS_DIR}/outputs"
+echo "Installation location (on network volume):"
+echo "  Root:      ${SV3D_2DGS_ROOT}"
+echo "  2DGS:      ${TWO_DGS_DIR}"
+echo "  Inputs:    ${INPUTS_DIR}"
+echo "  Outputs:   ${OUTPUTS_DIR}"
+echo "  Models:    ${MODELS_DIR}"
 echo ""
-echo "Next steps:"
-echo "  1. Run quick test:  python ${SV3D_2DGS_DIR}/quick_test.py"
-echo "  2. Copy test image: cp your_image.jpg ${SV3D_2DGS_DIR}/inputs/"
-echo "  3. Run pipeline:    python ${SV3D_2DGS_DIR}/test_pipeline.py"
+echo "Conda environment: ${CONDA_ENV_NAME}"
 echo ""
-echo "VRAM usage (estimated):"
-echo "  - SV3D inference:    ~20GB"
-echo "  - 2DGS training:     ~15GB"
-echo "  - Total (sequential): ~20GB peak"
+echo "This installation is SEPARATE from your existing setups:"
+echo "  - Gen3C/Lyra/SHARP remain in cosmos-predict1"
+echo "  - SV3D/2DGS is in sv3d-2dgs environment"
 echo ""
-echo "Recommended GPU: A6000 (48GB) or A100 (40GB)"
+echo "----------------------------------------------"
+echo "  Quick Start"
+echo "----------------------------------------------"
 echo ""
-
+echo "On future pod starts, activate with:"
+echo "  source ${SV3D_2DGS_ROOT}/activate.sh"
+echo ""
+echo "Or manually:"
+echo "  conda activate ${CONDA_ENV_NAME}"
+echo "  export HF_HOME=${MODELS_DIR}/huggingface"
+echo ""
+echo "Run quick test:"
+echo "  python ${SCRIPTS_DIR}/quick_test.py"
+echo ""
+echo "Copy test image and run pipeline:"
+echo "  cp your_image.jpg ${INPUTS_DIR}/"
+echo "  python ${SCRIPTS_DIR}/test_pipeline.py --image ${INPUTS_DIR}/your_image.jpg --quick"
+echo ""
