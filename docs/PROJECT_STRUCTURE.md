@@ -9,6 +9,8 @@ The project provides a unified Gradio UI for multiple 3D generation models, with
 ```
 Hunyuan3D-2-Fork/
 ├── app_sidebar.py          # Main Gradio application (entry point)
+├── handlers/               # Generation handler functions (business logic)
+├── help/                   # Help documentation strings
 ├── generators/             # Model-specific generation logic
 ├── ui/                     # UI components and tabs
 ├── runpod/                 # RunPod serverless infrastructure
@@ -24,7 +26,7 @@ Hunyuan3D-2-Fork/
 ## Core Application Files
 
 ### `app_sidebar.py`
-**Main entry point** - The primary Gradio application with sidebar navigation.
+**Main entry point** - The primary Gradio application with sidebar navigation (~2,070 lines).
 
 - **Purpose**: Unified UI for all 3D generation models
 - **Key Features**:
@@ -35,6 +37,8 @@ Hunyuan3D-2-Fork/
   - Help documentation
   - Update tracker for model versions
 - **Dependencies**: 
+  - `handlers/*` for generation business logic
+  - `help/*` for documentation strings
   - `generators/*` for model execution
   - `ui/components/*` for UI elements
   - `runpod/runpod_client.py` for API calls
@@ -42,6 +46,51 @@ Hunyuan3D-2-Fork/
 
 ### `gradio_app.py`
 Legacy Gradio application (older version, kept for reference).
+
+---
+
+## Handlers (`handlers/`)
+
+Business logic layer between UI and generators. Extracted from `app_sidebar.py` for maintainability.
+
+### `handlers/generation_handlers.py` (~886 lines)
+
+| Function | Purpose |
+|----------|---------|
+| `handle_sharp_generation()` | SHARP 3DGS generation with video rendering |
+| `handle_gen3c_generation()` | Gen3C video generation |
+| `handle_lyra_generation()` | Lyra 3DGS/4DGS generation |
+| `handle_trellis_generation()` | TRELLIS.2 3D generation |
+| `handle_hunyuan_generation()` | Hunyuan3D mesh generation |
+| `handle_mesh_extraction()` | PLY to mesh conversion |
+| `handle_mesh_analyze()` | Mesh statistics analysis |
+| `handle_mesh_cleanup()` | Mesh decimation and cleanup |
+
+**Responsibilities**:
+- Image scaling and preprocessing
+- Parameter validation and encoding
+- Calling appropriate generator (local or RunPod)
+- Experiment logging to CSV
+- Cleanup of temporary files
+
+---
+
+## Help Documentation (`help/`)
+
+Help text and documentation strings for the UI. Extracted from `app_sidebar.py` for easier maintenance.
+
+### `help/documentation.py` (~514 lines)
+
+| Constant | Content |
+|----------|---------|
+| `SHARP_HELP` | SHARP model documentation and settings |
+| `GEN3C_HELP` | Gen3C video generation documentation |
+| `LYRA_HELP` | Lyra 3DGS/4DGS documentation |
+| `TRELLIS_HELP` | TRELLIS.2 documentation |
+| `HUNYUAN_HELP` | Hunyuan3D documentation with memory options |
+| `MESH_HELP` | Mesh extraction documentation |
+| `MESH_CLEANUP_HELP` | Mesh cleanup detailed documentation |
+| `GENERAL_TIPS_HELP` | Workflow recommendations and tips |
 
 ---
 
@@ -128,8 +177,8 @@ CSS styles and color palette for the Gradio UI.
 - Conda environment: `cosmos-predict1`
 - Current version: v50
 
-#### `Dockerfile.v49-patch`
-Incremental patch Dockerfile for quick updates.
+#### `Dockerfile.patch`
+Incremental patch Dockerfile for quick updates (generic, reusable).
 
 #### Key Files:
 | File | Purpose |
@@ -226,18 +275,19 @@ Separate Docker image for TRELLIS.2:
 
 ## Key File Relationships
 
-### UI → Generators → RunPod
+### UI → Handlers → Generators → RunPod
 ```
-app_sidebar.py
-    └── generators/sharp.py
-            └── runpod/runpod_client.py (UnifiedServerlessClient)
-                    └── RunPod API → handler_unified.py
+app_sidebar.py (UI components + event bindings)
+    └── handlers/generation_handlers.py (business logic)
+            └── generators/sharp.py (model-specific logic)
+                    └── runpod/runpod_client.py (UnifiedServerlessClient)
+                            └── RunPod API → handler_unified.py
 ```
 
 ### Docker Build Chain
 ```
 Dockerfile.unified (base image)
-    └── Dockerfile.v49-patch (incremental updates)
+    └── Dockerfile.patch (incremental updates)
             └── 88dreams/gen3c-runpod:v50 (Docker Hub)
 ```
 
