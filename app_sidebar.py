@@ -836,9 +836,9 @@ def handle_mesh_cleanup(
             log_lines.append(f"📋 Parameter log: {stats['param_log']}")
             log_lines.append(f"📊 Experiment CSV: {stats.get('csv_log', '/srv/searidge_share/outputs/logs/mesh_cleanup.csv')}")
         log_lines.append("")
-        log_lines.append(f"Saved to: {output_path}")
+        log_lines.append(f"Saved to: {actual_output}")
         
-        return output_path, "\n".join(log_lines), "✅ Cleanup complete!"
+        return actual_output, "\n".join(log_lines), "✅ Cleanup complete!"
         
     except Exception as e:
         import traceback
@@ -1005,7 +1005,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     """)
                     
                     with gr.Row():
-                        with gr.Column(scale=2):
+                        with gr.Column(scale=1):
                             with gr.Group():
                                 gr.Markdown("### Output Settings")
                                 sharp_output_name = gr.Textbox(value="sharp_output", label="Output Name")
@@ -1013,6 +1013,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
                             sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                        
+                        with gr.Column(scale=1):
+                            sharp_3d_viewer = gr.Model3D(
+                                label="3D Preview",
+                                height=400,
+                                clear_color=[0.1, 0.1, 0.1, 1.0],
+                            )
                     
                     with gr.Accordion("📋 Logs", open=False):
                         sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
@@ -1165,7 +1172,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     """)
                     
                     with gr.Row():
-                        with gr.Column(scale=2):
+                        with gr.Column(scale=1):
                             hunyuan_model = gr.Dropdown(
                                 ["mini", "full"], 
                                 value="mini", 
@@ -1193,6 +1200,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             hunyuan_exec_mode = gr.Radio(["RunPod Serverless", "Local"], value="RunPod Serverless", label="Mode", visible=False)
                             hunyuan_generate_btn = gr.Button("Generate Mesh", variant="primary", size="lg")
                             hunyuan_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                        
+                        with gr.Column(scale=1):
+                            hunyuan_3d_viewer = gr.Model3D(
+                                label="3D Preview",
+                                height=400,
+                                clear_color=[0.1, 0.1, 0.1, 1.0],
+                            )
                     
                     with gr.Accordion("📋 Logs", open=False):
                         hunyuan_logs = gr.Textbox(lines=8, interactive=False)
@@ -1252,7 +1266,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             gr.Markdown("Remove artifacts, fix normals, decimate, and prepare meshes for Unity/Blender.")
                             
                             with gr.Row():
-                                with gr.Column(scale=2):
+                                with gr.Column(scale=1):
                                     with gr.Group():
                                         gr.Markdown("### Input Mesh")
                                         cleanup_input = gr.File(
@@ -1313,10 +1327,22 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     cleanup_status = gr.Textbox(value="Ready", label="Status", interactive=False)
                                 
                                 with gr.Column(scale=1):
+                                    gr.Markdown("### 3D Preview")
+                                    cleanup_before_viewer = gr.Model3D(
+                                        label="Before (Input)",
+                                        height=350,
+                                        clear_color=[0.1, 0.1, 0.1, 1.0],
+                                    )
+                                    cleanup_after_viewer = gr.Model3D(
+                                        label="After (Cleaned)",
+                                        height=350,
+                                        clear_color=[0.1, 0.1, 0.1, 1.0],
+                                    )
+                                    
                                     gr.Markdown("### Analysis Results")
                                     cleanup_analysis = gr.Textbox(
                                         label="Mesh Info",
-                                        lines=12,
+                                        lines=6,
                                         interactive=False,
                                         placeholder="Click 'Analyze' to inspect mesh...",
                                     )
@@ -2038,15 +2064,113 @@ Min Component Ratio: 1% (default)
     # SHARP EVENT HANDLERS
     # =========================================================================
     
+    def convert_3dgs_to_preview_glb(input_ply: str) -> str:
+        """Convert 3DGS PLY to GLB point cloud mesh for preview.
+        
+        Extracts positions and colors from 3DGS format and creates a 
+        viewable point cloud in GLB format.
+        """
+        if not input_ply or not os.path.exists(input_ply):
+            return None
+        
+        try:
+            import numpy as np
+            from plyfile import PlyData
+            import trimesh
+            
+            # Read the 3DGS PLY
+            plydata = PlyData.read(input_ply)
+            vertex = plydata['vertex']
+            
+            # Extract XYZ positions
+            x = np.array(vertex['x'])
+            y = np.array(vertex['y'])
+            z = np.array(vertex['z'])
+            
+            # Try to get colors from spherical harmonics (f_dc_0, f_dc_1, f_dc_2)
+            # 3DGS stores colors as SH coefficients where DC component = color * C0
+            # The formula is: color = sigmoid(sh_dc) for some implementations
+            # or color = sh_dc * C0 + 0.5 for others
+            if 'f_dc_0' in vertex.data.dtype.names:
+                # Get raw SH DC values
+                sh_r = np.array(vertex['f_dc_0'])
+                sh_g = np.array(vertex['f_dc_1'])
+                sh_b = np.array(vertex['f_dc_2'])
+                
+                # Method 1: Direct sigmoid conversion (common in 3DGS)
+                def sigmoid(x):
+                    return 1 / (1 + np.exp(-x))
+                
+                r = np.clip(sigmoid(sh_r) * 255, 0, 255).astype(np.uint8)
+                g = np.clip(sigmoid(sh_g) * 255, 0, 255).astype(np.uint8)
+                b = np.clip(sigmoid(sh_b) * 255, 0, 255).astype(np.uint8)
+                
+                print(f"[SHARP] SH color range: R({sh_r.min():.2f}-{sh_r.max():.2f}), G({sh_g.min():.2f}-{sh_g.max():.2f}), B({sh_b.min():.2f}-{sh_b.max():.2f})")
+                print(f"[SHARP] RGB range: R({r.min()}-{r.max()}), G({g.min()}-{g.max()}), B({b.min()}-{b.max()})")
+                
+            elif 'red' in vertex.data.dtype.names:
+                r = np.array(vertex['red']).astype(np.uint8)
+                g = np.array(vertex['green']).astype(np.uint8)
+                b = np.array(vertex['blue']).astype(np.uint8)
+            else:
+                # Fallback: use height-based coloring for visualization
+                z_norm = (z - z.min()) / (z.max() - z.min() + 1e-6)
+                r = np.clip(z_norm * 255, 0, 255).astype(np.uint8)
+                g = np.clip((1 - z_norm) * 200 + 55, 0, 255).astype(np.uint8)
+                b = np.full_like(x, 150, dtype=np.uint8)
+            
+            # Downsample for preview (100k points max for performance)
+            max_points = 100000
+            if len(x) > max_points:
+                indices = np.random.choice(len(x), max_points, replace=False)
+                x, y, z = x[indices], y[indices], z[indices]
+                r, g, b = r[indices], g[indices], b[indices]
+            
+            # Stack into vertices array
+            vertices = np.column_stack([x, y, z])
+            colors = np.column_stack([r, g, b, np.full(len(r), 255, dtype=np.uint8)])  # RGBA
+            
+            # Create a point cloud and convert to GLB
+            cloud = trimesh.PointCloud(vertices=vertices, colors=colors)
+            
+            # Save as GLB
+            preview_path = input_ply.replace('.ply', '_preview.glb')
+            cloud.export(preview_path)
+            
+            print(f"[SHARP] Preview GLB created: {preview_path} ({len(vertices)} points)")
+            return preview_path
+            
+        except Exception as e:
+            print(f"[SHARP] Preview conversion failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def sharp_generate_with_preview(*args):
+        """Wrapper that returns a preview-compatible GLB for 3D viewer."""
+        result = handle_sharp_generation(*args)
+        output_path, logs, progress = result
+        
+        print(f"[SHARP DEBUG] output_path: {output_path}")
+        print(f"[SHARP DEBUG] output_path exists: {os.path.exists(output_path) if output_path else 'N/A'}")
+        
+        # Convert to GLB point cloud for preview (gr.Model3D works better with GLB)
+        preview_path = convert_3dgs_to_preview_glb(output_path) if output_path else None
+        
+        print(f"[SHARP DEBUG] preview_path: {preview_path}")
+        print(f"[SHARP DEBUG] preview_path exists: {os.path.exists(preview_path) if preview_path else 'N/A'}")
+        
+        return output_path, logs, progress, preview_path
+    
     sharp_generate_btn.click(
-        fn=handle_sharp_generation,
+        fn=sharp_generate_with_preview,
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
             settings_gen3c_endpoint, settings_gen3c_key, gr.State(False),
             sharp_output_name, sharp_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, sharp_logs, sharp_progress],
+        outputs=[output_display, sharp_logs, sharp_progress, sharp_3d_viewer],
     )
     
     # =========================================================================
@@ -2118,8 +2242,15 @@ Min Component Ratio: 1% (default)
     # HUNYUAN EVENT HANDLERS
     # =========================================================================
     
+    def hunyuan_generate_with_preview(*args):
+        """Wrapper that returns the GLB path for 3D viewer."""
+        result = handle_hunyuan_generation(*args)
+        output_path, logs, progress = result
+        # Return path for 3D viewer (gr.Model3D accepts file path directly)
+        return output_path, logs, progress, output_path
+    
     hunyuan_generate_btn.click(
-        fn=handle_hunyuan_generation,
+        fn=hunyuan_generate_with_preview,
         inputs=[
             input_image, image_scale, hunyuan_exec_mode,
             settings_hunyuan_endpoint, settings_hunyuan_key,
@@ -2129,7 +2260,7 @@ Min Component Ratio: 1% (default)
             hunyuan_output_name, hunyuan_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, hunyuan_logs, hunyuan_progress],
+        outputs=[output_display, hunyuan_logs, hunyuan_progress, hunyuan_3d_viewer],
     )
     
     # =========================================================================
@@ -2174,16 +2305,24 @@ Min Component Ratio: 1% (default)
         base_name = os.path.splitext(os.path.basename(input_path))[0]
         return f"{base_name}-CLEAN"
     
+    def get_input_path_for_viewer(file_input, path_input):
+        """Get the input path for the 3D viewer."""
+        if file_input is not None:
+            return file_input.name if hasattr(file_input, 'name') else str(file_input)
+        elif path_input and path_input.strip():
+            return path_input.strip()
+        return None
+    
     cleanup_input.change(
-        fn=lambda f: get_cleanup_output_name(f, None),
+        fn=lambda f: (get_cleanup_output_name(f, None), get_input_path_for_viewer(f, None)),
         inputs=[cleanup_input],
-        outputs=[cleanup_output_name],
+        outputs=[cleanup_output_name, cleanup_before_viewer],
     )
     
     cleanup_input_path.change(
-        fn=lambda p: get_cleanup_output_name(None, p),
+        fn=lambda p: (get_cleanup_output_name(None, p), p.strip() if p else None),
         inputs=[cleanup_input_path],
-        outputs=[cleanup_output_name],
+        outputs=[cleanup_output_name, cleanup_before_viewer],
     )
     
     cleanup_analyze_btn.click(
@@ -2192,8 +2331,14 @@ Min Component Ratio: 1% (default)
         outputs=[cleanup_analysis, cleanup_status],
     )
     
+    def cleanup_with_preview(*args):
+        """Wrapper that returns output path for after viewer."""
+        result = handle_mesh_cleanup(*args)
+        output_path, logs, status = result
+        return output_path, logs, status, output_path
+    
     cleanup_run_btn.click(
-        fn=handle_mesh_cleanup,
+        fn=cleanup_with_preview,
         inputs=[
             cleanup_input, cleanup_input_path,
             cleanup_target_tris, cleanup_smooth,
@@ -2204,7 +2349,7 @@ Min Component Ratio: 1% (default)
             cleanup_output_name, cleanup_output_dir, cleanup_output_format,
             cleanup_log_params, cleanup_encode_params,
         ],
-        outputs=[output_display, cleanup_logs, cleanup_status],
+        outputs=[output_display, cleanup_logs, cleanup_status, cleanup_after_viewer],
     )
     
     # =========================================================================
