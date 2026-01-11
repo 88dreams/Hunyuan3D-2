@@ -6,7 +6,7 @@ This document summarizes the work completed and provides context for new convers
 
 ## Project Overview
 
-**ARKRUNR WORLDS** is a multi-model 3D generation system built as a fork of Hunyuan3D-2. It provides a unified Gradio UI for multiple AI models that generate 3D content from images.
+**ARKRUNR WORLDS** is a multi-model 3D generation system built as a fork of Hunyuan3D-2. It provides a unified Gradio UI for multiple AI models that generate 3D content from images and video.
 
 ### Supported Models
 
@@ -17,6 +17,7 @@ This document summarizes the work completed and provides context for new convers
 | **Lyra** | NVIDIA | 3D/4D Gaussian Splatting | ✅ Working |
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
+| **Stage Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | 🔄 Testing (v15) |
 
 ### Architecture
 
@@ -26,148 +27,139 @@ This document summarizes the work completed and provides context for new convers
 
 ---
 
+## Current Work In Progress
+
+### Stage Pipeline: ViPE + 2DGS (January 11, 2026)
+
+**Goal**: Convert Gen3C video output into 3D mesh using video pose estimation and 2D Gaussian Splatting.
+
+**Pipeline Flow**:
+1. **ViPE** (NVIDIA) extracts camera poses, depth maps, and intrinsics from video
+2. **Converter** transforms ViPE output to COLMAP format for 2DGS
+3. **Point Cloud Generator** creates initial 3D points from depth maps
+4. **2DGS Training** produces Gaussian splats from video frames
+5. **Mesh Extraction** via marching cubes
+
+**Current Status**: Testing v15 - waiting for RunPod endpoint update
+
+**Issues Fixed (v1-v15)**:
+| Version | Issue | Fix |
+|---------|-------|-----|
+| v1-v6 | Conda TOS acceptance | Added `conda tos accept` commands |
+| v7-v8 | ViPE ABI mismatch | Set `_GLIBCXX_USE_CXX11_ABI=0` flag |
+| v9-v10 | ViPE module invocation | Changed to `python -c "from vipe.cli.main import main; main([...])"` |
+| v11-v12 | ViPE output paths | Fixed to use `pose/input.npz` structure |
+| v12 | Converter signature | Fixed `vipe_to_2dgs.py` to accept `vipe_dir` |
+| v13 | PLY format | Added normals (`nx`, `ny`, `nz`) for 2DGS compatibility |
+| v14 | Missing dependency | Added `mediapy` |
+| v15 | Missing dependency | Added `scikit-image` for marching cubes |
+
+**Key Files**:
+- `runpod/stage-pipeline/Dockerfile` - Combined ViPE + 2DGS image
+- `runpod/stage-pipeline/handler.py` - Serverless handler
+- `runpod/stage-pipeline/vipe_to_2dgs.py` - Format converter
+- `runpod/stage-pipeline/init_points_from_depth.py` - Point cloud generator
+- `scripts/test_stage_pipeline.py` - Test script
+
+**Docker Image**: `88dreams/stage-pipeline:v15`
+
+**RunPod Endpoint**: `2dgs-serverless` (ID: `s9txp6edtf2vg4`)
+
+---
+
 ## Recent Work Completed
 
-### 1. SHARP Video Rendering (Current Session)
+### 1. Stage Pipeline Development (Current Session - Jan 11, 2026)
+
+Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstruction:
+
+- Built Dockerfile with ViPE and 2DGS CUDA extensions
+- Resolved ABI compatibility issues between PyTorch and ViPE extensions
+- Fixed PLY format to include normal vectors required by 2DGS
+- Added missing dependencies (mediapy, scikit-image)
+- Created test script with S3 upload support
+
+### 2. SHARP Video Rendering (Previous Session)
 
 **Problem**: SHARP's `--render` flag for video generation was intermittently failing.
 
-**Root Cause**: `gsplat` CUDA kernels need JIT compilation on first run, which can timeout on cold workers.
-
 **Solutions Implemented**:
-
-1. **gsplat Pre-compilation** (`start_unified.sh`):
-   - Added startup step that imports `gsplat` and triggers kernel compilation
-   - Runs before handler starts accepting jobs
-   - Ensures video rendering works on first job
-
-2. **Always Upload to S3** (`handler_unified.py`):
-   - New function `upload_file_to_s3_always()` 
-   - SHARP now uploads both PLY and video to S3 regardless of size
-   - Ensures files are available even if API response times out
-
-3. **Extended Timeout** (`runpod_client.py`):
-   - SHARP with video: 30 minutes (was 10 minutes)
-   - SHARP without video: 10 minutes
-
-4. **Enhanced Logging** (`handler_unified.py`):
-   - `check_environment()` function at startup
-   - Logs Python path, conda env, PyTorch/CUDA status, gsplat availability
-   - Better subprocess environment logging
+1. **gsplat Pre-compilation** in `start_unified.sh`
+2. **Always Upload to S3** via `upload_file_to_s3_always()`
+3. **Extended Timeout** (30 minutes for video)
+4. **Enhanced Logging** via `check_environment()`
 
 **Docker Version**: v50 (`88dreams/gen3c-runpod:v50`)
 
-### 2. SHARP UI Enhancements
+### 3. UI Modernization
 
-- Added tabbed interface: "Generate PLY" and "Render Video"
-- Exposed all video trajectory parameters:
-  - `trajectory_type`: rotate_forward, rotate, swipe, shake
-  - `num_steps`: Number of video frames
-  - `num_repeats`: Trajectory loops
-  - `max_disparity`: Lateral camera offset
-  - `max_zoom`: Forward camera movement
-  - `lookat_mode`: point, ahead
-
-### 3. UI Modernization (Previous Sessions)
-
-- Implemented sidebar navigation layout
-- Custom color palette (dark theme)
-- Section categories: INPUT, CREATE, TOOLS
+- Sidebar navigation layout with INPUT, CREATE, TOOLS sections
+- Custom dark theme color palette
 - System metrics display (CPU, Memory, GPU)
-- Persistent button highlighting
-- Image preview persistence
-
-### 4. Experiment Logging
-
-- CSV logging for all models (`scripts/experiment_logger.py`)
-- Logs saved to `/srv/searidge_share/outputs/logs/`
-- Optional parameter encoding in filenames
-
-### 5. Mesh Cleanup Tab
-
-- Integrated `trimesh` and `fast_simplification`
-- Before/after 3D viewers
-- Decimation and smoothing options
-
-### 6. Update Tracker
-
-- GitHub API integration for upstream version checking
-- Local version tracking via `.version_tracking.json`
-- "Query Deployed Version" to check RunPod instances
+- Experiment logging to CSV
 
 ---
 
 ## Docker Images
 
-### Unified Image (Gen3C, Lyra, SHARP, SuGaR)
+| Image | Models | Current Version |
+|-------|--------|-----------------|
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
+| `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
+| `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
+| `88dreams/stage-pipeline` | ViPE + 2DGS | v15 |
+
+### Build Commands
 
 ```bash
-# Build incremental update
+# Unified Image
 cd runpod/gen3c
-docker build -f Dockerfile.v49-patch -t 88dreams/gen3c-runpod:v50 .
-docker push 88dreams/gen3c-runpod:v50
+docker build -f Dockerfile.patch -t 88dreams/gen3c-runpod:vXX .
+docker push 88dreams/gen3c-runpod:vXX
+
+# Stage Pipeline
+cd runpod/stage-pipeline
+docker build -t 88dreams/stage-pipeline:vXX .
+docker push 88dreams/stage-pipeline:vXX
 ```
-
-**Current Version**: v50
-- v49: gsplat pre-compilation, environment checks
-- v50: Always upload to S3
-
-### Trellis Image
-
-```bash
-cd runpod/trellis
-docker build -f Dockerfile -t 88dreams/trellis-runpod:v10 .
-docker push 88dreams/trellis-runpod:v10
-```
-
-**Current Version**: v10
-
-### Hunyuan Image
-
-```bash
-cd runpod/hunyuan
-docker build -f Dockerfile -t 88dreams/hunyuan-runpod:v10 .
-docker push 88dreams/hunyuan-runpod:v10
-```
-
-**Current Version**: v10
 
 ---
 
-## Key Files Modified
+## RunPod Serverless Endpoints
 
-### Handler (`runpod/gen3c/handler_unified.py`)
-
-- `check_environment()` - Startup diagnostics
-- `upload_file_to_s3_always()` - Always upload to S3
-- `handle_sharp()` - Updated to always upload PLY and video
-- `run_sharp()` - Enhanced logging for video rendering
-
-### Startup Script (`runpod/gen3c/start_unified.sh`)
-
-- Added gsplat pre-compilation section before handler starts
-
-### Client (`runpod/runpod_client.py`)
-
-- `generate_sharp_sync()` - Dynamic timeout based on `render_video`
-
-### Main UI (`app_sidebar.py`)
-
-- SHARP tab with video rendering options
-- All trajectory parameters exposed
+| Endpoint Name | Image | Purpose |
+|---------------|-------|---------|
+| `gen3c-serverless` | gen3c-runpod:v50 | Multi-model (Gen3C, Lyra, SHARP) |
+| `trellis-serverless` | trellis-runpod:v10 | TRELLIS.2 3D generation |
+| `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
+| `2dgs-serverless` | stage-pipeline:v15 | Video to mesh (ViPE + 2DGS) |
 
 ---
 
-## Known Issues / Future Work
+## Key Files
 
-### 1. Video Trajectory Parameters
-SHARP's CLI doesn't expose trajectory parameters directly. The parameters are passed to the handler but may not affect the actual trajectory until SHARP's Python API is used instead of CLI.
+### Stage Pipeline
+| File | Purpose |
+|------|---------|
+| `runpod/stage-pipeline/Dockerfile` | Combined ViPE + 2DGS Docker image |
+| `runpod/stage-pipeline/handler.py` | Serverless handler orchestrating pipeline |
+| `runpod/stage-pipeline/vipe_to_2dgs.py` | ViPE → COLMAP format converter |
+| `runpod/stage-pipeline/init_points_from_depth.py` | Point cloud from depth maps |
+| `scripts/test_stage_pipeline.py` | Test script with S3 upload |
 
-### 2. Lyra Integration
-Lyra is integrated but the SDG (Synthetic Data Generation) step can take 60-90 minutes. Consider adding progress callbacks.
+### Unified Handler
+| File | Purpose |
+|------|---------|
+| `runpod/gen3c/handler_unified.py` | Multi-model serverless handler |
+| `runpod/gen3c/start_unified.sh` | Container startup with gsplat precompile |
+| `runpod/runpod_client.py` | Python client for RunPod API |
 
-### 3. SuGaR Mesh Extraction
-SuGaR is installed but the full training pipeline is complex. Current implementation uses Poisson reconstruction as a simpler alternative.
+### UI
+| File | Purpose |
+|------|---------|
+| `app_sidebar.py` | Main Gradio application |
+| `handlers/generation_handlers.py` | Business logic for generation |
+| `generators/*.py` | Model-specific logic |
 
 ---
 
@@ -176,7 +168,7 @@ SuGaR is installed but the full training pipeline is complex. Current implementa
 ### Local Requirements
 
 ```bash
-pip install gradio==6.0.1 requests boto3 python-dotenv trimesh
+pip install gradio==6.0.1 requests boto3 python-dotenv trimesh runpod
 ```
 
 ### AWS Credentials
@@ -187,67 +179,68 @@ AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_secret
 ```
 
-### RunPod Credentials
+### RunPod API Key
 
-Set in the UI's Settings page:
-- Endpoint IDs for each model
-- RunPod API Key
+For testing scripts:
+```bash
+export RUNPOD_API_KEY="your_key"
+```
+
+Or set in UI Settings page.
 
 ---
 
-## Useful Commands
+## Testing Stage Pipeline
 
-### Start the UI
 ```bash
-python app_sidebar.py
-```
+# Test with local video (uploads to S3 automatically)
+cd /home/arkrunr02/Hunyuan3D-2-Fork
+RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py \
+    --video /path/to/video.mp4 \
+    --iterations 1000
 
-### Quick Docker Rebuild
-```bash
-cd runpod/gen3c
-docker build -f Dockerfile.v49-patch -t 88dreams/gen3c-runpod:vXX .
-docker push 88dreams/gen3c-runpod:vXX
-```
+# Check logs
+cat /tmp/test-v15.log
 
-### Download from RunPod Storage Pod
-```bash
-scp -P <PORT> -i ~/.ssh/id_ed25519 root@<IP>:/workspace/outputs/sharp/file.mp4 ~/Downloads/
-```
-
-### Check S3 Files
-```bash
-curl -I "https://arkrunr.s3.us-west-1.amazonaws.com/MediaContent/outputs/sharp/filename.ply"
+# Health check
+RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
 ```
 
 ---
 
-## File Locations
+## Known Issues / Next Steps
 
-| Type | Local Path | RunPod Path | S3 Path |
-|------|------------|-------------|---------|
-| SHARP outputs | `outputs/sharp/` | `/runpod-volume/outputs/sharp/` | `MediaContent/outputs/sharp/` |
-| Gen3C outputs | `outputs/gen3c/` | `/runpod-volume/outputs/gen3c/` | `MediaContent/outputs/gen3c/` |
-| Logs | `/srv/searidge_share/outputs/logs/` | N/A | N/A |
+### 1. Stage Pipeline (v15)
+- Currently testing - awaiting RunPod endpoint update
+- If v15 fails, check logs for next missing dependency
+
+### 2. Lyra Integration
+- SDG step takes 60-90 minutes
+- Consider adding progress callbacks
+
+### 3. SuGaR Mesh Extraction
+- Full training pipeline is complex
+- Currently using Poisson reconstruction alternative
 
 ---
 
 ## Debugging Tips
 
-### Check RunPod Logs
-1. Go to RunPod Console → Serverless → Your Endpoint
-2. Click on a job ID to see logs
+### Stage Pipeline Logs
+1. Go to RunPod Console → Serverless → `2dgs-serverless`
+2. Click job ID to see logs
 3. Look for:
-   - "ENVIRONMENT CHECK" section at startup
-   - "gsplat version" confirmation
-   - "SHARP stdout/stderr" for model output
-   - "S3 upload complete" for file transfers
+   - "STEP 1: Running ViPE" - Camera pose extraction
+   - "STEP 2: Converting to 2DGS format" - COLMAP conversion
+   - "STEP 3: Generating initial point cloud" - Depth → points
+   - "STEP 4: Training 2DGS" - Gaussian splatting
+   - "STEP 5: Extracting mesh" - Marching cubes
 
 ### Common Issues
-
-1. **UI Timeout**: Increase `max_wait` in client or check RunPod logs for actual completion
-2. **Missing Video**: Check if gsplat pre-compilation succeeded in startup logs
-3. **S3 Upload Fails**: Verify AWS credentials are set in RunPod environment variables
-4. **Model Not Found**: Check network volume mount in startup logs
+1. **Missing dependency**: Add to Dockerfile, rebuild, push
+2. **ABI mismatch**: Ensure `_GLIBCXX_USE_CXX11_ABI=0` is set
+3. **PLY format errors**: Check normals are included
+4. **Timeout**: Increase RunPod execution timeout or reduce iterations
 
 ---
 
@@ -256,8 +249,9 @@ curl -I "https://arkrunr.s3.us-west-1.amazonaws.com/MediaContent/outputs/sharp/f
 - **RunPod Console**: https://www.runpod.io/console
 - **Docker Hub**: https://hub.docker.com/u/88dreams
 - **S3 Bucket**: arkrunr (us-west-1)
+- **Git Branch**: `2dgs`
 
 ---
 
-*Last Updated: January 8, 2026*
+*Last Updated: January 11, 2026*
 
