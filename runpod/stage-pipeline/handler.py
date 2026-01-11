@@ -262,20 +262,29 @@ def extract_mesh(data_dir: Path, model_dir: Path, mesh_resolution: int = 512) ->
         env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
     )
     
-    if result.returncode != 0:
+    # Log output regardless of return code
+    if result.stdout:
+        print(f"Mesh extraction STDOUT: {result.stdout[-2000:]}")  # Last 2000 chars
+    if result.stderr:
         print(f"Mesh extraction STDERR: {result.stderr}")
-        raise RuntimeError(f"Mesh extraction failed: {result.stderr}")
     
-    # Find the mesh file
+    # Find the mesh file - check if it exists before failing on return code
     mesh_dir = model_dir / "mesh"
     mesh_files = list(mesh_dir.glob("*.ply")) if mesh_dir.exists() else []
     
     if not mesh_files:
-        # Try alternative location
+        # Try alternative locations
         mesh_files = list(model_dir.glob("**/fuse*.ply"))
     
     if not mesh_files:
-        raise FileNotFoundError("No mesh file found after extraction")
+        mesh_files = list(model_dir.glob("**/*.ply"))
+    
+    # Only fail if no mesh was created AND return code was non-zero
+    if not mesh_files:
+        if result.returncode != 0:
+            raise RuntimeError(f"Mesh extraction failed (exit code {result.returncode}): {result.stderr}")
+        else:
+            raise FileNotFoundError("No mesh file found after extraction")
     
     mesh_path = mesh_files[0]
     print(f"  ✓ Mesh extracted: {mesh_path}")
@@ -309,10 +318,16 @@ def upload_result(mesh_path: Path, job_input: dict) -> str:
         s3_config = job_input["output_s3"]
         bucket = s3_config["bucket"]
         prefix = s3_config.get("prefix", "stage-pipeline/")
+        region = s3_config.get("region", "us-west-1")  # Default to us-west-1
         
         key = f"{prefix}{mesh_path.name}"
         
-        s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
+        # Create S3 client with correct region for presigned URLs
+        s3 = boto3.client(
+            "s3", 
+            region_name=region,
+            config=Config(signature_version="s3v4")
+        )
         s3.upload_file(str(mesh_path), bucket, key)
         
         url = s3.generate_presigned_url(

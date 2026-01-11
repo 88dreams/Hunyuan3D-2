@@ -1,5 +1,7 @@
 # ARKRUNR WORLDS - Project Structure
 
+**Last Updated:** January 11, 2026
+
 This document describes the structure of the ARKRUNR WORLDS project, a multi-model 3D generation system built on top of Hunyuan3D-2.
 
 ## Overview
@@ -106,6 +108,7 @@ Model-specific Python modules that handle local and RunPod execution.
 | `trellis.py` | TRELLIS.2 (Microsoft) | Image to 3D with O-Voxel representation |
 | `hunyuan.py` | Hunyuan3D (Tencent) | Image to 3D mesh (GLB) |
 | `sugar.py` | SuGaR | 3DGS to mesh conversion (Poisson reconstruction) |
+| `vipe_integration.py` | ViPE (NVIDIA) | Video pose estimation integration |
 
 ### Common Pattern
 Each generator module typically contains:
@@ -141,6 +144,7 @@ Individual tab implementations (legacy, mostly integrated into `app_sidebar.py`)
 | `trellis_tab.py` | TRELLIS.2 tab |
 | `hunyuan_tab.py` | Hunyuan3D tab |
 | `mesh_extraction_tab.py` | Mesh cleanup/extraction tab |
+| `create_tab.py` | Create tab component |
 | `placeholder_tabs.py` | Placeholder tabs for future features |
 
 ### `ui/styles.py`
@@ -168,38 +172,64 @@ CSS styles and color palette for the Gradio UI.
   - Base64 encoding for small files
   - Automatic timeout handling
 
-### Docker Images (`runpod/gen3c/`)
+### Docker Images
 
-#### `Dockerfile.unified`
-**Main Docker image** containing all models:
-- Gen3C, Lyra, SHARP, TRELLIS.2, SuGaR
-- Base: `nvcr.io/nvidia/pytorch:24.10-py3`
-- Conda environment: `cosmos-predict1`
-- Current version: v50
-
-#### `Dockerfile.patch`
-Incremental patch Dockerfile for quick updates (generic, reusable).
-
-#### Key Files:
+#### `runpod/gen3c/` - Unified Multi-Model Image
 | File | Purpose |
 |------|---------|
+| `Dockerfile.unified` | Main Docker image (Gen3C, Lyra, SHARP, TRELLIS.2, SuGaR) |
+| `Dockerfile.patch` | Incremental patch Dockerfile for quick updates |
 | `handler_unified.py` | Serverless handler for all models |
 | `start_unified.sh` | Container startup script |
 | `lyra_inference.py` | Lyra-specific inference logic |
 | `sugar_inference.py` | SuGaR mesh extraction logic |
 | `server_unified.py` | Pod-mode API server |
 
-### Hunyuan Docker (`runpod/hunyuan/`)
-Separate Docker image for Hunyuan3D:
-- `Dockerfile` - Hunyuan-specific image
-- `handler_hunyuan.py` - Serverless handler
-- `start_hunyuan.sh` - Startup script
+#### `runpod/hunyuan/` - Hunyuan3D Image
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Hunyuan-specific image |
+| `handler_hunyuan.py` | Serverless handler |
+| `start_hunyuan.sh` | Startup script |
 
-### Trellis Docker (`runpod/trellis/`)
-Separate Docker image for TRELLIS.2:
-- `Dockerfile` - Trellis-specific image
-- `handler_trellis.py` - Serverless handler
-- `trellis_inference.py` - Inference logic
+#### `runpod/trellis/` - TRELLIS.2 Image
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Trellis-specific image |
+| `handler_trellis.py` | Serverless handler |
+| `trellis_inference.py` | Inference logic |
+
+#### `runpod/stage-pipeline/` - ViPE + 2DGS Pipeline (NEW)
+Combined serverless endpoint for video-to-mesh reconstruction:
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Combined ViPE + 2DGS image |
+| `handler.py` | Serverless handler orchestrating full pipeline |
+| `vipe_to_2dgs.py` | Converter: ViPE output → COLMAP format |
+| `init_points_from_depth.py` | Generate initial point cloud from depth maps |
+| `README.md` | Deployment and usage instructions |
+
+**Pipeline Flow:**
+1. ViPE extracts camera poses, depth, intrinsics from video
+2. Converter transforms to COLMAP format for 2DGS
+3. Point cloud generated from depth maps
+4. 2DGS training produces Gaussian splats
+5. Mesh extraction via marching cubes
+
+#### `runpod/vipe/` - Standalone ViPE (Reference)
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | ViPE-only image |
+| `handler_vipe.py` | Serverless handler |
+| `setup_vipe.sh` | Setup script |
+
+#### `runpod/2dgs/` - Standalone 2DGS (Reference)
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | 2DGS-only image |
+| `handler_2dgs.py` | Serverless handler |
+| `vipe_to_2dgs.py` | Converter script |
+| `init_points_from_depth.py` | Point cloud generator |
 
 ---
 
@@ -212,6 +242,10 @@ Separate Docker image for TRELLIS.2:
 | `convert_lyra_ply.py` | Convert Lyra's PyTorch PLY to standard PLY |
 | `blender_import_pointcloud.py` | Blender script for PLY visualization |
 | `benchmark_models.py` | Performance benchmarking |
+| `init_points_from_depth.py` | Generate point cloud from ViPE depth maps |
+| `vipe_to_2dgs.py` | Convert ViPE output to 2DGS COLMAP format |
+| `test_stage_pipeline.py` | Test script for stage-pipeline endpoint |
+| `test_vipe.py` | Test script for ViPE endpoint |
 
 ---
 
@@ -232,6 +266,20 @@ Separate Docker image for TRELLIS.2:
 | `paths.py` | Path configuration |
 | `multi_system.yaml` | Multi-system configuration |
 | `monitoring/` | Grafana/Prometheus configs |
+
+---
+
+## Documentation (`docs/`)
+
+| File | Purpose |
+|------|---------|
+| `PROJECT_STRUCTURE.md` | This file - project structure overview |
+| `SERVERLESS_DEPLOYMENT_MORNING.md` | Stage-pipeline deployment guide |
+| `VIPE_SETUP_GUIDE.md` | ViPE installation and usage |
+| `SV3D_SETUP_GUIDE.md` | SV3D setup instructions |
+| `INTERIOR_RECONSTRUCTION_APPROACHES.md` | Research on interior 3D reconstruction |
+| `S3_UPLOAD_ACCESS.md` | S3 configuration for large files |
+| `CONVERSATION_HANDOFF.md` | Session handoff documentation |
 
 ---
 
@@ -261,6 +309,7 @@ Separate Docker image for TRELLIS.2:
 │                   (GPU Cloud - Remote)                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  handler_unified.py / handler_hunyuan.py / handler_trellis.py   │
+│  handler.py (stage-pipeline)                                    │
 │                    (Serverless Handlers)                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -291,6 +340,12 @@ Dockerfile.unified (base image)
             └── 88dreams/gen3c-runpod:v50 (Docker Hub)
 ```
 
+### Stage Pipeline Build
+```
+runpod/stage-pipeline/Dockerfile
+    └── 88dreams/stage-pipeline:v15 (Docker Hub)
+```
+
 ### Configuration Flow
 ```
 .env (AWS credentials - not in repo)
@@ -316,4 +371,13 @@ python app_sidebar.py
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
 | `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
+| `88dreams/stage-pipeline` | ViPE + 2DGS (video→mesh) | v15 |
 
+## RunPod Serverless Endpoints
+
+| Endpoint Name | Image | Purpose |
+|---------------|-------|---------|
+| `gen3c-serverless` | gen3c-runpod | Multi-model (Gen3C, Lyra, SHARP) |
+| `trellis-serverless` | trellis-runpod | TRELLIS.2 3D generation |
+| `hunyuan-serverless` | hunyuan-runpod | Hunyuan3D mesh generation |
+| `2dgs-serverless` | stage-pipeline | Video to mesh (ViPE + 2DGS) |

@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 import runpod
+import requests
 
 # Try to import boto3 for S3 uploads
 try:
@@ -23,6 +24,9 @@ try:
     HAS_BOTO3 = True
 except ImportError:
     HAS_BOTO3 = False
+
+# Local output directory
+LOCAL_OUTPUT_DIR = Path("/srv/searidge_share/outputs/mesh_vipe")
 
 # Configuration
 ENDPOINT_ID = "s9txp6edtf2vg4"
@@ -171,6 +175,7 @@ def run_pipeline(video_input: str, iterations: int = 5000, output_format: str = 
         "mesh_resolution": 512,
         "output_s3": {
             "bucket": S3_BUCKET,
+            "region": S3_REGION,
             "prefix": f"{S3_PREFIX}/stage-pipeline/outputs/"
         }
     }
@@ -203,9 +208,30 @@ def run_pipeline(video_input: str, iterations: int = 5000, output_format: str = 
             # Download mesh if successful
             if result.get("status") == "success" and result.get("mesh_url"):
                 mesh_url = result["mesh_url"]
-                output_name = f"stage_mesh_{job_id[:8]}.{output_format}"
-                print(f"\n📥 To download mesh:")
-                print(f"  curl -o {output_name} '{mesh_url}'")
+                
+                # Create output directory if needed
+                LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                
+                # Generate output filename from video input
+                video_name = Path(video_input).stem if not video_input.startswith("http") else "stage_mesh"
+                output_name = f"{video_name}_{job_id[:8]}.{output_format}"
+                local_path = LOCAL_OUTPUT_DIR / output_name
+                
+                print(f"\n📥 Downloading mesh to local storage...")
+                print(f"  URL: {mesh_url[:80]}...")
+                print(f"  Local: {local_path}")
+                
+                try:
+                    response = requests.get(mesh_url, timeout=300)
+                    response.raise_for_status()
+                    with open(local_path, "wb") as f:
+                        f.write(response.content)
+                    file_size = local_path.stat().st_size
+                    print(f"  ✅ Downloaded: {file_size / 1024 / 1024:.2f} MB")
+                except Exception as e:
+                    print(f"  ❌ Download failed: {e}")
+                    print(f"\n📥 Manual download:")
+                    print(f"  curl -o {output_name} '{mesh_url}'")
             
             return result
             
