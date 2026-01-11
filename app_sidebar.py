@@ -274,6 +274,8 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             with gr.Row(elem_classes=["button-grid"]):
                 nav_hunyuan = gr.Button("Hunyuan", elem_classes=["sidebar-nav"], elem_id="nav-hunyuan", scale=1)
                 nav_mesh = gr.Button("Mesh", elem_classes=["sidebar-nav"], elem_id="nav-mesh", scale=1)
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_create = gr.Button("2DGS", elem_classes=["sidebar-nav"], elem_id="nav-create", scale=1)
             
             # Refine/Monitor Section combined
             gr.HTML('<div class="sidebar-category">TOOLS</div>')
@@ -776,6 +778,22 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             with gr.Accordion("📋 Cleanup Log", open=False):
                                 cleanup_logs = gr.Textbox(lines=8, interactive=False)
+                
+                # PAGE: 2DGS (Stage Reconstruction Pipeline)
+                with gr.TabItem("2DGS", id="create"):
+                    gr.HTML("""
+                        <div class="page-header">
+                            <h1>2DGS - Stage Reconstruction</h1>
+                            <p>Build 3D architectural stages from Gen3C videos using ViPE pose extraction and 2D Gaussian Splatting.</p>
+                        </div>
+                    """)
+                    
+                    from ui.tabs.create_tab import create_create_tab
+                    create_components = create_create_tab(
+                        default_runpod_url=_runpod_config.get("gen3c_url", ""),
+                        default_endpoint_id=_runpod_config.get("gen3c_endpoint", ""),
+                        default_api_key=_runpod_config.get("gen3c_api_key", ""),
+                    )
                 
                 # PAGE: SETTINGS
                 with gr.TabItem("Settings", id="settings"):
@@ -1488,6 +1506,7 @@ Min Component Ratio: 1% (default)
     nav_trellis.click(fn=lambda: gr.Tabs(selected="trellis"), outputs=[page_tabs], js=highlight_js % 'nav-trellis')
     nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs], js=highlight_js % 'nav-hunyuan')
     nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs], js=highlight_js % 'nav-mesh')
+    nav_create.click(fn=lambda: gr.Tabs(selected="create"), outputs=[page_tabs], js=highlight_js % 'nav-create')
     nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs], js=highlight_js % 'nav-settings')
     nav_update.click(fn=lambda: gr.Tabs(selected="update"), outputs=[page_tabs], js=highlight_js % 'nav-update')
     nav_help.click(fn=lambda: gr.Tabs(selected="help"), outputs=[page_tabs], js=highlight_js % 'nav-help')
