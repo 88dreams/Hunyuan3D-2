@@ -632,7 +632,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     hunyuan_octree = gr.Slider(256, 512, 380, step=1, label="Octree Resolution")
                                     hunyuan_seed = gr.Number(None, label="Seed", precision=0)
                                 with gr.Row():
-                                    hunyuan_fp16 = gr.Checkbox(False, label="FP16")
+                                    hunyuan_fp16 = gr.Checkbox(False, label="FP16", visible=False)
                                     hunyuan_attn_slice = gr.Checkbox(False, label="Attention Slicing")
                                     hunyuan_cpu_offload = gr.Checkbox(False, label="CPU Offload")
                                 hunyuan_remove_bg = gr.Checkbox(True, label="Remove Background")
