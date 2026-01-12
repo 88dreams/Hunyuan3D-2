@@ -1,5 +1,5 @@
 """
-Stage Pipeline Handler - Combined ViPE + 2DGS
+2DGS Pipeline Handler - Combined ViPE + 2DGS
 Converts Gen3C video directly to 3D mesh in one endpoint.
 
 Input:
@@ -226,14 +226,69 @@ def train_2dgs(data_dir: Path, model_dir: Path, iterations: int = 5000) -> Path:
     return model_dir
 
 
-def extract_mesh(data_dir: Path, model_dir: Path, mesh_resolution: int = 512) -> Path:
+def extract_mesh(
+    data_dir: Path, 
+    model_dir: Path, 
+    mesh_resolution: int = 512,
+    mesh_quality: str = "balanced",
+    depth_trunc: float = None,
+    voxel_size: float = None,
+    num_cluster: int = None,
+) -> Path:
     """
-    Extract mesh from trained 2DGS model using TSDF fusion.
+    Extract mesh from trained 2DGS model.
+    
+    Quality presets:
+    - "fast": Quick extraction, lower quality (mesh_res=512, num_cluster=1)
+    - "balanced": Good balance (mesh_res=512, num_cluster=50) [default]
+    - "high": High quality (mesh_res=1024, voxel_size=0.004, num_cluster=100)
+    - "ultra": Maximum quality (mesh_res=2048, voxel_size=0.002, num_cluster=200)
+    
     Returns path to extracted mesh.
     """
     print("\n" + "="*50)
-    print(f"STEP 5: Extracting mesh (resolution: {mesh_resolution})")
+    print(f"STEP 5: Extracting mesh (quality: {mesh_quality}, resolution: {mesh_resolution})")
     print("="*50)
+    
+    # Quality presets - 2DGS native extraction parameters
+    quality_presets = {
+        "fast": {
+            "mesh_res": 512,
+            "depth_trunc": 6.0,
+            "voxel_size": 0.01,
+            "num_cluster": 1,
+        },
+        "balanced": {
+            "mesh_res": 512,
+            "depth_trunc": 4.0,
+            "voxel_size": 0.006,
+            "num_cluster": 50,
+        },
+        "high": {
+            "mesh_res": 1024,
+            "depth_trunc": 3.0,
+            "voxel_size": 0.004,
+            "num_cluster": 100,
+        },
+        "ultra": {
+            "mesh_res": 2048,
+            "depth_trunc": 2.0,
+            "voxel_size": 0.002,
+            "num_cluster": 200,
+        },
+    }
+    
+    # Get preset values, allow overrides
+    preset = quality_presets.get(mesh_quality, quality_presets["balanced"])
+    final_mesh_res = mesh_resolution if mesh_resolution != 512 else preset["mesh_res"]
+    final_depth_trunc = depth_trunc if depth_trunc is not None else preset["depth_trunc"]
+    final_voxel_size = voxel_size if voxel_size is not None else preset["voxel_size"]
+    final_num_cluster = num_cluster if num_cluster is not None else preset["num_cluster"]
+    
+    print(f"  Mesh resolution: {final_mesh_res}")
+    print(f"  Depth truncation: {final_depth_trunc}")
+    print(f"  Voxel size: {final_voxel_size}")
+    print(f"  Num clusters: {final_num_cluster}")
     
     # Find the iteration checkpoint
     ckpt_dirs = list((model_dir / "point_cloud").glob("iteration_*"))
@@ -242,6 +297,7 @@ def extract_mesh(data_dir: Path, model_dir: Path, mesh_resolution: int = 512) ->
     
     latest_iter = max(int(d.name.split("_")[1]) for d in ckpt_dirs)
     
+    # Build command with high-quality 2DGS native extraction parameters
     cmd = [
         sys.executable, "render.py",
         "-s", str(data_dir),
@@ -250,7 +306,10 @@ def extract_mesh(data_dir: Path, model_dir: Path, mesh_resolution: int = 512) ->
         "--skip_train",
         "--skip_test",
         "--unbounded",
-        "--mesh_res", str(mesh_resolution)
+        "--mesh_res", str(final_mesh_res),
+        "--depth_trunc", str(final_depth_trunc),
+        "--voxel_size", str(final_voxel_size),
+        "--num_cluster", str(final_num_cluster),
     ]
     
     print(f"Running: {' '.join(cmd)}")
@@ -345,7 +404,7 @@ def upload_result(mesh_path: Path, job_input: dict) -> str:
         
         s3_config = job_input["output_s3"]
         bucket = s3_config["bucket"]
-        prefix = s3_config.get("prefix", "stage-pipeline/")
+        prefix = s3_config.get("prefix", "2dgs-pipeline/")
         region = s3_config.get("region", "us-west-1")  # Default to us-west-1
         
         key = f"{prefix}{mesh_path.name}"
@@ -372,28 +431,35 @@ def upload_result(mesh_path: Path, job_input: dict) -> str:
 
 def handler(job):
     """
-    Main RunPod handler - runs the full stage pipeline.
+    Main RunPod handler - runs the full 2DGS pipeline.
     Video → ViPE → 2DGS → Mesh
     """
     job_input = job["input"]
     start_time = time.time()
     
     print("\n" + "="*60)
-    print("STAGE PIPELINE: Gen3C Video → 3D Mesh")
+    print("2DGS PIPELINE: Gen3C Video → 3D Mesh")
     print("="*60)
     
     # Parameters
     iterations = job_input.get("iterations", 5000)
     mesh_resolution = job_input.get("mesh_resolution", 512)
+    mesh_quality = job_input.get("mesh_quality", "high")  # Default to high quality
     output_format = job_input.get("output_format", "glb").lower()
     
+    # Advanced mesh extraction parameters (optional overrides)
+    depth_trunc = job_input.get("depth_trunc", None)
+    voxel_size = job_input.get("voxel_size", None)
+    num_cluster = job_input.get("num_cluster", None)
+
     print(f"Parameters:")
     print(f"  - Training iterations: {iterations}")
+    print(f"  - Mesh quality: {mesh_quality}")
     print(f"  - Mesh resolution: {mesh_resolution}")
     print(f"  - Output format: {output_format}")
     
     # Create working directory
-    work_dir = Path(tempfile.mkdtemp(prefix="stage_pipeline_"))
+    work_dir = Path(tempfile.mkdtemp(prefix="2dgs_pipeline_"))
     print(f"Working directory: {work_dir}")
     
     try:
@@ -419,8 +485,16 @@ def handler(job):
         model_dir = work_dir / "model"
         train_2dgs(data_dir, model_dir, iterations)
         
-        # Step 6: Extract mesh
-        mesh_path = extract_mesh(data_dir, model_dir, mesh_resolution)
+        # Step 6: Extract mesh with high-quality 2DGS native extraction
+        mesh_path = extract_mesh(
+            data_dir, 
+            model_dir, 
+            mesh_resolution=mesh_resolution,
+            mesh_quality=mesh_quality,
+            depth_trunc=depth_trunc,
+            voxel_size=voxel_size,
+            num_cluster=num_cluster,
+        )
         
         # Step 7: Convert format if needed
         if output_format != "ply":
@@ -463,5 +537,5 @@ def handler(job):
 
 
 if __name__ == "__main__":
-    print("Starting Stage Pipeline serverless worker...")
+    print("Starting 2DGS Pipeline serverless worker...")
     runpod.serverless.start({"handler": handler})

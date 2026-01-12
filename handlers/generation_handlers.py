@@ -884,3 +884,209 @@ def handle_mesh_cleanup(
         import traceback
         return "", f"Error: {str(e)}\n\n{traceback.format_exc()}", f"❌ {str(e)}"
 
+
+def handle_2dgs_pipeline(
+    video_source: str,
+    video_path: str,
+    video_upload,
+    video_dropdown: str,
+    gen3c_output_dir: str,
+    iterations: int,
+    mesh_quality: str,
+    output_format: str,
+    output_dir: str,
+    endpoint_id: str,
+    api_key: str,
+    s3_bucket: str = "arkrunr",
+    s3_region: str = "us-west-1",
+    progress_callback=None,
+) -> Tuple[Optional[str], dict, str]:
+    """
+    Handle 2DGS pipeline: Video → 3D Mesh.
+    
+    Args:
+        video_source: "Upload Video", "Video Path", or "Use Gen3C Output"
+        video_path: Path or URL to video (if video_source == "Video Path")
+        video_upload: Uploaded video file (if video_source == "Upload Video")
+        video_dropdown: Selected video from dropdown (if video_source == "Use Gen3C Output")
+        gen3c_output_dir: Gen3C output directory
+        iterations: 2DGS training iterations (1000-10000)
+        mesh_quality: Mesh extraction quality (fast, balanced, high, ultra)
+        output_format: Output format (glb, obj, ply)
+        output_dir: Local directory to save output
+        endpoint_id: RunPod endpoint ID
+        api_key: RunPod API key
+        s3_bucket: S3 bucket for file transfer
+        s3_region: S3 region
+        progress_callback: Optional callback for progress updates
+        
+    Returns:
+        Tuple of (output_file_path, stats_dict, status_message)
+    """
+    import uuid
+    from pathlib import Path
+    
+    logs = []
+    
+    # Validate API key
+    if not api_key:
+        return None, {}, "❌ API key required. Set in Endpoint Settings."
+    
+    # Determine video input
+    video_url = None
+    local_video_path = None
+    
+    if video_source == "Upload Video":
+        if video_upload is None:
+            return None, {}, "❌ No video uploaded"
+        local_video_path = video_upload
+        logs.append(f"Using uploaded video: {local_video_path}")
+        
+    elif video_source == "Video Path":
+        if not video_path:
+            return None, {}, "❌ No video path provided"
+        
+        # Check if it's a URL
+        if video_path.startswith(("http://", "https://", "s3://")):
+            video_url = video_path
+            logs.append(f"Using video URL: {video_url[:60]}...")
+        else:
+            local_video_path = video_path
+            if not Path(local_video_path).exists():
+                return None, {}, f"❌ Video file not found: {local_video_path}"
+            logs.append(f"Using local video: {local_video_path}")
+            
+    elif video_source == "Use Gen3C Output":
+        if not video_dropdown:
+            return None, {}, "❌ No video selected from Gen3C outputs"
+        local_video_path = str(Path(gen3c_output_dir) / video_dropdown)
+        if not Path(local_video_path).exists():
+            return None, {}, f"❌ Gen3C video not found: {local_video_path}"
+        logs.append(f"Using Gen3C video: {local_video_path}")
+    
+    # Upload to S3 if local file
+    if local_video_path and not video_url:
+        try:
+            import boto3
+            
+            logs.append("Uploading video to S3...")
+            
+            # Generate unique S3 key
+            unique_id = str(uuid.uuid4())[:8]
+            filename = Path(local_video_path).name
+            s3_key = f"MediaContent/2dgs-pipeline/inputs/{unique_id}_{filename}"
+            
+            s3 = boto3.client("s3", region_name=s3_region)
+            s3.upload_file(str(local_video_path), s3_bucket, s3_key)
+            
+            # Generate presigned URL
+            video_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": s3_bucket, "Key": s3_key},
+                ExpiresIn=3600
+            )
+            logs.append(f"✅ Uploaded to S3: s3://{s3_bucket}/{s3_key}")
+            
+        except Exception as e:
+            return None, {}, f"❌ S3 upload failed: {e}"
+    
+    if not video_url:
+        return None, {}, "❌ Could not resolve video URL"
+    
+    # Create 2DGS client and run pipeline
+    try:
+        from runpod.runpod_client import TwoDGSPipelineClient
+        
+        client = TwoDGSPipelineClient(
+            endpoint_id=endpoint_id,
+            api_key=api_key
+        )
+        
+        logs.append(f"Starting 2DGS pipeline...")
+        logs.append(f"Iterations: {iterations}, Quality: {mesh_quality}")
+        logs.append(f"Output format: {output_format}")
+        
+        # Custom progress callback that updates both logs and UI
+        def _progress_callback(status, elapsed):
+            msg = f"[{elapsed:.0f}s] Status: {status}"
+            logs.append(msg)
+            if progress_callback:
+                progress_callback(status, elapsed)
+        
+        result = client.generate_sync(
+            video_url=video_url,
+            output_dir=output_dir,
+            iterations=iterations,
+            mesh_quality=mesh_quality,
+            output_format=output_format,
+            s3_bucket=s3_bucket,
+            s3_region=s3_region,
+            poll_interval=15,
+            max_wait=1200,  # 20 minutes
+            progress_callback=_progress_callback,
+        )
+        
+        if result.success:
+            stats = {
+                "job_id": result.job_id,
+                "duration_seconds": round(result.duration_seconds, 1),
+                "output_path": result.output_path,
+            }
+            
+            logs.append("")
+            logs.append(f"✅ Pipeline completed in {result.duration_seconds:.1f}s")
+            logs.append(f"Output: {result.output_path}")
+            
+            return result.output_path, stats, "\n".join(logs)
+        else:
+            logs.append(f"❌ Pipeline failed: {result.error}")
+            return None, {"error": result.error}, "\n".join(logs)
+            
+    except Exception as e:
+        import traceback
+        logs.append(f"❌ Error: {str(e)}")
+        logs.append(traceback.format_exc())
+        return None, {"error": str(e)}, "\n".join(logs)
+
+
+def list_gen3c_videos(output_dir: str) -> list:
+    """List MP4 videos in the Gen3C output directory."""
+    from pathlib import Path
+    
+    output_path = Path(output_dir)
+    if not output_path.exists():
+        return []
+    
+    videos = sorted(output_path.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return [v.name for v in videos[:20]]  # Return 20 most recent
+
+
+def get_video_info(video_path: str) -> str:
+    """Get basic info about a video file."""
+    from pathlib import Path
+    import subprocess
+    
+    if not video_path:
+        return "No video selected"
+    
+    path = Path(video_path)
+    if not path.exists():
+        return f"File not found: {video_path}"
+    
+    size_mb = path.stat().st_size / 1024 / 1024
+    info = f"File: {path.name}\nSize: {size_mb:.1f} MB"
+    
+    # Try to get duration with ffprobe
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            duration = float(result.stdout.strip())
+            info += f"\nDuration: {duration:.1f}s"
+    except:
+        pass
+    
+    return info

@@ -316,13 +316,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     interactive=False,
                 )
             
-            # Video preview - separate from output, hidden by default
-            output_video = gr.Video(
-                label="Video Preview",
-                visible=False,
-                height=200,
-            )
-            
             # ─────────────────────────────────────────────────────────────────
             # PAGES CONTAINER - Using Tabs with hidden tab bar
             # ─────────────────────────────────────────────────────────────────
@@ -463,7 +456,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     """)
                     
                     with gr.Row():
-                        with gr.Column(scale=2):
+                        with gr.Column(scale=1):
                             with gr.Group():
                                 gr.Markdown("### Video Settings")
                                 with gr.Row():
@@ -472,22 +465,22 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         value="left",
                                         label="Camera Trajectory",
                                     )
-                                    gen3c_frames = gr.Dropdown(
-                                        choices=["121", "241", "361"],
-                                        value="121",
-                                        label="Frames (121*N - 1)",
+                                    gen3c_camera_rotation = gr.Dropdown(
+                                        choices=["center_facing", "no_rotation", "trajectory_aligned"],
+                                        value="center_facing",
+                                        label="Camera Rotation",
+                                        elem_id="gen3c-camera-rotation",
                                     )
                                 with gr.Row():
                                     gen3c_movement_distance = gr.Slider(
                                         minimum=0.1, maximum=1.0, value=0.3, step=0.05,
                                         label="Movement Distance",
-                                        info="How far camera moves (0.1=subtle, 1.0=dramatic)"
+                                        elem_id="gen3c-movement-distance",
                                     )
-                                    gen3c_camera_rotation = gr.Dropdown(
-                                        choices=["center_facing", "no_rotation", "trajectory_aligned"],
-                                        value="center_facing",
-                                        label="Camera Rotation",
-                                        info="How camera rotates during movement"
+                                    gen3c_frames = gr.Dropdown(
+                                        choices=["121", "241", "361"],
+                                        value="121",
+                                        label="Frames (121*N - 1)",
                                     )
                                 with gr.Row():
                                     gen3c_guidance = gr.Slider(minimum=0.5, maximum=5.0, value=1.0, label="Guidance")
@@ -501,6 +494,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             gen3c_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
                             gen3c_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                        
+                        with gr.Column(scale=1):
+                            gen3c_video_viewer = gr.Video(
+                                label="Video Preview",
+                                height=400,
+                                autoplay=True,
+                                loop=True,
+                            )
                     
                     with gr.Accordion("📋 Logs", open=False):
                         gen3c_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
@@ -517,7 +518,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     with gr.Tabs():
                         with gr.Tab("Generate"):
                             with gr.Row():
-                                with gr.Column(scale=2):
+                                with gr.Column(scale=1):
                                     lyra_mode = gr.Radio(
                                         choices=["Static (Image → 3DGS)", "Dynamic (Video → 4DGS)"],
                                         value="Static (Image → 3DGS)",
@@ -544,6 +545,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     lyra_generate_btn = gr.Button("Generate 3DGS", variant="primary", size="lg")
                                     lyra_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                
+                                with gr.Column(scale=1):
+                                    lyra_3d_viewer = gr.Model3D(
+                                        label="3D Preview",
+                                        height=400,
+                                        clear_color=[0.1, 0.1, 0.1, 1.0],
+                                    )
                             
                             with gr.Accordion("📋 Logs", open=False):
                                 lyra_logs = gr.Textbox(lines=8, interactive=False)
@@ -574,7 +582,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     """)
                     
                     with gr.Row():
-                        with gr.Column(scale=2):
+                        with gr.Column(scale=1):
                             with gr.Row():
                                 trellis_resolution = gr.Dropdown(["512", "1024"], value="1024", label="Resolution")
                                 trellis_guidance = gr.Slider(1.0, 15.0, 7.5, label="Guidance")
@@ -587,6 +595,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             trellis_generate_btn = gr.Button("Generate 3D", variant="primary", size="lg")
                             trellis_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                        
+                        with gr.Column(scale=1):
+                            trellis_3d_viewer = gr.Model3D(
+                                label="3D Preview",
+                                height=400,
+                                clear_color=[0.1, 0.1, 0.1, 1.0],
+                            )
                     
                     with gr.Accordion("📋 Logs", open=False):
                         trellis_logs = gr.Textbox(lines=8, interactive=False)
@@ -652,7 +667,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     with gr.Tabs():
                         with gr.Tab("Extract"):
                             with gr.Row():
-                                with gr.Column(scale=2):
+                                with gr.Column(scale=1):
                                     with gr.Group():
                                         gr.Markdown("### Input PLY")
                                         mesh_ply_files = scan_for_ply_files()
@@ -669,6 +684,12 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     with gr.Group():
                                         gr.Markdown("### Reconstruction Settings")
+                                        mesh_method = gr.Radio(
+                                            choices=["Poisson (High Quality)", "TSDF (Fast)"],
+                                            value="Poisson (High Quality)",
+                                            label="Method",
+                                            info="Poisson: watertight mesh, better quality. TSDF: faster, good for previews.",
+                                        )
                                         with gr.Row():
                                             mesh_quality = gr.Dropdown(
                                                 ["High Poly (1M)", "Low Poly (200k)", "Custom"],
@@ -676,6 +697,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                                 label="Quality",
                                             )
                                             mesh_poisson_depth = gr.Slider(6, 12, 10, step=1, label="Poisson Depth")
+                                        with gr.Row(visible=False) as mesh_tsdf_row:
+                                            mesh_tsdf_voxel_size = gr.Slider(0.002, 0.02, 0.008, step=0.002, label="TSDF Voxel Size")
+                                            mesh_tsdf_num_views = gr.Slider(8, 64, 32, step=8, label="TSDF Views")
                                         mesh_decimate = gr.Number(0, label="Decimate to (faces, 0=none)")
                                     
                                     with gr.Group():
@@ -686,6 +710,13 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
                                     mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                
+                                with gr.Column(scale=1):
+                                    mesh_3d_viewer = gr.Model3D(
+                                        label="3D Preview",
+                                        height=400,
+                                        clear_color=[0.1, 0.1, 0.1, 1.0],
+                                    )
                             
                             with gr.Accordion("📋 Logs", open=False):
                                 mesh_logs = gr.Textbox(lines=8, interactive=False)
@@ -779,19 +810,18 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             with gr.Accordion("📋 Cleanup Log", open=False):
                                 cleanup_logs = gr.Textbox(lines=8, interactive=False)
                 
-                # PAGE: 2DGS (Stage Reconstruction Pipeline)
+                # PAGE: 2DGS (Video → Mesh Pipeline)
                 with gr.TabItem("2DGS", id="create"):
                     gr.HTML("""
                         <div class="page-header">
-                            <h1>2DGS - Stage Reconstruction</h1>
-                            <p>Build 3D architectural stages from Gen3C videos using ViPE pose extraction and 2D Gaussian Splatting.</p>
+                            <h1>2DGS - Video to Mesh</h1>
+                            <p>Convert Gen3C videos to 3D meshes using ViPE pose extraction and 2D Gaussian Splatting.</p>
                         </div>
                     """)
                     
-                    from ui.tabs.create_tab import create_create_tab
-                    create_components = create_create_tab(
-                        default_runpod_url=_runpod_config.get("gen3c_url", ""),
-                        default_endpoint_id=_runpod_config.get("gen3c_endpoint", ""),
+                    from ui.tabs.create_tab import create_2dgs_tab
+                    twodgs_components = create_2dgs_tab(
+                        default_endpoint_id="s9txp6edtf2vg4",
                         default_api_key=_runpod_config.get("gen3c_api_key", ""),
                     )
                 
@@ -1061,8 +1091,13 @@ Trajectory: clockwise or counterclockwise (for room tours)
 - Works best with images that have clear foreground/background separation
 - Enable foreground_masking for better depth handling
 - Ideal for: virtual tours, real estate walkthroughs, design visualization
-- Output is VIDEO (mp4), not 3D model - use Lyra for 3DGS output
+- Output is VIDEO (mp4), not 3D model - use 2DGS or Lyra for 3D output
                         """)
+                    
+                    # 2DGS Documentation
+                    with gr.Accordion("2DGS - Video to Mesh Pipeline", open=False):
+                        from help.documentation import TWODGS_HELP
+                        gr.Markdown(TWODGS_HELP)
                     
                     # Lyra Documentation
                     with gr.Accordion("LYRA - Image/Video to 3DGS/4DGS", open=False):
@@ -1298,35 +1333,52 @@ CPU Offload: OFF unless necessary
                         gr.Markdown("""
 ## MESH Extraction
 
-**What it does:** Converts 3D Gaussian Splat (3DGS) files to traditional mesh formats (GLB/OBJ) using Poisson surface reconstruction. This allows 3DGS outputs from Lyra, SHARP, or other sources to be used in standard 3D software.
+**What it does:** Converts 3D Gaussian Splat (3DGS) files to traditional mesh formats (GLB/OBJ). Works with PLY files from Lyra, SHARP, or other 3DGS sources.
+
+### Extraction Methods
+
+| Method | Quality | Speed | Best For |
+|--------|---------|-------|----------|
+| **Poisson** | ⭐⭐⭐⭐ | Slower | Final outputs, watertight meshes, editing |
+| **TSDF** | ⭐⭐⭐ | Fast | Quick previews, iterating on models |
+
+**Poisson (Recommended for quality):**
+- Creates watertight meshes suitable for 3D printing/editing
+- Better surface smoothness
+- Preserves detail with adjustable depth parameter
+
+**TSDF (Recommended for speed):**
+- Fast depth-based volumetric fusion
+- Good enough for previews and iteration
+- Adjustable voxel size controls quality/speed tradeoff
 
 ### Key Settings
 
 | Setting | Description | Range | Default |
 |---------|-------------|-------|---------|
-| **Input PLY** | Source 3DGS PLY file | file path | - |
-| **Poisson Depth** | Reconstruction detail level | 6-12 | 9 |
-| **Point Weight** | Influence of input points | 0.0-10.0 | 4.0 |
-| **Scale** | Output mesh scale | 0.1-10.0 | 1.0 |
-| **Output Format** | GLB or OBJ | glb/obj | glb |
+| **Method** | Extraction algorithm | Poisson/TSDF | Poisson |
+| **Poisson Depth** | Detail level (Poisson only) | 6-12 | 10 |
+| **TSDF Voxel Size** | Resolution (TSDF only) | 0.002-0.02 | 0.008 |
+| **TSDF Views** | Viewpoints (TSDF only) | 8-64 | 32 |
+| **Decimate** | Reduce faces (0=none) | 0-500k | 0 |
 
-### Architectural Interior Settings
+### Recommended Settings
 
-For architectural interiors:
-
+**For final quality output (Poisson):**
 ```
-Poisson Depth: 10-11 (higher for detailed interiors)
-Point Weight: 3.0-5.0 (balance detail vs smoothness)
-Scale: 1.0 (maintain original scale)
-Output Format: GLB (preserves vertex colors as texture)
+Method: Poisson (High Quality)
+Quality: High Poly (1M)
+Poisson Depth: 10-11
+Output Format: GLB
 ```
 
-**Tips for Architectural Interiors:**
-- Higher Poisson depth = more detail but longer processing
-- Lower point weight = smoother surfaces (good for walls)
-- Higher point weight = more detail preservation (good for furniture)
-- Process individual objects separately for best results
-- Large room scans may need to be segmented first
+**For quick previews (TSDF):**
+```
+Method: TSDF (Fast)
+TSDF Voxel Size: 0.01 (larger = faster)
+TSDF Views: 16-32
+Output Format: GLB
+```
                         """)
                     
                     # MESH Cleanup Documentation
@@ -1488,7 +1540,7 @@ Min Component Ratio: 1% (default)
     # JavaScript to highlight active nav button
     highlight_js = """
     () => {
-        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-settings', 'nav-update', 'nav-help'];
+        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-create', 'nav-settings', 'nav-update', 'nav-help'];
         navButtons.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.classList.remove('nav-active');
@@ -1729,15 +1781,31 @@ Min Component Ratio: 1% (default)
             gen3c_video_name, gen3c_seed, gen3c_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_video, gen3c_logs, gen3c_progress],
+        outputs=[gen3c_video_viewer, gen3c_logs, gen3c_progress],
     )
     
     # =========================================================================
     # LYRA EVENT HANDLERS
     # =========================================================================
     
+    def lyra_generate_with_preview(*args):
+        """Wrapper that converts PLY to GLB for 3D viewer."""
+        result = handle_lyra_generation(*args)
+        output_path, logs, progress, ply_path = result
+        
+        # Convert PLY to GLB for preview if PLY exists
+        preview_path = None
+        if ply_path and os.path.exists(ply_path):
+            try:
+                preview_path = convert_3dgs_to_preview_glb(ply_path)
+            except Exception as e:
+                print(f"[LYRA] Preview conversion failed: {e}")
+                preview_path = None
+        
+        return output_path, logs, progress, ply_path, preview_path
+    
     lyra_generate_btn.click(
-        fn=handle_lyra_generation,
+        fn=lyra_generate_with_preview,
         inputs=[
             input_image, input_video, image_scale,
             settings_gen3c_endpoint, settings_gen3c_key,
@@ -1748,7 +1816,7 @@ Min Component Ratio: 1% (default)
             lyra_out_ply, lyra_out_video,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, lyra_logs, lyra_progress, lyra_ply_path],
+        outputs=[output_display, lyra_logs, lyra_progress, lyra_ply_path, lyra_3d_viewer],
     )
     
     # Lyra PLY dropdown
@@ -1767,8 +1835,27 @@ Min Component Ratio: 1% (default)
     # TRELLIS EVENT HANDLERS
     # =========================================================================
     
+    def trellis_generate_with_preview(*args):
+        """Wrapper that returns GLB path for 3D viewer."""
+        result = handle_trellis_generation(*args)
+        output_path, logs, progress = result
+        
+        # Trellis outputs GLB directly, perfect for Model3D
+        # If format is OBJ or PLY, try to find GLB version or return None
+        preview_path = None
+        if output_path:
+            if output_path.endswith('.glb'):
+                preview_path = output_path
+            elif output_path.endswith(('.obj', '.ply')):
+                # Try to find GLB version
+                glb_path = output_path.rsplit('.', 1)[0] + '.glb'
+                if os.path.exists(glb_path):
+                    preview_path = glb_path
+        
+        return output_path, logs, progress, preview_path
+    
     trellis_generate_btn.click(
-        fn=handle_trellis_generation,
+        fn=trellis_generate_with_preview,
         inputs=[
             input_image, image_scale,
             settings_trellis_endpoint, settings_trellis_key,
@@ -1776,7 +1863,7 @@ Min Component Ratio: 1% (default)
             trellis_output_name, trellis_output_dir, trellis_format,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, trellis_logs, trellis_progress],
+        outputs=[output_display, trellis_logs, trellis_progress, trellis_3d_viewer],
     )
     
     # =========================================================================
@@ -1808,18 +1895,82 @@ Min Component Ratio: 1% (default)
     # MESH EXTRACTION EVENT HANDLERS
     # =========================================================================
     
+    # Toggle visibility of method-specific settings
+    def toggle_mesh_method_settings(method):
+        """Show/hide settings based on extraction method."""
+        is_poisson = "Poisson" in method
+        return (
+            gr.update(visible=is_poisson),   # poisson_depth row
+            gr.update(visible=not is_poisson),  # tsdf row
+        )
+    
+    mesh_method.change(
+        fn=toggle_mesh_method_settings,
+        inputs=[mesh_method],
+        outputs=[mesh_poisson_depth, mesh_tsdf_row],
+    )
+    
+    def mesh_extract_with_preview(
+        ply_dropdown, input_format, method,
+        quality, poisson_depth, decimate,
+        tsdf_voxel_size, tsdf_num_views,
+        output_name, output_format, output_dir,
+        endpoint_id, api_key
+    ):
+        """Wrapper that returns GLB path for 3D viewer."""
+        # Map method selection to handler parameters
+        if "Poisson" in method:
+            handler_method = "SuGaR"
+            voxel_size = 0.01  # not used for Poisson
+            num_views = 32  # not used for Poisson
+        else:
+            handler_method = "TSDF"
+            voxel_size = tsdf_voxel_size
+            num_views = int(tsdf_num_views)
+            poisson_depth = 10  # not used for TSDF
+        
+        result = handle_mesh_extraction(
+            ply_dropdown, input_format,
+            handler_method, "dn_consistency",
+            quality, poisson_depth, decimate,
+            False, "2048", "short",
+            voxel_size, num_views,
+            output_name, output_format, output_dir,
+            endpoint_id, api_key,
+        )
+        output_path, logs, progress = result
+        
+        # Mesh extraction outputs GLB/OBJ/PLY
+        # Model3D works best with GLB
+        preview_path = None
+        if output_path:
+            if output_path.endswith('.glb'):
+                preview_path = output_path
+            elif output_path.endswith('.obj'):
+                # Try to find GLB version
+                glb_path = output_path.rsplit('.', 1)[0] + '.glb'
+                if os.path.exists(glb_path):
+                    preview_path = glb_path
+            elif output_path.endswith('.ply'):
+                # Convert PLY to GLB for preview
+                try:
+                    preview_path = convert_3dgs_to_preview_glb(output_path)
+                except Exception as e:
+                    print(f"[MESH] Preview conversion failed: {e}")
+                    preview_path = None
+        
+        return output_path, logs, progress, preview_path
+    
     mesh_extract_btn.click(
-        fn=handle_mesh_extraction,
+        fn=mesh_extract_with_preview,
         inputs=[
-            mesh_ply_dropdown, mesh_format,
-            gr.State("SuGaR"), gr.State("dn_consistency"),
+            mesh_ply_dropdown, mesh_format, mesh_method,
             mesh_quality, mesh_poisson_depth, mesh_decimate,
-            gr.State(False), gr.State("2048"), gr.State("short"),
-            gr.State(0.01), gr.State(32),
+            mesh_tsdf_voxel_size, mesh_tsdf_num_views,
             mesh_output_name, mesh_output_format, mesh_output_dir,
             settings_gen3c_endpoint, settings_gen3c_key,
         ],
-        outputs=[output_display, mesh_logs, mesh_progress],
+        outputs=[output_display, mesh_logs, mesh_progress, mesh_3d_viewer],
     )
     
     # Mesh PLY dropdown
@@ -1891,6 +2042,118 @@ Min Component Ratio: 1% (default)
             cleanup_log_params, cleanup_encode_params,
         ],
         outputs=[output_display, cleanup_logs, cleanup_status, cleanup_after_viewer],
+    )
+    
+    # =========================================================================
+    # 2DGS PIPELINE EVENT HANDLERS
+    # =========================================================================
+    
+    from handlers.generation_handlers import handle_2dgs_pipeline, list_gen3c_videos, get_video_info
+    
+    # Refresh Gen3C video list
+    def refresh_gen3c_videos(output_dir):
+        videos = list_gen3c_videos(output_dir)
+        return gr.update(choices=videos)
+    
+    twodgs_components["refresh_videos_btn"].click(
+        fn=refresh_gen3c_videos,
+        inputs=[twodgs_components["gen3c_output_dir"]],
+        outputs=[twodgs_components["video_dropdown"]],
+    )
+    
+    # Update video info when path changes
+    twodgs_components["video_path"].change(
+        fn=get_video_info,
+        inputs=[twodgs_components["video_path"]],
+        outputs=[twodgs_components["video_info"]],
+    )
+    
+    # Update video info when dropdown selection changes
+    def update_video_info_from_dropdown(video_name, gen3c_dir):
+        if not video_name:
+            return "No video selected"
+        from pathlib import Path
+        full_path = str(Path(gen3c_dir) / video_name)
+        return get_video_info(full_path)
+    
+    twodgs_components["video_dropdown"].change(
+        fn=update_video_info_from_dropdown,
+        inputs=[twodgs_components["video_dropdown"], twodgs_components["gen3c_output_dir"]],
+        outputs=[twodgs_components["video_info"]],
+    )
+    
+    # Main generate button
+    def run_2dgs_pipeline_wrapper(
+        video_source, video_path, video_upload, video_dropdown, gen3c_output_dir,
+        iterations, mesh_quality, output_format, output_dir,
+        endpoint_id, api_key, s3_bucket, s3_region
+    ):
+        """Wrapper to call 2DGS pipeline with progress updates."""
+        output_path, stats, status = handle_2dgs_pipeline(
+            video_source=video_source,
+            video_path=video_path,
+            video_upload=video_upload,
+            video_dropdown=video_dropdown,
+            gen3c_output_dir=gen3c_output_dir,
+            iterations=int(iterations),
+            mesh_quality=mesh_quality,
+            output_format=output_format,
+            output_dir=output_dir,
+            endpoint_id=endpoint_id,
+            api_key=api_key,
+            s3_bucket=s3_bucket,
+            s3_region=s3_region,
+        )
+        return output_path, stats, status
+    
+    def run_2dgs_pipeline_with_preview(*args):
+        """Wrapper that returns GLB path for 3D viewer."""
+        output_path, stats, status = run_2dgs_pipeline_wrapper(*args)
+        
+        # 2DGS outputs GLB/OBJ/PLY
+        # Model3D works best with GLB
+        preview_path = None
+        if output_path:
+            if output_path.endswith('.glb'):
+                preview_path = output_path
+            elif output_path.endswith('.obj'):
+                # Try to find GLB version
+                glb_path = output_path.rsplit('.', 1)[0] + '.glb'
+                if os.path.exists(glb_path):
+                    preview_path = glb_path
+            elif output_path.endswith('.ply'):
+                # Convert PLY to GLB for preview
+                try:
+                    preview_path = convert_3dgs_to_preview_glb(output_path)
+                except Exception as e:
+                    print(f"[2DGS] Preview conversion failed: {e}")
+                    preview_path = None
+        
+        return output_path, stats, status, preview_path
+    
+    twodgs_components["generate_btn"].click(
+        fn=run_2dgs_pipeline_with_preview,
+        inputs=[
+            twodgs_components["video_source"],
+            twodgs_components["video_path"],
+            twodgs_components["video_upload"],
+            twodgs_components["video_dropdown"],
+            twodgs_components["gen3c_output_dir"],
+            twodgs_components["iterations"],
+            twodgs_components["mesh_quality"],
+            twodgs_components["output_format"],
+            twodgs_components["output_dir"],
+            twodgs_components["endpoint_id"],
+            twodgs_components["api_key"],
+            twodgs_components["s3_bucket"],
+            twodgs_components["s3_region"],
+        ],
+        outputs=[
+            twodgs_components["output_file"],
+            twodgs_components["output_stats"],
+            twodgs_components["status_text"],
+            twodgs_components["twodgs_3d_viewer"],
+        ],
     )
     
     # =========================================================================
@@ -2055,8 +2318,21 @@ Min Component Ratio: 1% (default)
         js="""
         () => {
             setTimeout(() => {
+                // Highlight SHARP button on load
                 const sharpBtn = document.getElementById('nav-sharp');
                 if (sharpBtn) sharpBtn.classList.add('nav-active');
+                
+                // Add native tooltips to Gen3C controls
+                const movementDist = document.getElementById('gen3c-movement-distance');
+                if (movementDist) {
+                    const label = movementDist.querySelector('label, span');
+                    if (label) label.title = 'How far camera moves (0.1=subtle, 1.0=dramatic)';
+                }
+                const cameraRot = document.getElementById('gen3c-camera-rotation');
+                if (cameraRot) {
+                    const label = cameraRot.querySelector('label, span');
+                    if (label) label.title = 'How camera rotates during movement';
+                }
             }, 500);
             return [];
         }

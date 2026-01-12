@@ -1,4 +1,4 @@
-# Stage Pipeline Serverless Deployment
+# 2DGS Pipeline Serverless Deployment
 
 **One endpoint**: Gen3C Video → 3D Mesh
 
@@ -7,7 +7,7 @@
 ## What's Ready
 
 ```
-runpod/stage-pipeline/
+runpod/2dgs-pipeline/
 ├── Dockerfile              ← Docker image
 ├── handler.py              ← Serverless handler
 ├── vipe_to_2dgs.py         ← Format converter
@@ -26,14 +26,14 @@ You can build this locally or on a RunPod GPU pod.
 **Option A: Build Locally** (if you have Docker + NVIDIA GPU)
     
 ```bash
-cd ~/Hunyuan3D-2-Fork/runpod/stage-pipeline
+cd ~/Hunyuan3D-2-Fork/runpod/2dgs-pipeline
 
 # Build (~30 min for CUDA extensions)
-docker build -t 88dreams/stage-pipeline:v1 .
+docker build -t 88dreams/2dgs-pipeline:v1 .
 
 # Push to Docker Hub
 docker login
-docker push 88dreams/stage-pipeline:v1
+docker push 88dreams/2dgs-pipeline:v1
 ```
 
 **Option B: Build on RunPod Pod**
@@ -49,14 +49,14 @@ sudo sh get-docker.sh
 # Clone repo
 cd /workspace
 git clone https://github.com/88dreams/Hunyuan3D-2-Fork.git
-cd Hunyuan3D-2-Fork/runpod/stage-pipeline
+cd Hunyuan3D-2-Fork/runpod/2dgs-pipeline
 
 # Build
-docker build -t 88dreams/stage-pipeline:v1 .
+docker build -t 88dreams/2dgs-pipeline:v1 .
 
 # Push
 docker login
-docker push 88dreams/stage-pipeline:v1
+docker push 88dreams/2dgs-pipeline:v1
 ```
 
 ---
@@ -69,8 +69,8 @@ docker push 88dreams/stage-pipeline:v1
 
 | Field | Value |
 |-------|-------|
-| **Name** | `stage-pipeline` |
-| **Docker Image** | `88dreams/stage-pipeline:v1` |
+| **Name** | `2dgs-pipeline` |
+| **Docker Image** | `88dreams/2dgs-pipeline:v1` |
 | **GPU Type** | RTX 4090 (or A100) |
 | **Min Workers** | 0 |
 | **Max Workers** | 2 |

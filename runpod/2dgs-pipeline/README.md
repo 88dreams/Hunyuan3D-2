@@ -1,4 +1,4 @@
-# Stage Pipeline Serverless
+# 2DGS Pipeline Serverless
 
 **One endpoint** that converts Gen3C video directly to 3D mesh.
 
@@ -16,13 +16,13 @@ Gen3C Video → [This Endpoint] → GLB/OBJ Mesh
 ### 1. Build the Docker Image
 
 ```bash
-cd runpod/stage-pipeline
+cd runpod/2dgs-pipeline
 
 # Build (takes ~30 minutes due to CUDA extensions)
-docker build -t 88dreams/stage-pipeline:v1 .
+docker build -t 88dreams/2dgs-pipeline:v1 .
 
 # Push to Docker Hub
-docker push 88dreams/stage-pipeline:v1
+docker push 88dreams/2dgs-pipeline:v1
 ```
 
 ### 2. Create RunPod Serverless Endpoint
@@ -33,8 +33,8 @@ docker push 88dreams/stage-pipeline:v1
 
 | Setting | Value |
 |---------|-------|
-| Name | `stage-pipeline` |
-| Docker Image | `88dreams/stage-pipeline:v1` |
+| Name | `2dgs-pipeline` |
+| Docker Image | `88dreams/2dgs-pipeline:v1` |
 | GPU Type | RTX 4090 or A100 |
 | Min Workers | 0 |
 | Max Workers | 2 |
@@ -129,7 +129,7 @@ Or on error:
 ## Files
 
 ```
-runpod/stage-pipeline/
+runpod/2dgs-pipeline/
 ├── Dockerfile              # Docker image definition
 ├── handler.py              # Main serverless handler
 ├── vipe_to_2dgs.py         # ViPE → COLMAP converter

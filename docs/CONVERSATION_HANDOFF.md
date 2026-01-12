@@ -17,7 +17,7 @@ This document summarizes the work completed and provides context for new convers
 | **Lyra** | NVIDIA | 3D/4D Gaussian Splatting | ✅ Working |
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
-| **Stage Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
+| **2DGS Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
 
 ### Architecture
 
@@ -29,7 +29,7 @@ This document summarizes the work completed and provides context for new convers
 
 ## Current Work In Progress
 
-### Stage Pipeline: ViPE + 2DGS (January 11, 2026)
+### 2DGS Pipeline: ViPE + 2DGS (January 11, 2026)
 
 **Goal**: Convert Gen3C video output into 3D mesh using video pose estimation and 2D Gaussian Splatting.
 
@@ -67,13 +67,13 @@ This document summarizes the work completed and provides context for new convers
 | v20 | GeoCalib weights | Pre-downloaded 110MB GeoCalib model weights |
 
 **Key Files**:
-- `runpod/stage-pipeline/Dockerfile` - Combined ViPE + 2DGS image
-- `runpod/stage-pipeline/handler.py` - Serverless handler
-- `runpod/stage-pipeline/vipe_to_2dgs.py` - Format converter
-- `runpod/stage-pipeline/init_points_from_depth.py` - Point cloud generator
-- `scripts/test_stage_pipeline.py` - Test script
+- `runpod/2dgs-pipeline/Dockerfile` - Combined ViPE + 2DGS image
+- `runpod/2dgs-pipeline/handler.py` - Serverless handler
+- `runpod/2dgs-pipeline/vipe_to_2dgs.py` - Format converter
+- `runpod/2dgs-pipeline/init_points_from_depth.py` - Point cloud generator
+- `scripts/test_2dgs_pipeline.py` - Test script
 
-**Docker Image**: `88dreams/stage-pipeline:v20`
+**Docker Image**: `88dreams/2dgs-pipeline:v20`
 
 **RunPod Endpoint**: `2dgs-serverless` (ID: `s9txp6edtf2vg4`)
 
@@ -81,7 +81,7 @@ This document summarizes the work completed and provides context for new convers
 
 ## Recent Work Completed
 
-### 1. Stage Pipeline Development (Current Session - Jan 11, 2026)
+### 1. 2DGS Pipeline Development (Current Session - Jan 11, 2026)
 
 Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstruction:
 
@@ -119,7 +119,7 @@ Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstructio
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
 | `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/stage-pipeline` | ViPE + 2DGS | v20 ✅ |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS | v20 ✅ |
 
 ### Build Commands
 
@@ -129,10 +129,10 @@ cd runpod/gen3c
 docker build -f Dockerfile.patch -t 88dreams/gen3c-runpod:vXX .
 docker push 88dreams/gen3c-runpod:vXX
 
-# Stage Pipeline
-cd runpod/stage-pipeline
-docker build -t 88dreams/stage-pipeline:vXX .
-docker push 88dreams/stage-pipeline:vXX
+# 2DGS Pipeline
+cd runpod/2dgs-pipeline
+docker build -t 88dreams/2dgs-pipeline:vXX .
+docker push 88dreams/2dgs-pipeline:vXX
 ```
 
 ---
@@ -144,20 +144,20 @@ docker push 88dreams/stage-pipeline:vXX
 | `gen3c-serverless` | gen3c-runpod:v50 | Multi-model (Gen3C, Lyra, SHARP) |
 | `trellis-serverless` | trellis-runpod:v10 | TRELLIS.2 3D generation |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | stage-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
+| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
 
 ---
 
 ## Key Files
 
-### Stage Pipeline
+### 2DGS Pipeline
 | File | Purpose |
 |------|---------|
-| `runpod/stage-pipeline/Dockerfile` | Combined ViPE + 2DGS Docker image |
-| `runpod/stage-pipeline/handler.py` | Serverless handler orchestrating pipeline |
-| `runpod/stage-pipeline/vipe_to_2dgs.py` | ViPE → COLMAP format converter |
-| `runpod/stage-pipeline/init_points_from_depth.py` | Point cloud from depth maps |
-| `scripts/test_stage_pipeline.py` | Test script with S3 upload |
+| `runpod/2dgs-pipeline/Dockerfile` | Combined ViPE + 2DGS Docker image |
+| `runpod/2dgs-pipeline/handler.py` | Serverless handler orchestrating pipeline |
+| `runpod/2dgs-pipeline/vipe_to_2dgs.py` | ViPE → COLMAP format converter |
+| `runpod/2dgs-pipeline/init_points_from_depth.py` | Point cloud from depth maps |
+| `scripts/test_2dgs_pipeline.py` | Test script with S3 upload |
 
 ### Unified Handler
 | File | Purpose |
@@ -202,12 +202,12 @@ Or set in UI Settings page.
 
 ---
 
-## Testing Stage Pipeline
+## Testing 2DGS Pipeline
 
 ```bash
 # Test with local video (uploads to S3 automatically)
 cd /home/arkrunr02/Hunyuan3D-2-Fork
-RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py \
+RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py \
     --video /path/to/video.mp4 \
     --iterations 1000
 
@@ -215,16 +215,16 @@ RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py \
 cat /tmp/test-v20.log
 
 # Health check
-RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
+RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py --health
 ```
 
 ---
 
 ## Known Issues / Next Steps
 
-### 1. Stage Pipeline (v20) ✅ COMPLETE
+### 1. 2DGS Pipeline (v20) ✅ COMPLETE
 - Successfully generates high-quality meshes from Gen3C video
-- Auto-downloads to `/srv/searidge_share/outputs/mesh_vipe/`
+- Auto-downloads to `/srv/searidge_share/outputs/mesh_2dgs/`
 
 ### 2. Lyra Integration
 - SDG step takes 60-90 minutes
@@ -238,7 +238,7 @@ RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
 
 ## Debugging Tips
 
-### Stage Pipeline Logs
+### 2DGS Pipeline Logs
 1. Go to RunPod Console → Serverless → `2dgs-serverless`
 2. Click job ID to see logs
 3. Look for:

@@ -1,15 +1,17 @@
 """
-CREATE Tab - Interior Stage Reconstruction Pipeline
+2DGS Tab - Video to 3D Mesh Pipeline
 
-This tab implements the full Gen3C → ViPE → 2DGS → Mesh pipeline
-for reconstructing 3D stages from interior photographs.
+This tab provides the UI for the 2DGS Pipeline (ViPE + 2DGS)
+which converts Gen3C videos into 3D meshes.
 
-Workflow:
-1. Upload Gen3C video (or provide path)
-2. Run ViPE to extract camera poses + depth
-3. Convert to 2DGS format
-4. Train 2DGS model
-5. Extract mesh (GLB/OBJ)
+The pipeline is a ONE-SHOT serverless endpoint that handles:
+1. ViPE pose extraction
+2. Format conversion to COLMAP
+3. Point cloud initialization
+4. 2DGS training
+5. Mesh extraction
+
+Endpoint ID: s9txp6edtf2vg4
 """
 
 import gradio as gr
@@ -17,280 +19,185 @@ from pathlib import Path
 
 
 # Default paths
-VIPE_DEFAULT_OUTPUT_DIR = "./outputs/vipe"
-MESH_DEFAULT_OUTPUT_DIR = "./outputs/mesh_vipe"
+MESH_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/mesh_2dgs"
+GEN3C_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/gen3c"
+
+# Default endpoint
+DEFAULT_2DGS_ENDPOINT_ID = "s9txp6edtf2vg4"
 
 
-def create_create_tab(
-    default_runpod_url: str = "",
-    default_endpoint_id: str = "",
+def create_2dgs_tab(
+    default_endpoint_id: str = DEFAULT_2DGS_ENDPOINT_ID,
     default_api_key: str = "",
 ):
     """
-    Create the CREATE tab for stage reconstruction pipeline.
+    Create the 2DGS tab for video-to-mesh pipeline.
     
-    This is a multi-step workflow:
-    1. Video Input → 2. ViPE Pose Extraction → 3. 2DGS Training → 4. Mesh Export
+    This is a simplified one-shot workflow:
+    1. Video Input → 2. Parameters → 3. Generate → 4. Download Mesh
     
     Args:
-        default_runpod_url: Default RunPod pod URL
-        default_endpoint_id: Default serverless endpoint ID  
+        default_endpoint_id: Default RunPod endpoint ID
         default_api_key: Default serverless API key
     
     Returns:
         Dictionary of all UI components for event handler binding
     """
     
-    gr.Markdown("""
-    ### Stage Reconstruction Pipeline
-    **Video → Poses → 3D Training → Mesh**
-    
-    Create 3D architectural meshes from Gen3C videos using ViPE pose extraction and 2D Gaussian Splatting.
-    """)
-    
     # ===========================================
-    # STEP 1: VIDEO INPUT
+    # TWO-COLUMN LAYOUT (matching Sharp/other tabs)
     # ===========================================
-    with gr.Group():
-        gr.Markdown("#### Step 1: Video Input")
-        
-        with gr.Row():
-            video_source = gr.Radio(
-                choices=["Upload Video", "Video Path", "Use Gen3C Output"],
-                value="Video Path",
-                label="Source",
-            )
-        
-        # Upload option
-        with gr.Group(visible=False) as upload_group:
-            video_upload = gr.Video(
-                label="Upload Gen3C Video",
-                format="mp4",
-            )
-        
-        # Path option  
-        with gr.Group(visible=True) as path_group:
-            video_path = gr.Textbox(
-                value="",
-                label="Video Path",
-                placeholder="/path/to/gen3c_video.mp4",
-            )
-            browse_video_btn = gr.Button("Browse...", size="sm")
-        
-        # Gen3C output option
-        with gr.Group(visible=False) as gen3c_group:
-            gen3c_output_dir = gr.Textbox(
-                value="./outputs/gen3c",
-                label="Gen3C Output Directory",
-            )
-            video_dropdown = gr.Dropdown(
-                choices=[],
-                label="Select Video",
-            )
-            refresh_videos_btn = gr.Button("Refresh", size="sm")
-        
-        # Video preview
-        video_preview = gr.Video(
-            label="Preview",
-            visible=False,
-        )
-        video_info = gr.Textbox(
-            value="No video selected",
-            label="Video Info",
-            interactive=False,
-            lines=2,
-        )
-    
-    # ===========================================
-    # STEP 2: VIPE POSE EXTRACTION
-    # ===========================================
-    with gr.Group():
-        gr.Markdown("#### Step 2: ViPE Pose Extraction")
-        gr.Markdown("*Extract camera poses and depth maps from video*")
-        
-        with gr.Row():
-            vipe_exec_mode = gr.Radio(
-                choices=["RunPod Serverless", "RunPod Pod"],
-                value="RunPod Serverless",
-                label="Execution Mode",
-            )
-        
-        # Serverless credentials
-        with gr.Group() as vipe_creds_group:
-            with gr.Row():
-                vipe_endpoint_id = gr.Textbox(
-                    value=default_endpoint_id,
-                    label="ViPE Endpoint ID",
-                    placeholder="vipe-endpoint-id",
+    with gr.Row():
+        # LEFT COLUMN: All controls
+        with gr.Column(scale=1):
+            gr.Markdown("""
+            **ViPE + 2DGS**: Extract camera poses and reconstruct 3D geometry from Gen3C videos.
+            """)
+            
+            # VIDEO INPUT
+            with gr.Group():
+                gr.Markdown("### Video Input")
+                
+                video_source = gr.Radio(
+                    choices=["Upload Video", "Video Path", "Use Gen3C Output"],
+                    value="Use Gen3C Output",
+                    label="Source",
                 )
-                vipe_api_key = gr.Textbox(
-                    value=default_api_key,
-                    label="API Key",
-                    type="password",
+                
+                # Upload option
+                video_upload = gr.Video(
+                    label="Upload Gen3C Video",
+                    format="mp4",
+                    visible=False,
                 )
-            save_vipe_creds_btn = gr.Button("Save Credentials", size="sm")
-        
-        # ViPE output settings
-        with gr.Row():
-            vipe_output_dir = gr.Textbox(
-                value=VIPE_DEFAULT_OUTPUT_DIR,
-                label="Output Directory",
-            )
-        
-        with gr.Row():
-            run_vipe_btn = gr.Button(
-                "Run ViPE",
+                upload_group = video_upload  # For compatibility
+                
+                # Path option  
+                video_path = gr.Textbox(
+                    value="",
+                    label="Video Path",
+                    placeholder="/path/to/gen3c_video.mp4 or https://...",
+                    visible=False,
+                )
+                path_group = video_path  # For compatibility
+                
+                # Gen3C output option (default visible)
+                with gr.Column(visible=True) as gen3c_group:
+                    gen3c_output_dir = gr.Textbox(
+                        value=GEN3C_DEFAULT_OUTPUT_DIR,
+                        label="Gen3C Output Directory",
+                    )
+                    video_dropdown = gr.Dropdown(
+                        choices=[],
+                        label="Select Video",
+                    )
+                    refresh_videos_btn = gr.Button("🔄 Refresh", size="sm")
+                
+                # Video info
+                video_info = gr.Textbox(
+                    value="No video selected",
+                    label="Video Info",
+                    interactive=False,
+                    lines=2,
+                )
+            
+            # PIPELINE PARAMETERS
+            with gr.Group():
+                gr.Markdown("### Pipeline Parameters")
+                
+                with gr.Row():
+                    iterations = gr.Slider(
+                        minimum=1000,
+                        maximum=10000,
+                        value=5000,
+                        step=500,
+                        label="Training Iterations",
+                    )
+                    mesh_quality = gr.Radio(
+                        choices=["fast", "balanced", "high", "ultra"],
+                        value="high",
+                        label="Mesh Quality",
+                        info="Higher = better geometry, slower extraction",
+                    )
+                
+                with gr.Row():
+                    output_format = gr.Radio(
+                        choices=["glb", "obj", "ply"],
+                        value="glb",
+                        label="Output Format",
+                    )
+                    output_dir = gr.Textbox(
+                        value=MESH_DEFAULT_OUTPUT_DIR,
+                        label="Output Directory",
+                    )
+            
+            # EXECUTION
+            with gr.Group():
+                gr.Markdown("### Output")
+                output_stats = gr.JSON(
+                    label="Pipeline Statistics",
+                    value={},
+                )
+            
+            generate_btn = gr.Button(
+                "🚀 Generate 3D Mesh",
                 variant="primary",
+                size="lg",
             )
-            vipe_status = gr.Textbox(
-                value="Ready",
+            cancel_btn = gr.Button(
+                "⏹️ Cancel",
+                variant="stop",
+                size="lg",
+                visible=False,
+            )
+            status_text = gr.Textbox(
+                value="Ready to start...",
                 label="Status",
                 interactive=False,
+                lines=2,
             )
         
-        # ViPE results preview
-        with gr.Accordion("ViPE Results", open=False):
-            vipe_results_info = gr.Textbox(
-                value="No results yet",
-                label="Extracted Data",
-                interactive=False,
-                lines=4,
-            )
-    
-    # ===========================================
-    # STEP 3: 2DGS TRAINING
-    # ===========================================
-    with gr.Group():
-        gr.Markdown("#### Step 3: 2DGS Training")
-        gr.Markdown("*Train 2D Gaussian Splatting model from poses*")
-        
-        with gr.Row():
-            gs_exec_mode = gr.Radio(
-                choices=["RunPod Pod", "Local"],
-                value="RunPod Pod",
-                label="Execution Mode",
-            )
-        
-        # Training parameters
-        with gr.Row():
-            gs_iterations = gr.Slider(
-                minimum=1000,
-                maximum=30000,
-                value=5000,
-                step=1000,
-                label="Training Iterations",
-            )
-            gs_resolution = gr.Slider(
-                minimum=256,
-                maximum=1024,
-                value=512,
-                step=128,
-                label="Mesh Resolution",
-            )
-        
-        with gr.Row():
-            gs_output_name = gr.Textbox(
-                value="stage_model",
-                label="Model Name",
-            )
-        
-        with gr.Row():
-            run_gs_btn = gr.Button(
-                "Train 2DGS",
-                variant="primary",
-            )
-            gs_status = gr.Textbox(
-                value="Waiting for ViPE results",
-                label="Status",
-                interactive=False,
-            )
-        
-        # Training progress
-        with gr.Accordion("Training Progress", open=False):
-            gs_progress = gr.Textbox(
-                value="",
-                label="Progress",
-                interactive=False,
-                lines=6,
-            )
-    
-    # ===========================================
-    # STEP 4: MESH EXTRACTION
-    # ===========================================
-    with gr.Group():
-        gr.Markdown("#### Step 4: Mesh Extraction")
-        gr.Markdown("*Extract and export final mesh*")
-        
-        with gr.Row():
-            mesh_format = gr.Radio(
-                choices=["GLB", "OBJ", "PLY"],
-                value="GLB",
-                label="Export Format",
-            )
-            mesh_cleanup = gr.Checkbox(
-                value=True,
-                label="Post-process Mesh",
-                info="Remove floaters and clean geometry",
-            )
-        
-        with gr.Row():
-            mesh_output_dir = gr.Textbox(
-                value=MESH_DEFAULT_OUTPUT_DIR,
-                label="Output Directory",
-            )
-        
-        with gr.Row():
-            extract_mesh_btn = gr.Button(
-                "Extract Mesh",
-                variant="primary",
-            )
-            mesh_status = gr.Textbox(
-                value="Waiting for training",
-                label="Status",
-                interactive=False,
-            )
-    
-    # ===========================================
-    # FINAL OUTPUT
-    # ===========================================
-    with gr.Group():
-        gr.Markdown("#### Output")
-        
-        with gr.Row():
-            output_mesh_file = gr.File(
+        # RIGHT COLUMN: Preview outputs
+        with gr.Column(scale=1):
+            output_file = gr.File(
                 label="Downloaded Mesh",
                 file_types=[".glb", ".obj", ".ply"],
             )
-            download_mesh_btn = gr.Button(
-                "Download Mesh",
-                variant="secondary",
+            twodgs_3d_viewer = gr.Model3D(
+                label="3D Preview",
+                height=400,
+                clear_color=[0.1, 0.1, 0.1, 1.0],
             )
-        
-        output_stats = gr.JSON(
-            label="Pipeline Statistics",
-            value={},
-        )
     
     # ===========================================
-    # ONE-CLICK PIPELINE
+    # ENDPOINT CONFIGURATION (Accordion)
     # ===========================================
-    with gr.Group():
-        gr.Markdown("---")
-        gr.Markdown("#### One-Click Pipeline")
-        gr.Markdown("*Run all steps automatically*")
+    with gr.Accordion("⚙️ Endpoint Settings", open=False):
+        with gr.Row():
+            endpoint_id = gr.Textbox(
+                value=default_endpoint_id,
+                label="2DGS Endpoint ID",
+                placeholder="s9txp6edtf2vg4",
+                info="RunPod serverless endpoint ID"
+            )
+            api_key = gr.Textbox(
+                value=default_api_key,
+                label="API Key",
+                type="password",
+                placeholder="rp_...",
+                info="Your RunPod API key"
+            )
         
-        run_full_pipeline_btn = gr.Button(
-            "Run Full Pipeline (Video → Mesh)",
-            variant="primary",
-            size="lg",
-        )
-        
-        pipeline_progress = gr.Textbox(
-            value="Ready to start...",
-            label="Pipeline Progress",
-            interactive=False,
-            lines=3,
-        )
+        with gr.Row():
+            s3_bucket = gr.Textbox(
+                value="arkrunr",
+                label="S3 Bucket",
+                info="For video upload and mesh download"
+            )
+            s3_region = gr.Textbox(
+                value="us-west-1",
+                label="S3 Region",
+            )
     
     # ===========================================
     # VISIBILITY HANDLERS
@@ -316,47 +223,37 @@ def create_create_tab(
         "video_upload": video_upload,
         "path_group": path_group,
         "video_path": video_path,
-        "browse_video_btn": browse_video_btn,
         "gen3c_group": gen3c_group,
         "gen3c_output_dir": gen3c_output_dir,
         "video_dropdown": video_dropdown,
         "refresh_videos_btn": refresh_videos_btn,
-        "video_preview": video_preview,
         "video_info": video_info,
         
-        # ViPE
-        "vipe_exec_mode": vipe_exec_mode,
-        "vipe_creds_group": vipe_creds_group,
-        "vipe_endpoint_id": vipe_endpoint_id,
-        "vipe_api_key": vipe_api_key,
-        "save_vipe_creds_btn": save_vipe_creds_btn,
-        "vipe_output_dir": vipe_output_dir,
-        "run_vipe_btn": run_vipe_btn,
-        "vipe_status": vipe_status,
-        "vipe_results_info": vipe_results_info,
+        # Parameters
+        "iterations": iterations,
+        "mesh_quality": mesh_quality,
+        "output_format": output_format,
+        "output_dir": output_dir,
         
-        # 2DGS Training
-        "gs_exec_mode": gs_exec_mode,
-        "gs_iterations": gs_iterations,
-        "gs_resolution": gs_resolution,
-        "gs_output_name": gs_output_name,
-        "run_gs_btn": run_gs_btn,
-        "gs_status": gs_status,
-        "gs_progress": gs_progress,
-        
-        # Mesh extraction
-        "mesh_format": mesh_format,
-        "mesh_cleanup": mesh_cleanup,
-        "mesh_output_dir": mesh_output_dir,
-        "extract_mesh_btn": extract_mesh_btn,
-        "mesh_status": mesh_status,
+        # Execution
+        "generate_btn": generate_btn,
+        "cancel_btn": cancel_btn,
+        "status_text": status_text,
         
         # Output
-        "output_mesh_file": output_mesh_file,
-        "download_mesh_btn": download_mesh_btn,
+        "output_file": output_file,
         "output_stats": output_stats,
+        "twodgs_3d_viewer": twodgs_3d_viewer,
         
-        # Full pipeline
-        "run_full_pipeline_btn": run_full_pipeline_btn,
-        "pipeline_progress": pipeline_progress,
+        # Settings
+        "endpoint_id": endpoint_id,
+        "api_key": api_key,
+        "s3_bucket": s3_bucket,
+        "s3_region": s3_region,
     }
+
+
+# Legacy alias for backwards compatibility
+def create_create_tab(*args, **kwargs):
+    """Alias for create_2dgs_tab (backwards compatibility)."""
+    return create_2dgs_tab(*args, **kwargs)

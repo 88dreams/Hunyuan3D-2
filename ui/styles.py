@@ -912,6 +912,26 @@ button[role="tab"][aria-selected="true"],
     position: absolute !important;
 }
 
+/* Properly hide Gradio components when visibility is false */
+.gr-group[style*="display: none"],
+.gr-column[style*="display: none"],
+.gr-row[style*="display: none"],
+.gr-box[style*="display: none"],
+[class*="gr-"][style*="display: none"] {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+}
+
+/* Ensure hidden components don't affect layout */
+.hidden, [hidden] {
+    display: none !important;
+}
+
 /* Reduce gap between output section and page content */
 .main-content > .gr-group:first-child {
     margin-bottom: 8px !important;
@@ -938,4 +958,5 @@ button[role="tab"][aria-selected="true"],
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
 """

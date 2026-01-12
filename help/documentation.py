@@ -328,6 +328,93 @@ CPU Offload: OFF unless necessary
 """
 
 
+TWODGS_HELP = """
+## 2DGS Pipeline (Video → Mesh)
+
+**What it does:** The 2DGS Pipeline converts Gen3C videos into high-quality 3D meshes using NVIDIA ViPE for pose extraction and 2D Gaussian Splatting for reconstruction. This is a one-shot pipeline that handles the entire conversion process automatically.
+
+**Pipeline Steps:**
+1. **ViPE** extracts camera poses, intrinsics, and depth maps from video
+2. **Converter** transforms ViPE output to COLMAP format for 2DGS
+3. **Point Cloud Generator** creates initial 3D points from depth maps
+4. **2DGS Training** produces 2D Gaussian splats (flat disks on surfaces)
+5. **Mesh Extraction** via 2DGS native extraction with depth fusion
+
+### Key Settings
+
+| Setting | Description | Options | Default |
+|---------|-------------|---------|---------|
+| **Training Iterations** | 2DGS training steps | 1000-10000 | 5000 |
+| **Mesh Quality** | Extraction quality preset | fast/balanced/high/ultra | high |
+| **Output Format** | Mesh file format | GLB/OBJ/PLY | GLB |
+
+### Mesh Quality Presets
+
+| Preset | Resolution | Voxel Size | Clusters | Best For |
+|--------|------------|------------|----------|----------|
+| **fast** | 512 | 0.01 | 1 | Quick previews |
+| **balanced** | 512 | 0.006 | 50 | Good balance |
+| **high** | 1024 | 0.004 | 100 | Most use cases |
+| **ultra** | 2048 | 0.002 | 200 | Maximum detail |
+
+**Why 2DGS gives better meshes:** Unlike 3D Gaussian Splatting, 2DGS uses flat 2D disks that naturally align with surfaces. This means the Gaussians themselves define the geometry, resulting in ⭐⭐⭐⭐⭐ quality compared to ⭐⭐⭐ for standard TSDF.
+
+### Processing Times (241-frame video)
+
+| Stage | Time |
+|-------|------|
+| ViPE pose extraction | ~5 min |
+| 2DGS training (5000 iter) | ~1 min |
+| Mesh extraction (high) | ~1-2 min |
+| **Total** | **~8-12 min** |
+
+### Recommended Settings
+
+For best results with Gen3C architectural videos:
+
+```
+Training Iterations: 5000-7000 (more for complex scenes)
+Mesh Quality: high (use ultra for final renders)
+Output Format: GLB (best compatibility)
+```
+
+### Input Requirements
+
+- **Video source:** Gen3C output video (MP4)
+- **Frame count:** 121-361 frames works best
+- **Camera motion:** Smooth trajectories (clockwise, counterclockwise)
+- **Content:** Architectural interiors work especially well
+
+### Output Quality Tips
+
+**Problem: Mesh has holes or gaps**
+→ Increase training iterations to 7000-10000
+
+**Problem: Mesh lacks fine detail**
+→ Use "ultra" mesh quality (takes longer)
+
+**Problem: Noisy geometry**
+→ Use post-processing in Mesh Cleanup tab
+
+**Problem: Slow processing**
+→ Use "fast" quality for previews, then "high" for final
+
+### Typical Workflow
+
+1. Generate video using **Gen3C** tab (clockwise trajectory, 241 frames)
+2. Use **2DGS** tab to convert video to mesh
+3. Clean up mesh in **Mesh** tab if needed (remove floaters, decimate)
+4. Export final mesh for use in Unity, Blender, or web viewers
+
+### Technical Details
+
+- Uses NVIDIA ViPE for monocular video pose estimation
+- 2D Gaussian Splatting with depth supervision
+- 2DGS native mesh extraction (flat disks define surface geometry)
+- Outputs include vertex colors from video frames
+"""
+
+
 MESH_HELP = """
 ## MESH Extraction
 

@@ -1671,6 +1671,361 @@ class UnifiedServerlessClient:
             )
 
 
+# =============================================================================
+# 2DGS PIPELINE CLIENT
+# =============================================================================
+
+class TwoDGSPipelineClient:
+    """
+    Client for the 2DGS Pipeline serverless endpoint.
+    
+    Converts Gen3C videos to 3D meshes using ViPE + 2DGS.
+    Endpoint ID: s9txp6edtf2vg4
+    """
+    
+    RUNPOD_API_BASE = "https://api.runpod.ai/v2"
+    DEFAULT_ENDPOINT_ID = "s9txp6edtf2vg4"
+    
+    def __init__(
+        self, 
+        endpoint_id: str = DEFAULT_ENDPOINT_ID, 
+        api_key: str = "",
+        timeout: int = 30
+    ):
+        """
+        Initialize the 2DGS Pipeline client.
+        
+        Args:
+            endpoint_id: RunPod serverless endpoint ID (default: s9txp6edtf2vg4)
+            api_key: Your RunPod API key
+            timeout: Request timeout in seconds
+        """
+        self.endpoint_id = endpoint_id or self.DEFAULT_ENDPOINT_ID
+        self.api_key = api_key
+        self.timeout = timeout
+        self.base_url = f"{self.RUNPOD_API_BASE}/{self.endpoint_id}"
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def health_check(self) -> Dict[str, Any]:
+        """Check endpoint health."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "status": "healthy",
+                    "workers": data.get("workers", {}),
+                    "jobs": data.get("jobs", {}),
+                    "endpoint_id": self.endpoint_id
+                }
+            else:
+                return {"status": "error", "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    def submit_job(
+        self,
+        video_url: str,
+        iterations: int = 5000,
+        mesh_quality: str = "high",
+        output_format: str = "glb",
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1",
+        s3_prefix: str = "MediaContent/2dgs-pipeline/outputs/"
+    ) -> Dict[str, Any]:
+        """
+        Submit a 2DGS pipeline job.
+        
+        Args:
+            video_url: URL to the video (S3 presigned, HTTP, etc.)
+            iterations: 2DGS training iterations
+            mesh_quality: Mesh quality preset (fast, balanced, high, ultra)
+            output_format: Output format (glb, obj, ply)
+            s3_bucket: S3 bucket for output
+            s3_region: S3 region
+            s3_prefix: S3 key prefix for output
+            
+        Returns:
+            Dict with job_id and status
+        """
+        payload = {
+            "input": {
+                "video_url": video_url,
+                "iterations": iterations,
+                "mesh_quality": mesh_quality,
+                "output_format": output_format,
+                "output_s3": {
+                    "bucket": s3_bucket,
+                    "region": s3_region,
+                    "prefix": s3_prefix
+                }
+            }
+        }
+        
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return {
+            "job_id": result.get("id", ""),
+            "status": result.get("status", "unknown").lower(),
+            "model": "2dgs"
+        }
+    
+    def get_status(self, job_id: str) -> Dict[str, Any]:
+        """Get job status."""
+        response = requests.get(
+            f"{self.base_url}/status/{job_id}",
+            headers=self._headers(),
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        runpod_status = result.get("status", "unknown").upper()
+        status_map = {
+            "IN_QUEUE": "pending",
+            "IN_PROGRESS": "running",
+            "COMPLETED": "completed",
+            "FAILED": "failed",
+            "CANCELLED": "failed"
+        }
+        
+        normalized = {
+            "job_id": job_id,
+            "status": status_map.get(runpod_status, "unknown"),
+            "runpod_status": runpod_status
+        }
+        
+        if "logs" in result:
+            normalized["logs"] = result["logs"]
+        
+        if runpod_status == "COMPLETED" and "output" in result:
+            output = result["output"]
+            if isinstance(output, dict):
+                normalized["mesh_url"] = output.get("mesh_url")
+                normalized["num_frames"] = output.get("num_frames")
+                normalized["iterations"] = output.get("iterations")
+                normalized["elapsed_seconds"] = output.get("elapsed_seconds")
+                if output.get("status") == "error":
+                    normalized["status"] = "failed"
+                    normalized["error"] = output.get("error", "Unknown error")
+        
+        if runpod_status == "FAILED":
+            normalized["error"] = result.get("error", "Unknown error")
+        
+        return normalized
+    
+    def cancel_job(self, job_id: str) -> Dict[str, Any]:
+        """Cancel a job."""
+        try:
+            response = requests.post(
+                f"{self.base_url}/cancel/{job_id}",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return {"success": True, "message": f"Job {job_id} cancelled"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def wait_for_completion(
+        self,
+        job_id: str,
+        poll_interval: int = 15,
+        max_wait: int = 1200,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> Dict[str, Any]:
+        """Wait for job completion."""
+        start_time = time.time()
+        
+        while True:
+            elapsed = time.time() - start_time
+            
+            if elapsed > max_wait:
+                return {"job_id": job_id, "status": "failed", "error": f"Timeout after {max_wait}s"}
+            
+            try:
+                status = self.get_status(job_id)
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Status check failed: {e}", elapsed)
+                time.sleep(poll_interval)
+                continue
+            
+            if progress_callback:
+                progress_callback(status.get("status", "unknown"), elapsed)
+            
+            if status.get("status") in ["completed", "failed"]:
+                return status
+            
+            time.sleep(poll_interval)
+    
+    def generate_sync(
+        self,
+        video_url: str,
+        output_dir: str = "./outputs/mesh_2dgs",
+        iterations: int = 5000,
+        mesh_quality: str = "high",
+        output_format: str = "glb",
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1",
+        poll_interval: int = 15,
+        max_wait: int = 1200,
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> RunPodJobResult:
+        """
+        Submit 2DGS pipeline job and wait for completion.
+        
+        Args:
+            video_url: URL to the Gen3C video
+            output_dir: Directory to save output mesh
+            iterations: 2DGS training iterations (1000-10000, default 5000)
+            mesh_quality: Mesh quality preset (fast, balanced, high, ultra)
+            output_format: Output format (glb, obj, ply)
+            s3_bucket: S3 bucket for output
+            s3_region: S3 region
+            poll_interval: Seconds between status checks
+            max_wait: Maximum wait time (default 20 minutes)
+            progress_callback: Optional callback(status, elapsed)
+            
+        Returns:
+            RunPodJobResult with mesh output
+        """
+        start_time = time.time()
+        logs = []
+        
+        logs.append(f"Submitting 2DGS pipeline job to endpoint: {self.endpoint_id}")
+        logs.append(f"Video: {video_url[:80]}...")
+        logs.append(f"Iterations: {iterations}, Quality: {mesh_quality}")
+        
+        try:
+            submit_result = self.submit_job(
+                video_url=video_url,
+                iterations=iterations,
+                mesh_quality=mesh_quality,
+                output_format=output_format,
+                s3_bucket=s3_bucket,
+                s3_region=s3_region,
+            )
+        except Exception as e:
+            return RunPodJobResult(
+                success=False,
+                job_id="",
+                status=JobStatus.FAILED,
+                model="2dgs",
+                error=f"Failed to submit job: {e}",
+                logs="\n".join(logs)
+            )
+        
+        job_id = submit_result.get("job_id", "")
+        logs.append(f"Job submitted: {job_id}")
+        
+        if progress_callback:
+            progress_callback("pending", 0)
+        
+        # Wait for completion
+        final_status = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        duration = time.time() - start_time
+        
+        if final_status.get("status") == "completed":
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = None
+            
+            mesh_url = final_status.get("mesh_url")
+            if mesh_url:
+                logs.append(f"Mesh available at: {mesh_url[:80]}...")
+                logs.append("Downloading mesh...")
+                
+                # Download from presigned URL
+                try:
+                    response = requests.get(mesh_url, timeout=300)
+                    response.raise_for_status()
+                    
+                    # Generate filename
+                    filename = f"2dgs_mesh_{job_id[:8]}.{output_format}"
+                    output_path = os.path.join(output_dir, filename)
+                    
+                    with open(output_path, "wb") as f:
+                        f.write(response.content)
+                    
+                    file_size = os.path.getsize(output_path)
+                    logs.append(f"✅ Downloaded: {output_path} ({file_size / 1024 / 1024:.2f} MB)")
+                except Exception as e:
+                    logs.append(f"❌ Download failed: {e}")
+                    logs.append(f"Manual download: {mesh_url}")
+            
+            # Build stats
+            stats = {
+                "num_frames": final_status.get("num_frames"),
+                "iterations": final_status.get("iterations"),
+                "elapsed_seconds": final_status.get("elapsed_seconds"),
+                "mesh_url": mesh_url,
+            }
+            
+            return RunPodJobResult(
+                success=True,
+                job_id=job_id,
+                status=JobStatus.COMPLETED,
+                model="2dgs",
+                output_path=output_path,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+            )
+        else:
+            error = final_status.get("error", "Unknown error")
+            logs.append(f"Job failed: {error}")
+            return RunPodJobResult(
+                success=False,
+                job_id=job_id,
+                status=JobStatus.FAILED,
+                model="2dgs",
+                error=error,
+                duration_seconds=duration,
+                logs="\n".join(logs),
+            )
+
+
+# Default 2DGS client
+_2dgs_client: Optional[TwoDGSPipelineClient] = None
+
+
+def get_2dgs_client(
+    endpoint_id: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional[TwoDGSPipelineClient]:
+    """Get or create the 2DGS pipeline client."""
+    global _2dgs_client
+    
+    if api_key:
+        _2dgs_client = TwoDGSPipelineClient(
+            endpoint_id=endpoint_id or TwoDGSPipelineClient.DEFAULT_ENDPOINT_ID,
+            api_key=api_key
+        )
+    
+    return _2dgs_client
+
+
 # Default unified client
 _unified_client: Optional[UnifiedServerlessClient] = None
 

@@ -199,7 +199,7 @@ CSS styles and color palette for the Gradio UI.
 | `handler_trellis.py` | Serverless handler |
 | `trellis_inference.py` | Inference logic |
 
-#### `runpod/stage-pipeline/` - ViPE + 2DGS Pipeline (NEW)
+#### `runpod/2dgs-pipeline/` - ViPE + 2DGS Pipeline (NEW)
 Combined serverless endpoint for video-to-mesh reconstruction:
 | File | Purpose |
 |------|---------|
@@ -244,7 +244,7 @@ Combined serverless endpoint for video-to-mesh reconstruction:
 | `benchmark_models.py` | Performance benchmarking |
 | `init_points_from_depth.py` | Generate point cloud from ViPE depth maps |
 | `vipe_to_2dgs.py` | Convert ViPE output to 2DGS COLMAP format |
-| `test_stage_pipeline.py` | Test script for stage-pipeline endpoint |
+| `test_2dgs_pipeline.py` | Test script for 2dgs-pipeline endpoint |
 | `test_vipe.py` | Test script for ViPE endpoint |
 
 ---
@@ -309,7 +309,7 @@ Combined serverless endpoint for video-to-mesh reconstruction:
 │                   (GPU Cloud - Remote)                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  handler_unified.py / handler_hunyuan.py / handler_trellis.py   │
-│  handler.py (stage-pipeline)                                    │
+│  handler.py (2dgs-pipeline)                                    │
 │                    (Serverless Handlers)                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -340,10 +340,10 @@ Dockerfile.unified (base image)
             └── 88dreams/gen3c-runpod:v50 (Docker Hub)
 ```
 
-### Stage Pipeline Build
+### 2DGS Pipeline Build
 ```
-runpod/stage-pipeline/Dockerfile
-    └── 88dreams/stage-pipeline:v15 (Docker Hub)
+runpod/2dgs-pipeline/Dockerfile
+    └── 88dreams/2dgs-pipeline:v15 (Docker Hub)
 ```
 
 ### Configuration Flow
@@ -371,7 +371,7 @@ python app_sidebar.py
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
 | `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/stage-pipeline` | ViPE + 2DGS (video→mesh) | v20 ✅ |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 ✅ |
 
 ## RunPod Serverless Endpoints
 
@@ -380,4 +380,4 @@ python app_sidebar.py
 | `gen3c-serverless` | gen3c-runpod | Multi-model (Gen3C, Lyra, SHARP) |
 | `trellis-serverless` | trellis-runpod | TRELLIS.2 3D generation |
 | `hunyuan-serverless` | hunyuan-runpod | Hunyuan3D mesh generation |
-| `2dgs-serverless` | stage-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
+| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for the 2DGS Stage Pipeline serverless endpoint.
+Test script for the 2DGS Pipeline serverless endpoint.
 Converts a Gen3C video to a 3D mesh.
 
 Supports:
@@ -26,7 +26,7 @@ except ImportError:
     HAS_BOTO3 = False
 
 # Local output directory
-LOCAL_OUTPUT_DIR = Path("/srv/searidge_share/outputs/mesh_vipe")
+LOCAL_OUTPUT_DIR = Path("/srv/searidge_share/outputs/mesh_2dgs")
 
 # Configuration
 ENDPOINT_ID = "s9txp6edtf2vg4"
@@ -92,7 +92,7 @@ def upload_to_s3(local_path: str) -> str:
     
     # Generate unique S3 key
     unique_id = str(uuid.uuid4())[:8]
-    s3_key = f"{S3_PREFIX}/stage-pipeline/inputs/{unique_id}_{local_path.name}"
+    s3_key = f"{S3_PREFIX}/2dgs-pipeline/inputs/{unique_id}_{local_path.name}"
     
     print(f"Uploading to S3...")
     print(f"  Local: {local_path}")
@@ -155,7 +155,7 @@ def run_pipeline(video_input: str, iterations: int = 5000, output_format: str = 
         output_format: Output mesh format ("glb", "obj", or "ply")
     """
     print(f"\n{'='*60}")
-    print("STAGE PIPELINE TEST")
+    print("2DGS PIPELINE TEST")
     print(f"{'='*60}")
     print(f"Video input: {video_input}")
     print(f"Iterations: {iterations}")
@@ -176,7 +176,7 @@ def run_pipeline(video_input: str, iterations: int = 5000, output_format: str = 
         "output_s3": {
             "bucket": S3_BUCKET,
             "region": S3_REGION,
-            "prefix": f"{S3_PREFIX}/stage-pipeline/outputs/"
+            "prefix": f"{S3_PREFIX}/2dgs-pipeline/outputs/"
         }
     }
     
@@ -213,7 +213,7 @@ def run_pipeline(video_input: str, iterations: int = 5000, output_format: str = 
                 LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
                 
                 # Generate output filename from video input
-                video_name = Path(video_input).stem if not video_input.startswith("http") else "stage_mesh"
+                video_name = Path(video_input).stem if not video_input.startswith("http") else "2dgs_mesh"
                 output_name = f"{video_name}_{job_id[:8]}.{output_format}"
                 local_path = LOCAL_OUTPUT_DIR / output_name
                 
@@ -252,7 +252,7 @@ if __name__ == "__main__":
     
     runpod.api_key = API_KEY
     
-    parser = argparse.ArgumentParser(description="Test the 2DGS Stage Pipeline")
+    parser = argparse.ArgumentParser(description="Test the 2DGS Pipeline")
     parser.add_argument("--video", "-v", help="Path to local video OR URL")
     parser.add_argument("--iterations", "-i", type=int, default=5000, help="Training iterations")
     parser.add_argument("--format", "-f", default="glb", choices=["glb", "obj", "ply"])
