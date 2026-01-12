@@ -17,7 +17,7 @@ This document summarizes the work completed and provides context for new convers
 | **Lyra** | NVIDIA | 3D/4D Gaussian Splatting | ✅ Working |
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
-| **Stage Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | 🔄 Testing (v15) |
+| **Stage Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
 
 ### Architecture
 
@@ -40,9 +40,16 @@ This document summarizes the work completed and provides context for new convers
 4. **2DGS Training** produces Gaussian splats from video frames
 5. **Mesh Extraction** via marching cubes
 
-**Current Status**: Testing v15 - waiting for RunPod endpoint update
+**Current Status**: ✅ **WORKING** (v20) - Successfully generates 36MB+ meshes with 727K+ vertices
 
-**Issues Fixed (v1-v15)**:
+**Performance** (241-frame video):
+- Total pipeline time: ~8 minutes
+- ViPE (pose extraction): ~5 minutes
+- 2DGS training (1000 iterations): ~1 minute
+- Mesh extraction (TSDF fusion): ~1 minute
+- Output: 36.76 MB GLB with 727,168 vertices
+
+**Issues Fixed (v1-v20)**:
 | Version | Issue | Fix |
 |---------|-------|-----|
 | v1-v6 | Conda TOS acceptance | Added `conda tos accept` commands |
@@ -53,6 +60,11 @@ This document summarizes the work completed and provides context for new convers
 | v13 | PLY format | Added normals (`nx`, `ny`, `nz`) for 2DGS compatibility |
 | v14 | Missing dependency | Added `mediapy` |
 | v15 | Missing dependency | Added `scikit-image` for marching cubes |
+| v16 | Mesh extraction errors | Improved error handling, log stdout/stderr |
+| v17 | S3 region mismatch | Added explicit `region_name` to boto3 client |
+| v18 | Trimesh/Open3D compat | Patched `mesh_utils.py` for manual conversion |
+| v19 | Wrong mesh path | Fixed to look in `train/ours_{iter}/` not `mesh/` |
+| v20 | GeoCalib weights | Pre-downloaded 110MB GeoCalib model weights |
 
 **Key Files**:
 - `runpod/stage-pipeline/Dockerfile` - Combined ViPE + 2DGS image
@@ -61,7 +73,7 @@ This document summarizes the work completed and provides context for new convers
 - `runpod/stage-pipeline/init_points_from_depth.py` - Point cloud generator
 - `scripts/test_stage_pipeline.py` - Test script
 
-**Docker Image**: `88dreams/stage-pipeline:v15`
+**Docker Image**: `88dreams/stage-pipeline:v20`
 
 **RunPod Endpoint**: `2dgs-serverless` (ID: `s9txp6edtf2vg4`)
 
@@ -107,7 +119,7 @@ Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstructio
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
 | `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/stage-pipeline` | ViPE + 2DGS | v15 |
+| `88dreams/stage-pipeline` | ViPE + 2DGS | v20 ✅ |
 
 ### Build Commands
 
@@ -132,7 +144,7 @@ docker push 88dreams/stage-pipeline:vXX
 | `gen3c-serverless` | gen3c-runpod:v50 | Multi-model (Gen3C, Lyra, SHARP) |
 | `trellis-serverless` | trellis-runpod:v10 | TRELLIS.2 3D generation |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | stage-pipeline:v15 | Video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | stage-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
 
 ---
 
@@ -200,7 +212,7 @@ RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py \
     --iterations 1000
 
 # Check logs
-cat /tmp/test-v15.log
+cat /tmp/test-v20.log
 
 # Health check
 RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
@@ -210,9 +222,9 @@ RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
 
 ## Known Issues / Next Steps
 
-### 1. Stage Pipeline (v15)
-- Currently testing - awaiting RunPod endpoint update
-- If v15 fails, check logs for next missing dependency
+### 1. Stage Pipeline (v20) ✅ COMPLETE
+- Successfully generates high-quality meshes from Gen3C video
+- Auto-downloads to `/srv/searidge_share/outputs/mesh_vipe/`
 
 ### 2. Lyra Integration
 - SDG step takes 60-90 minutes
@@ -253,5 +265,5 @@ RUNPOD_API_KEY="your_key" python scripts/test_stage_pipeline.py --health
 
 ---
 
-*Last Updated: January 11, 2026*
+*Last Updated: January 12, 2026*
 

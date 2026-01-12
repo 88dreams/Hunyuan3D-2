@@ -268,26 +268,54 @@ def extract_mesh(data_dir: Path, model_dir: Path, mesh_resolution: int = 512) ->
     if result.stderr:
         print(f"Mesh extraction STDERR: {result.stderr}")
     
-    # Find the mesh file - check if it exists before failing on return code
-    mesh_dir = model_dir / "mesh"
-    mesh_files = list(mesh_dir.glob("*.ply")) if mesh_dir.exists() else []
+    # Find the mesh file - 2DGS with --unbounded outputs to train/ours_{iteration}/
+    # This matches the working handler_2dgs.py behavior
     
+    # Priority 1: Look in train/ours_{iteration}/ for unbounded mesh (this is where render.py outputs)
+    train_dir = model_dir / "train" / f"ours_{latest_iter}"
+    mesh_files = []
+    
+    if train_dir.exists():
+        # Look for the post-processed mesh first, then raw
+        for pattern in ["fuse_unbounded_post.ply", "fuse_unbounded.ply", "fuse_post.ply", "fuse.ply"]:
+            candidates = list(train_dir.glob(pattern))
+            if candidates:
+                mesh_files = candidates
+                break
+    
+    # Priority 2: Fallback to mesh/ directory
     if not mesh_files:
-        # Try alternative locations
+        mesh_dir = model_dir / "mesh"
+        if mesh_dir.exists():
+            mesh_files = list(mesh_dir.glob("fuse*.ply"))
+    
+    # Priority 3: Search recursively
+    if not mesh_files:
         mesh_files = list(model_dir.glob("**/fuse*.ply"))
     
-    if not mesh_files:
-        mesh_files = list(model_dir.glob("**/*.ply"))
+    # Check if we found a real mesh (should be > 1MB for a proper mesh)
+    valid_mesh_files = []
+    for f in mesh_files:
+        size_mb = f.stat().st_size / 1024 / 1024
+        print(f"  Found: {f.name} ({size_mb:.2f} MB)")
+        if size_mb > 0.5:  # Real meshes are usually > 500KB
+            valid_mesh_files.append(f)
     
-    # Only fail if no mesh was created AND return code was non-zero
-    if not mesh_files:
+    if not valid_mesh_files:
+        # Mesh extraction failed - log what we found
+        print(f"  ⚠️ No valid mesh found. Model dir contents:")
+        for item in model_dir.rglob("*.ply"):
+            size_mb = item.stat().st_size / 1024 / 1024
+            print(f"    - {item.relative_to(model_dir)}: {size_mb:.2f} MB")
+        
         if result.returncode != 0:
-            raise RuntimeError(f"Mesh extraction failed (exit code {result.returncode}): {result.stderr}")
+            raise RuntimeError(f"Mesh extraction failed (exit code {result.returncode}). "
+                             f"The 2DGS marching cubes step failed. Check logs for details.")
         else:
-            raise FileNotFoundError("No mesh file found after extraction")
+            raise FileNotFoundError("No valid mesh file found. The marching cubes extraction may have failed.")
     
-    mesh_path = mesh_files[0]
-    print(f"  ✓ Mesh extracted: {mesh_path}")
+    mesh_path = valid_mesh_files[0]
+    print(f"  ✓ Mesh extracted: {mesh_path} ({mesh_path.stat().st_size / 1024 / 1024:.2f} MB)")
     return mesh_path
 
 

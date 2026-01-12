@@ -371,7 +371,7 @@ python app_sidebar.py
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
 | `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/stage-pipeline` | ViPE + 2DGS (video→mesh) | v15 |
+| `88dreams/stage-pipeline` | ViPE + 2DGS (video→mesh) | v20 ✅ |
 
 ## RunPod Serverless Endpoints
 
@@ -380,4 +380,4 @@ python app_sidebar.py
 | `gen3c-serverless` | gen3c-runpod | Multi-model (Gen3C, Lyra, SHARP) |
 | `trellis-serverless` | trellis-runpod | TRELLIS.2 3D generation |
 | `hunyuan-serverless` | hunyuan-runpod | Hunyuan3D mesh generation |
-| `2dgs-serverless` | stage-pipeline | Video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | stage-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |

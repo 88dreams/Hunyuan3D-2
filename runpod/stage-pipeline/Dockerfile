@@ -103,6 +103,14 @@ RUN ls -la /opt/vipe/*.so && echo "✓ Extension built successfully"
 # Install package
 RUN pip install -e . --no-build-isolation
 
+# Pre-download GeoCalib weights (ViPE downloads these at runtime otherwise)
+# Note: Despite .tar extension, file is actually a ZIP (PyTorch checkpoint format)
+RUN mkdir -p /root/.cache/torch/hub/geocalib && \
+    curl -L "https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-pinhole.tar" \
+         -o /root/.cache/torch/hub/geocalib/pinhole.tar && \
+    ls -la /root/.cache/torch/hub/geocalib/ && \
+    echo "✓ GeoCalib weights downloaded (110MB)"
+
 # ============================================
 # 2DGS INSTALLATION  
 # ============================================
@@ -128,6 +136,11 @@ RUN pip install \
 # Build CUDA rasterizer
 RUN pip install --no-build-isolation submodules/diff-surfel-rasterization
 RUN pip install --no-build-isolation submodules/simple-knn
+
+# Patch mesh_utils.py to fix trimesh/open3d compatibility
+# The as_open3d attribute was removed in newer trimesh versions
+RUN sed -i 's/mesh = mesh.as_open3d/mesh = open3d.geometry.TriangleMesh(open3d.utility.Vector3dVector(mesh.vertices), open3d.utility.Vector3iVector(mesh.faces))/' utils/mesh_utils.py && \
+    sed -i '1s/^/import open3d\n/' utils/mesh_utils.py || echo "Patch may have already been applied"
 
 # ============================================
 # PIPELINE SCRIPTS
