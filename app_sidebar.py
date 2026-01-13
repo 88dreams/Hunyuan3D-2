@@ -182,13 +182,14 @@ DEFAULT_2DGS_API_KEY = _runpod_config.get("2dgs_api_key", DEFAULT_GEN3C_API_KEY)
 # =============================================================================
 
 NAV_ITEMS = [
-    {"id": "sharp", "icon": "⚡", "label": "SHARP", "category": "create", "description": "Fast 3DGS (~60s)"},
-    {"id": "gen3c", "icon": "🎬", "label": "GEN3C", "category": "create", "description": "Video generation (~10min)"},
-    {"id": "lyra", "icon": "🌀", "label": "Lyra", "category": "create", "description": "3DGS from video (~15min)"},
-    {"id": "trellis", "icon": "🔷", "label": "TRELLIS.2", "category": "create", "description": "High-quality 3D"},
-    {"id": "hunyuan", "icon": "🏔️", "label": "Hunyuan3D", "category": "create", "description": "Image to GLB mesh"},
-    {"id": "mesh", "icon": "🔶", "label": "Mesh Extract", "category": "refine", "description": "3DGS → GLB mesh"},
-    {"id": "settings", "icon": "⚙️", "label": "Settings", "category": "monitor", "description": "Credentials & config"},
+    {"id": "sharp", "icon": "", "label": "SHARP", "category": "create", "description": "Fast 3DGS (~60s)"},
+    {"id": "gen3c", "icon": "", "label": "GEN3C", "category": "create", "description": "Video generation (~10min)"},
+    {"id": "ltx2", "icon": "", "label": "LTX-2", "category": "create", "description": "Video with camera control"},
+    {"id": "lyra", "icon": "", "label": "Lyra", "category": "create", "description": "3DGS from video (~15min)"},
+    {"id": "trellis", "icon": "", "label": "TRELLIS.2", "category": "create", "description": "High-quality 3D"},
+    {"id": "hunyuan", "icon": "", "label": "Hunyuan3D", "category": "create", "description": "Image to GLB mesh"},
+    {"id": "mesh", "icon": "", "label": "Mesh Extract", "category": "refine", "description": "3DGS to GLB mesh"},
+    {"id": "settings", "icon": "", "label": "Settings", "category": "monitor", "description": "Credentials & config"},
 ]
 
 
@@ -240,7 +241,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 )
             
             # Logging controls (applies to all models)
-            with gr.Accordion("📋 Experiment Logging", open=False, elem_classes=["logging-accordion"]):
+            with gr.Accordion("Experiment Logging", open=False, elem_classes=["logging-accordion"]):
                 global_log_params = gr.Checkbox(
                     value=True, 
                     label="Log Parameters",
@@ -265,18 +266,30 @@ with gr.Blocks(title="3D Generation Studio") as demo:
             # Create Section
             gr.HTML('<div class="sidebar-category">CREATE</div>')
             
-            # Button grid - 2 columns
+            # Button grid - 2 columns with section indicators
+            # VIDEO: Generate video from image
+            gr.Markdown("<small style='color:#666;margin:4px 0 2px 4px;'>VIDEO</small>", elem_classes=["section-label"])
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_gen3c = gr.Button("GEN3C", elem_classes=["sidebar-nav"], elem_id="nav-gen3c", scale=1)
+                nav_ltx2 = gr.Button("LTX-2", elem_classes=["sidebar-nav"], elem_id="nav-ltx2", scale=1)
+            
+            # SPLAT: Generate 3D Gaussian Splat (PLY)
+            gr.Markdown("<small style='color:#666;margin:4px 0 2px 4px;'>SPLAT</small>", elem_classes=["section-label"])
             with gr.Row(elem_classes=["button-grid"]):
                 nav_sharp = gr.Button("SHARP", elem_classes=["sidebar-nav"], elem_id="nav-sharp", scale=1)
-                nav_gen3c = gr.Button("GEN3C", elem_classes=["sidebar-nav"], elem_id="nav-gen3c", scale=1)
-            with gr.Row(elem_classes=["button-grid"]):
                 nav_lyra = gr.Button("Lyra", elem_classes=["sidebar-nav"], elem_id="nav-lyra", scale=1)
-                nav_trellis = gr.Button("TRELLIS", elem_classes=["sidebar-nav"], elem_id="nav-trellis", scale=1)
+            
+            # MESH: Generate mesh from image
+            gr.Markdown("<small style='color:#666;margin:4px 0 2px 4px;'>MESH</small>", elem_classes=["section-label"])
             with gr.Row(elem_classes=["button-grid"]):
                 nav_hunyuan = gr.Button("Hunyuan", elem_classes=["sidebar-nav"], elem_id="nav-hunyuan", scale=1)
-                nav_mesh = gr.Button("Mesh", elem_classes=["sidebar-nav"], elem_id="nav-mesh", scale=1)
+                nav_trellis = gr.Button("TRELLIS", elem_classes=["sidebar-nav"], elem_id="nav-trellis", scale=1)
+            
+            # CONVERT: Convert/refine to mesh
+            gr.Markdown("<small style='color:#666;margin:4px 0 2px 4px;'>CONVERT</small>", elem_classes=["section-label"])
             with gr.Row(elem_classes=["button-grid"]):
                 nav_create = gr.Button("2DGS", elem_classes=["sidebar-nav"], elem_id="nav-create", scale=1)
+                nav_mesh = gr.Button("Mesh", elem_classes=["sidebar-nav"], elem_id="nav-mesh", scale=1)
             
             # Refine/Monitor Section combined
             gr.HTML('<div class="sidebar-category">TOOLS</div>')
@@ -344,7 +357,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
                                     sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                                     
-                                    with gr.Accordion("📋 Logs", open=False):
+                                    with gr.Accordion("Logs", open=False):
                                         sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -421,7 +434,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     sharp_render_video_btn = gr.Button("Render Video", variant="primary", size="lg")
                                     sharp_video_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                                     
-                                    with gr.Accordion("📋 Trajectory Types Explained", open=False):
+                                    with gr.Accordion("Trajectory Types Explained", open=False):
                                         gr.Markdown("""
                                         | Type | Description |
                                         |------|-------------|
@@ -438,7 +451,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         - **Look-At Mode**: "point" keeps camera focused on scene center, "ahead" looks straight ahead
                                         """)
                                     
-                                    with gr.Accordion("📋 Logs", open=False):
+                                    with gr.Accordion("Logs", open=False):
                                         sharp_video_logs = gr.Textbox(label="Render Logs", lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -460,18 +473,19 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                         with gr.Column(scale=1):
                             with gr.Group():
                                 gr.Markdown("### Video Settings")
-                                with gr.Row():
-                                    gen3c_trajectory = gr.Dropdown(
-                                        choices=["left", "right", "up", "down", "zoom_in", "zoom_out", "clockwise", "counterclockwise"],
-                                        value="left",
-                                        label="Camera Trajectory",
-                                    )
-                                    gen3c_camera_rotation = gr.Dropdown(
-                                        choices=["center_facing", "no_rotation", "trajectory_aligned"],
-                                        value="center_facing",
-                                        label="Camera Rotation",
-                                        elem_id="gen3c-camera-rotation",
-                                    )
+                                gr.Markdown("**Camera Trajectories** (select one or more)")
+                                gen3c_trajectories = gr.CheckboxGroup(
+                                    choices=["left", "right", "up", "down", "zoom_in", "zoom_out", "clockwise", "counterclockwise"],
+                                    value=["left"],
+                                    label="Camera Trajectories",
+                                    info="Select multiple for multi-view generation"
+                                )
+                                gen3c_camera_rotation = gr.Dropdown(
+                                    choices=["center_facing", "no_rotation", "trajectory_aligned"],
+                                    value="center_facing",
+                                    label="Camera Rotation",
+                                    elem_id="gen3c-camera-rotation",
+                                )
                                 with gr.Row():
                                     gen3c_movement_distance = gr.Slider(
                                         minimum=0.1, maximum=1.0, value=0.3, step=0.05,
@@ -490,13 +504,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             with gr.Group():
                                 gr.Markdown("### Output")
-                                gen3c_video_name = gr.Textbox(value="gen3c_video", label="Video Name")
+                                gen3c_video_name = gr.Textbox(value="gen3c_video", label="Video Name (base)")
                                 gen3c_output_dir = gr.Textbox(value=GEN3C_DEFAULT_OUTPUT_DIR, label="Output Directory")
                             
-                            gen3c_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
+                            gen3c_generate_btn = gr.Button("Generate Videos", variant="primary", size="lg")
                             gen3c_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            gen3c_generated_videos = gr.State(value=[])  # Track generated video paths
                             
-                            with gr.Accordion("📋 Logs", open=False):
+                            with gr.Accordion("Logs", open=False):
                                 gen3c_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
@@ -506,6 +521,118 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 autoplay=True,
                                 loop=True,
                             )
+                
+                # PAGE: LTX-2
+                with gr.TabItem("LTX-2", id="ltx2"):
+                    gr.HTML("""
+                        <div class="page-header">
+                            <h1>LTX-2</h1>
+                            <p>Lightricks' high-quality video generation with camera control. Creates videos optimized for 3D reconstruction.</p>
+                        </div>
+                    """)
+                    
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            with gr.Group():
+                                gr.Markdown("### Model & Camera")
+                                ltx2_model_variant = gr.Dropdown(
+                                    choices=["19b-dev-fp8", "19b-dev", "19b-dev-fp4", "19b-distilled"],
+                                    value="19b-dev-fp8",
+                                    label="Model Variant",
+                                    info="fp8: 24GB GPU (default), dev: highest quality (32GB+)"
+                                )
+                                
+                                gr.Markdown("**Camera Motions** (select one or more)")
+                                ltx2_camera_motions = gr.CheckboxGroup(
+                                    choices=["dolly_out", "dolly_in", "dolly_left", "dolly_right", "jib_up", "static"],
+                                    value=["dolly_out"],
+                                    label="Camera Motions",
+                                    info="Select multiple for multi-view generation"
+                                )
+                            
+                            with gr.Group():
+                                gr.Markdown("### Prompt")
+                                ltx2_prompt = gr.Textbox(
+                                    value="Smooth camera movement revealing object details, high quality, cinematic",
+                                    label="Prompt",
+                                    lines=2,
+                                )
+                                ltx2_negative_prompt = gr.Textbox(
+                                    value="blurry, low quality, distorted, artifacts",
+                                    label="Negative Prompt",
+                                    lines=1,
+                                )
+                            
+                            with gr.Group():
+                                gr.Markdown("### Video Settings")
+                                with gr.Row():
+                                    ltx2_num_frames = gr.Dropdown(
+                                        choices=["49", "65", "81", "97", "113", "121"],
+                                        value="97",
+                                        label="Frames",
+                                        info="Must be 8n+1"
+                                    )
+                                    ltx2_fps = gr.Slider(
+                                        minimum=12, maximum=30, value=24, step=1,
+                                        label="FPS"
+                                    )
+                                with gr.Row():
+                                    ltx2_width = gr.Dropdown(
+                                        choices=["512", "640", "768", "896", "1024", "1280", "1920"],
+                                        value="768",
+                                        label="Width"
+                                    )
+                                    ltx2_height = gr.Dropdown(
+                                        choices=["320", "384", "448", "512", "576", "704", "1056"],
+                                        value="512",
+                                        label="Height",
+                                        info="704=720p, 1056=1080p (div by 32)"
+                                    )
+                            
+                            with gr.Accordion("Advanced", open=False):
+                                with gr.Row():
+                                    ltx2_guidance = gr.Slider(
+                                        minimum=1.0, maximum=15.0, value=7.5, step=0.5,
+                                        label="Guidance Scale"
+                                    )
+                                    ltx2_steps = gr.Slider(
+                                        minimum=8, maximum=75, value=50, step=1,
+                                        label="Inference Steps",
+                                        info="8 for distilled, 50 for others"
+                                    )
+                                ltx2_seed = gr.Number(value=None, label="Seed", precision=0)
+                            
+                            with gr.Group():
+                                gr.Markdown("### Output")
+                                ltx2_output_name = gr.Textbox(value="ltx2_video", label="Video Name (base)")
+                                ltx2_output_dir = gr.Textbox(value="/srv/searidge_share/outputs/ltx2", label="Output Directory")
+                            
+                            ltx2_generate_btn = gr.Button("Generate Videos", variant="primary", size="lg")
+                            ltx2_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            ltx2_generated_videos = gr.State(value=[])  # Track generated video paths
+                            
+                            with gr.Accordion("Logs", open=False):
+                                ltx2_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
+                        
+                        with gr.Column(scale=1):
+                            ltx2_video_viewer = gr.Video(
+                                label="Video Preview",
+                                height=400,
+                                autoplay=True,
+                                loop=True,
+                            )
+                            
+                            # Send to 2DGS button
+                            ltx2_send_to_2dgs = gr.Button("Send to 2DGS Pipeline", variant="secondary", size="sm")
+                            ltx2_last_video_path = gr.State(value=None)
+                            
+                            gr.Markdown("""
+                            **Camera Motions**:
+                            - `dolly_out` - Best for 3D (reveals full object)
+                            - `dolly_in/left/right` - Alternative angles
+                            - `jib_up` - Vertical movement
+                            - `static` - No movement
+                            """)
                 
                 # PAGE: LYRA
                 with gr.TabItem("Lyra", id="lyra"):
@@ -526,7 +653,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         label="Mode",
                                     )
                                     
-                                    with gr.Accordion("⚙️ Advanced", open=False):
+                                    with gr.Accordion("Advanced", open=False):
                                         with gr.Row():
                                             lyra_views = gr.Slider(4, 16, 8, step=1, label="Views")
                                             lyra_motion = gr.Slider(0.5, 2.0, 1.0, step=0.1, label="Camera Motion")
@@ -547,7 +674,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     lyra_generate_btn = gr.Button("Generate 3DGS", variant="primary", size="lg")
                                     lyra_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                                     
-                                    with gr.Accordion("📋 Logs", open=False):
+                                    with gr.Accordion("Logs", open=False):
                                         lyra_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -563,14 +690,14 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             initial_ply = scan_for_lyra_ply_files()
                             with gr.Row():
                                 lyra_ply_dropdown = gr.Dropdown(choices=initial_ply, label="Select PLY", scale=3, allow_custom_value=True)
-                                lyra_refresh_btn = gr.Button("🔄", scale=0)
+                                lyra_refresh_btn = gr.Button("Refresh", scale=0)
                             lyra_ply_path = gr.Textbox(label="Or enter path", placeholder="/path/to/file.ply")
                             
                             with gr.Row():
                                 lyra_conv_3dgs = gr.Checkbox(True, label="3DGS Format")
                                 lyra_conv_pc = gr.Checkbox(False, label="Point Cloud")
                             
-                            lyra_convert_btn = gr.Button("🔄 Convert", variant="secondary")
+                            lyra_convert_btn = gr.Button("Convert", variant="secondary")
                             lyra_convert_status = gr.Textbox(label="Result", interactive=False)
                 
                 # PAGE: TRELLIS.2
@@ -597,7 +724,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             trellis_generate_btn = gr.Button("Generate 3D", variant="primary", size="lg")
                             trellis_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                             
-                            with gr.Accordion("📋 Logs", open=False):
+                            with gr.Accordion("Logs", open=False):
                                 trellis_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
@@ -625,7 +752,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 info="mini: faster (2-5 min), full: higher quality (5-15 min)"
                             )
                             
-                            with gr.Accordion("⚙️ Advanced", open=False):
+                            with gr.Accordion("Advanced", open=False):
                                 with gr.Row():
                                     hunyuan_guidance = gr.Slider(1.0, 10.0, 5.0, label="Guidance")
                                     hunyuan_steps = gr.Slider(10, 100, 40, step=5, label="Steps")
@@ -646,7 +773,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             hunyuan_generate_btn = gr.Button("Generate Mesh", variant="primary", size="lg")
                             hunyuan_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                             
-                            with gr.Accordion("📋 Logs", open=False):
+                            with gr.Accordion("Logs", open=False):
                                 hunyuan_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
@@ -680,7 +807,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                                 allow_custom_value=True,
                                                 elem_classes=["ply-dropdown"],
                                             )
-                                            mesh_refresh_btn = gr.Button("🔄", scale=0, elem_classes=["refresh-btn-inline"], min_width=40)
+                                            mesh_refresh_btn = gr.Button("Refresh", scale=0, elem_classes=["refresh-btn-inline"], min_width=40)
                                         mesh_format = gr.Radio(["Auto-detect", "Lyra", "SHARP", "Standard 3DGS"], value="Auto-detect", label="Format")
                                     
                                     with gr.Group():
@@ -712,7 +839,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
                                     mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                                     
-                                    with gr.Accordion("📋 Logs", open=False):
+                                    with gr.Accordion("Logs", open=False):
                                         mesh_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -787,7 +914,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         cleanup_run_btn = gr.Button("Clean Up", variant="primary", size="lg")
                                     cleanup_status = gr.Textbox(value="Ready", label="Status", interactive=False)
                                     
-                                    with gr.Accordion("📋 Cleanup Log", open=False):
+                                    with gr.Accordion("Cleanup Log", open=False):
                                         cleanup_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
@@ -1528,7 +1655,7 @@ Min Component Ratio: 1% (default)
     # JavaScript to highlight active nav button
     highlight_js = """
     () => {
-        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-create', 'nav-settings', 'nav-update', 'nav-help'];
+        const navButtons = ['nav-sharp', 'nav-gen3c', 'nav-ltx2', 'nav-lyra', 'nav-trellis', 'nav-hunyuan', 'nav-mesh', 'nav-create', 'nav-settings', 'nav-update', 'nav-help'];
         navButtons.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) btn.classList.remove('nav-active');
@@ -1542,6 +1669,7 @@ Min Component Ratio: 1% (default)
     # Navigation buttons - use gr.Tabs.select() to switch tabs
     nav_sharp.click(fn=lambda: gr.Tabs(selected="sharp"), outputs=[page_tabs], js=highlight_js % 'nav-sharp')
     nav_gen3c.click(fn=lambda: gr.Tabs(selected="gen3c"), outputs=[page_tabs], js=highlight_js % 'nav-gen3c')
+    nav_ltx2.click(fn=lambda: gr.Tabs(selected="ltx2"), outputs=[page_tabs], js=highlight_js % 'nav-ltx2')
     nav_lyra.click(fn=lambda: gr.Tabs(selected="lyra"), outputs=[page_tabs], js=highlight_js % 'nav-lyra')
     nav_trellis.click(fn=lambda: gr.Tabs(selected="trellis"), outputs=[page_tabs], js=highlight_js % 'nav-trellis')
     nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs], js=highlight_js % 'nav-hunyuan')
@@ -1757,27 +1885,234 @@ Min Component Ratio: 1% (default)
     # =========================================================================
     # GEN3C EVENT HANDLERS
     # =========================================================================
-    
+
+    def gen3c_multi_generate(
+        input_img, img_scale, exec_mode,
+        endpoint_id, api_key,
+        guidance, frames, trajectories,
+        movement_distance, camera_rotation,
+        foreground_mask,
+        video_name, seed, output_dir,
+        log_params, encode_params
+    ):
+        """Handle GEN3C generation for multiple trajectories."""
+        logs = []
+        generated_videos = []
+        last_video_path = None
+        
+        if not trajectories:
+            return None, "Error: Select at least one trajectory", "❌ No trajectory selected", []
+        
+        total = len(trajectories)
+        logs.append(f"[GEN3C] Generating {total} video(s)...")
+        
+        for idx, traj in enumerate(trajectories, 1):
+            # Create unique name for each trajectory
+            unique_name = f"{video_name}_{traj}"
+            
+            logs.append(f"\n[GEN3C] ({idx}/{total}) Generating {traj}...")
+            
+            result = handle_gen3c_generation(
+                image_path=input_img,
+                image_scale=img_scale,
+                exec_mode=exec_mode,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                guidance=guidance,
+                frames=frames,
+                trajectory=traj,
+                movement_distance=movement_distance,
+                camera_rotation=camera_rotation,
+                foreground_mask=foreground_mask,
+                video_name=unique_name,
+                seed=seed,
+                output_dir=output_dir,
+                log_params=log_params,
+                encode_params=encode_params,
+            )
+            
+            output_path, gen_logs, status = result
+            logs.append(gen_logs)
+            
+            if output_path:
+                logs.append(f"[GEN3C] ✅ {traj}: {output_path}")
+                generated_videos.append(output_path)
+                last_video_path = output_path
+            else:
+                logs.append(f"[GEN3C] ❌ {traj} failed")
+        
+        if generated_videos:
+            status = f"✅ Generated {len(generated_videos)}/{total} videos"
+        else:
+            status = "❌ All generations failed"
+        
+        return last_video_path, "\n".join(logs), status, generated_videos
+
     def gen3c_generate_with_output(*args):
-        """Wrapper that returns output path for display."""
-        result = handle_gen3c_generation(*args)
-        output_path, logs, progress = result
-        return output_path, output_path, logs, progress
-    
+        """Wrapper that returns output paths for display."""
+        result = gen3c_multi_generate(*args)
+        last_video, logs, progress, video_list = result
+        return last_video, last_video, logs, progress, video_list
+
     gen3c_generate_btn.click(
         fn=gen3c_generate_with_output,
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
             settings_gen3c_endpoint, settings_gen3c_key,
-            gen3c_guidance, gen3c_frames, gen3c_trajectory,
+            gen3c_guidance, gen3c_frames, gen3c_trajectories,
             gen3c_movement_distance, gen3c_camera_rotation,
             gen3c_foreground,
             gen3c_video_name, gen3c_seed, gen3c_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, gen3c_video_viewer, gen3c_logs, gen3c_progress],
+        outputs=[output_display, gen3c_video_viewer, gen3c_logs, gen3c_progress, gen3c_generated_videos],
+    )
+
+    # =========================================================================
+    # LTX-2 EVENT HANDLERS
+    # =========================================================================
+    
+    def handle_ltx2_multi_generation(
+        input_img, img_scale,
+        endpoint_id, api_key,
+        model_variant, camera_motions,
+        prompt, negative_prompt,
+        num_frames, fps, width, height,
+        guidance, steps, seed,
+        output_name, output_dir,
+        log_params, encode_params
+    ):
+        """Handle LTX-2 video generation for multiple camera motions."""
+        import os
+        from generators.ltx2 import run_ltx2_runpod
+        
+        logs = []
+        generated_videos = []
+        last_video_path = None
+        
+        # Validate inputs
+        if input_img is None:
+            return None, "Error: No input image", "❌ No input image", []
+        
+        if not endpoint_id or not api_key:
+            return None, "Error: RunPod credentials required (configure in Settings)", "❌ Missing credentials", []
+        
+        if not camera_motions:
+            return None, "Error: Select at least one camera motion", "❌ No motion selected", []
+        
+        # Save input image temporarily
+        import tempfile
+        import shutil
+        from PIL import Image
+        
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Handle Gradio image input
+            if isinstance(input_img, str):
+                input_path = input_img
+            else:
+                input_path = os.path.join(temp_dir, "input.png")
+                if hasattr(input_img, 'save'):
+                    input_img.save(input_path)
+                else:
+                    Image.fromarray(input_img).save(input_path)
+            
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            
+            total = len(camera_motions)
+            logs.append(f"[LTX-2] Generating {total} video(s)...")
+            logs.append(f"[LTX-2] Model: {model_variant}")
+            logs.append(f"[LTX-2] Size: {width}x{height}, {num_frames} frames @ {fps}fps")
+            
+            for idx, motion in enumerate(camera_motions, 1):
+                # Create unique name for each motion
+                video_name = f"{output_name}_{motion}"
+                
+                logs.append(f"\n[LTX-2] ({idx}/{total}) Generating {motion}...")
+                
+                result = run_ltx2_runpod(
+                    image_path=input_path,
+                    output_dir=output_dir,
+                    output_name=video_name,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    camera_motion=motion,
+                    model_variant=model_variant,
+                    num_frames=int(num_frames),
+                    width=int(width),
+                    height=int(height),
+                    num_inference_steps=int(steps),
+                    guidance_scale=float(guidance),
+                    fps=int(fps),
+                    seed=int(seed) if seed else None,
+                    api_key=api_key,
+                    endpoint_id=endpoint_id,
+                )
+                
+                if result.logs:
+                    logs.append(result.logs)
+                
+                if result.success:
+                    logs.append(f"[LTX-2] ✅ {motion}: {result.video_path}")
+                    generated_videos.append(result.video_path)
+                    last_video_path = result.video_path
+                else:
+                    logs.append(f"[LTX-2] ❌ {motion} failed: {result.error}")
+            
+            if generated_videos:
+                status = f"✅ Generated {len(generated_videos)}/{total} videos"
+            else:
+                status = "❌ All generations failed"
+            
+            return last_video_path, "\n".join(logs), status, generated_videos
+                
+        except Exception as e:
+            logs.append(f"[LTX-2] ❌ Exception: {str(e)}")
+            return None, "\n".join(logs), f"❌ {str(e)}", []
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    def ltx2_generate_with_output(*args):
+        """Wrapper that returns output paths for display."""
+        result = handle_ltx2_multi_generation(*args)
+        last_video, logs, progress, video_list = result
+        # Return: display, video viewer (last), logs, progress, last path for 2DGS, video list
+        return last_video, last_video, logs, progress, last_video, video_list
+    
+    ltx2_generate_btn.click(
+        fn=ltx2_generate_with_output,
+        inputs=[
+            input_image, image_scale,
+            settings_gen3c_endpoint, settings_gen3c_key,  # Uses unified endpoint
+            ltx2_model_variant, ltx2_camera_motions,
+            ltx2_prompt, ltx2_negative_prompt,
+            ltx2_num_frames, ltx2_fps, ltx2_width, ltx2_height,
+            ltx2_guidance, ltx2_steps, ltx2_seed,
+            ltx2_output_name, ltx2_output_dir,
+            global_log_params, global_encode_params,
+        ],
+        outputs=[output_display, ltx2_video_viewer, ltx2_logs, ltx2_progress, ltx2_last_video_path, ltx2_generated_videos],
     )
     
+    # Send to 2DGS handler
+    def send_ltx2_to_2dgs(video_path):
+        """Set the 2DGS video path field and switch to 2DGS tab."""
+        if not video_path:
+            return gr.update(), gr.update(), gr.Tabs(selected="create")
+        # Set video source to "Video Path" and populate the path
+        return gr.update(value="Video Path"), gr.update(value=video_path), gr.Tabs(selected="create")
+    
+    ltx2_send_to_2dgs.click(
+        fn=send_ltx2_to_2dgs,
+        inputs=[ltx2_last_video_path],
+        outputs=[
+            twodgs_components["video_source"],
+            twodgs_components["video_path"],
+            page_tabs
+        ],
+    )
+
     # =========================================================================
     # LYRA EVENT HANDLERS
     # =========================================================================
@@ -2041,109 +2376,195 @@ Min Component Ratio: 1% (default)
     # =========================================================================
     # 2DGS PIPELINE EVENT HANDLERS
     # =========================================================================
-    
-    from handlers.generation_handlers import handle_2dgs_pipeline, list_gen3c_videos, get_video_info
-    
-    # Refresh Gen3C video list
-    def refresh_gen3c_videos(output_dir):
-        videos = list_gen3c_videos(output_dir)
-        return gr.update(choices=videos)
-    
+
+    from handlers.generation_handlers import handle_2dgs_pipeline, list_gen3c_videos, list_all_videos, get_video_info
+
+    # Store video paths mapping (display name -> full path)
+    _video_paths_cache = {}
+
+    # Refresh video list (Gen3C + LTX-2)
+    def refresh_video_list():
+        """Refresh video checkboxes with videos from Gen3C and LTX-2 directories."""
+        global _video_paths_cache
+        gen3c_dir = "/srv/searidge_share/outputs/gen3c"
+        ltx2_dir = "/srv/searidge_share/outputs/ltx2"
+        videos = list_all_videos(gen3c_dir, ltx2_dir)
+        
+        # Update cache and create choices
+        _video_paths_cache = {v[0]: v[1] for v in videos}
+        choices = [v[0] for v in videos]
+        
+        return gr.update(choices=choices, value=[])
+
     twodgs_components["refresh_videos_btn"].click(
-        fn=refresh_gen3c_videos,
-        inputs=[twodgs_components["gen3c_output_dir"]],
-        outputs=[twodgs_components["video_dropdown"]],
+        fn=refresh_video_list,
+        inputs=[],
+        outputs=[twodgs_components["video_checkboxes"]],
     )
-    
-    # Update video info when path changes
-    twodgs_components["video_path"].change(
-        fn=get_video_info,
-        inputs=[twodgs_components["video_path"]],
-        outputs=[twodgs_components["video_info"]],
-    )
-    
-    # Update video info when dropdown selection changes
-    def update_video_info_from_dropdown(video_name, gen3c_dir):
-        if not video_name:
-            return "No video selected"
+
+    # Helper to get full path from display name
+    def get_video_full_path(display_name):
+        """Get full path from display name."""
+        global _video_paths_cache
+        if display_name in _video_paths_cache:
+            return _video_paths_cache[display_name]
+        
+        # Fallback: parse the display name
         from pathlib import Path
-        full_path = str(Path(gen3c_dir) / video_name)
-        return get_video_info(full_path)
-    
-    twodgs_components["video_dropdown"].change(
-        fn=update_video_info_from_dropdown,
-        inputs=[twodgs_components["video_dropdown"], twodgs_components["gen3c_output_dir"]],
-        outputs=[twodgs_components["video_info"]],
+        if display_name.startswith("[Gen3C] "):
+            filename = display_name.replace("[Gen3C] ", "")
+            return str(Path("/srv/searidge_share/outputs/gen3c") / filename)
+        elif display_name.startswith("[LTX-2] "):
+            filename = display_name.replace("[LTX-2] ", "")
+            return str(Path("/srv/searidge_share/outputs/ltx2") / filename)
+        return display_name
+
+    # Update video previews when selection changes
+    def update_video_previews(selected_videos):
+        """Update video preview panels based on selection."""
+        # Limit to 4 videos
+        selected = selected_videos[:4] if selected_videos else []
+        
+        # Get full paths
+        video_paths = [get_video_full_path(v) for v in selected]
+        
+        # Pad to 4 elements
+        while len(video_paths) < 4:
+            video_paths.append(None)
+        
+        count_text = f"**Selected: {len(selected)}/4**"
+        label_text = f"*{len(selected)} video(s) selected*" if selected else "*No videos selected*"
+        
+        return (
+            count_text,
+            label_text,
+            video_paths[0],
+            video_paths[1],
+            video_paths[2],
+            video_paths[3],
+        )
+
+    twodgs_components["video_checkboxes"].change(
+        fn=update_video_previews,
+        inputs=[twodgs_components["video_checkboxes"]],
+        outputs=[
+            twodgs_components["selected_count"],
+            twodgs_components["selected_videos_label"],
+            twodgs_components["video_preview_1"],
+            twodgs_components["video_preview_2"],
+            twodgs_components["video_preview_3"],
+            twodgs_components["video_preview_4"],
+        ],
     )
-    
-    # Main generate button
-    def run_2dgs_pipeline_wrapper(
-        video_source, video_path, video_upload, video_dropdown, gen3c_output_dir,
-        iterations, mesh_quality, output_format, output_dir,
+
+    # Main generate button for multi-video
+    def run_2dgs_multi_video(
+        video_source, selected_videos, video_uploads,
+        iterations, mesh_quality, output_format, output_dir, output_name,
         endpoint_id, api_key, s3_bucket, s3_region
     ):
-        """Wrapper to call 2DGS pipeline with progress updates."""
-        output_path, stats, status = handle_2dgs_pipeline(
-            video_source=video_source,
-            video_path=video_path,
-            video_upload=video_upload,
-            video_dropdown=video_dropdown,
-            gen3c_output_dir=gen3c_output_dir,
-            iterations=int(iterations),
-            mesh_quality=mesh_quality,
-            output_format=output_format,
-            output_dir=output_dir,
-            endpoint_id=endpoint_id,
-            api_key=api_key,
-            s3_bucket=s3_bucket,
-            s3_region=s3_region,
-        )
-        return output_path, stats, status
-    
-    def run_2dgs_pipeline_with_preview(*args):
-        """Wrapper that returns GLB path for 3D viewer."""
-        output_path, stats, status = run_2dgs_pipeline_wrapper(*args)
+        """Run 2DGS pipeline with multiple videos."""
+        from pathlib import Path
         
-        # 2DGS outputs GLB/OBJ/PLY
-        # Model3D works best with GLB
+        # Determine video paths based on source
+        video_paths = []
+        
+        if video_source == "Select Videos":
+            if not selected_videos:
+                return None, {}, "Error: No videos selected", None
+            
+            # Limit to 4
+            selected = selected_videos[:4]
+            video_paths = [get_video_full_path(v) for v in selected]
+            
+        elif video_source == "Upload Video":
+            if not video_uploads:
+                return None, {}, "Error: No videos uploaded", None
+            
+            # Handle uploaded files
+            uploads = video_uploads[:4] if isinstance(video_uploads, list) else [video_uploads]
+            video_paths = [f.name if hasattr(f, 'name') else str(f) for f in uploads]
+        
+        # Validate paths exist
+        valid_paths = []
+        for p in video_paths:
+            if p and Path(p).exists():
+                valid_paths.append(p)
+            else:
+                print(f"[2DGS] Warning: Video not found: {p}")
+        
+        if not valid_paths:
+            return None, {}, "Error: No valid video files found", None
+        
+        # For now, use single-video pipeline with first video
+        # TODO: Implement multi-video merging in handler
+        if len(valid_paths) == 1:
+            # Single video - use existing handler
+            output_path, stats, status = handle_2dgs_pipeline(
+                video_source="Video Path",
+                video_path=valid_paths[0],
+                video_upload=None,
+                video_dropdown="",
+                gen3c_output_dir="/srv/searidge_share/outputs/gen3c",
+                iterations=int(iterations),
+                mesh_quality=mesh_quality,
+                output_format=output_format,
+                output_dir=output_dir,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                s3_bucket=s3_bucket,
+                s3_region=s3_region,
+            )
+        else:
+            # Multi-video - call multi-video handler
+            # TODO: Implement handle_2dgs_multi_video
+            output_path, stats, status = handle_2dgs_pipeline(
+                video_source="Video Path",
+                video_path=valid_paths[0],  # Temporarily use first video
+                video_upload=None,
+                video_dropdown="",
+                gen3c_output_dir="/srv/searidge_share/outputs/gen3c",
+                iterations=int(iterations),
+                mesh_quality=mesh_quality,
+                output_format=output_format,
+                output_dir=output_dir,
+                endpoint_id=endpoint_id,
+                api_key=api_key,
+                s3_bucket=s3_bucket,
+                s3_region=s3_region,
+            )
+            # Note: Multi-video merging needs serverless endpoint update
+            status = f"{status}\n(Multi-video: using {len(valid_paths)} videos - merging coming soon)"
+        
+        # Determine preview path
         preview_path = None
         if output_path:
             if output_path.endswith('.glb'):
                 preview_path = output_path
             elif output_path.endswith('.obj'):
-                # Try to find GLB version
                 glb_path = output_path.rsplit('.', 1)[0] + '.glb'
                 if os.path.exists(glb_path):
                     preview_path = glb_path
-            elif output_path.endswith('.ply'):
-                # Convert PLY to GLB for preview
-                try:
-                    preview_path = convert_3dgs_to_preview_glb(output_path)
-                except Exception as e:
-                    print(f"[2DGS] Preview conversion failed: {e}")
-                    preview_path = None
         
-        return output_path, output_path, stats, status, preview_path
+        return output_path, stats, status, preview_path
     
     twodgs_components["generate_btn"].click(
-        fn=run_2dgs_pipeline_with_preview,
+        fn=run_2dgs_multi_video,
         inputs=[
             twodgs_components["video_source"],
-            twodgs_components["video_path"],
-            twodgs_components["video_upload"],
-            twodgs_components["video_dropdown"],
-            twodgs_components["gen3c_output_dir"],
+            twodgs_components["video_checkboxes"],
+            twodgs_components["video_uploads"],
             twodgs_components["iterations"],
             twodgs_components["mesh_quality"],
             twodgs_components["output_format"],
             twodgs_components["output_dir"],
-            twodgs_components["endpoint_id"],
-            twodgs_components["api_key"],
-            twodgs_components["s3_bucket"],
-            twodgs_components["s3_region"],
+            twodgs_components["output_name"],
+            settings_2dgs_endpoint,
+            settings_2dgs_key,
+            gr.State("arkrunr"),  # S3 bucket
+            gr.State("us-west-1"),  # S3 region
         ],
         outputs=[
-            output_display,
             twodgs_components["output_file"],
             twodgs_components["output_stats"],
             twodgs_components["status_text"],

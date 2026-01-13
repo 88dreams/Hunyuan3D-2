@@ -1,15 +1,14 @@
 """
-2DGS Tab - Video to 3D Mesh Pipeline
+2DGS Tab - Video to 3D Mesh Pipeline (Multi-Video Support)
 
 This tab provides the UI for the 2DGS Pipeline (ViPE + 2DGS)
-which converts Gen3C videos into 3D meshes.
+which converts videos into 3D meshes.
 
-The pipeline is a ONE-SHOT serverless endpoint that handles:
-1. ViPE pose extraction
-2. Format conversion to COLMAP
-3. Point cloud initialization
-4. 2DGS training
-5. Mesh extraction
+Features:
+- Multi-video selection (up to 4 videos)
+- Support for Gen3C and LTX-2 videos
+- Video preview before processing
+- Pose alignment and merging
 
 Endpoint ID: s9txp6edtf2vg4
 """
@@ -21,9 +20,13 @@ from pathlib import Path
 # Default paths
 MESH_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/mesh_2dgs"
 GEN3C_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/gen3c"
+LTX2_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/ltx2"
 
 # Default endpoint
 DEFAULT_2DGS_ENDPOINT_ID = "s9txp6edtf2vg4"
+
+# Maximum videos for multi-video mode
+MAX_VIDEOS = 4
 
 
 def create_2dgs_tab(
@@ -31,10 +34,7 @@ def create_2dgs_tab(
     default_api_key: str = "",
 ):
     """
-    Create the 2DGS tab for video-to-mesh pipeline.
-    
-    This is a simplified one-shot workflow:
-    1. Video Input → 2. Parameters → 3. Generate → 4. Download Mesh
+    Create the 2DGS tab for video-to-mesh pipeline with multi-video support.
     
     Args:
         default_endpoint_id: Default RunPod endpoint ID
@@ -45,61 +45,46 @@ def create_2dgs_tab(
     """
     
     # ===========================================
-    # TWO-COLUMN LAYOUT (matching Sharp/other tabs)
+    # TWO-COLUMN LAYOUT
     # ===========================================
     with gr.Row():
-        # LEFT COLUMN: All controls
+        # LEFT COLUMN: Controls
         with gr.Column(scale=1):
             gr.Markdown("""
-            **ViPE + 2DGS**: Extract camera poses and reconstruct 3D geometry from Gen3C videos.
+            **ViPE + 2DGS**: Extract camera poses and reconstruct 3D geometry from videos.
+            Select up to 4 videos for better reconstruction quality.
             """)
             
-            # VIDEO INPUT
+            # VIDEO SELECTION
             with gr.Group():
-                gr.Markdown("### Video Input")
+                gr.Markdown("### Video Selection")
                 
                 video_source = gr.Radio(
-                    choices=["Upload Video", "Video Path", "Use Gen3C Output"],
-                    value="Use Gen3C Output",
+                    choices=["Select Videos", "Upload Video"],
+                    value="Select Videos",
                     label="Source",
                 )
                 
-                # Upload option
-                video_upload = gr.Video(
-                    label="Upload Gen3C Video",
-                    format="mp4",
-                    visible=False,
-                )
-                upload_group = video_upload  # For compatibility
-                
-                # Path option  
-                video_path = gr.Textbox(
-                    value="",
-                    label="Video Path",
-                    placeholder="/path/to/gen3c_video.mp4 or https://...",
-                    visible=False,
-                )
-                path_group = video_path  # For compatibility
-                
-                # Gen3C output option (default visible)
-                with gr.Column(visible=True) as gen3c_group:
-                    gen3c_output_dir = gr.Textbox(
-                        value=GEN3C_DEFAULT_OUTPUT_DIR,
-                        label="Gen3C Output Directory",
-                    )
-                    video_dropdown = gr.Dropdown(
+                # Select from directories option (default)
+                with gr.Column(visible=True) as select_group:
+                    gr.Markdown("**Available Videos** (Gen3C + LTX-2)")
+                    video_checkboxes = gr.CheckboxGroup(
                         choices=[],
-                        label="Select Video",
+                        value=[],
+                        label="Select up to 4 videos",
+                        info="Videos from Gen3C and LTX-2 directories",
                     )
-                    refresh_videos_btn = gr.Button("🔄 Refresh", size="sm")
+                    with gr.Row():
+                        refresh_videos_btn = gr.Button("Refresh", size="sm")
+                        selected_count = gr.Markdown("**Selected: 0/4**")
                 
-                # Video info
-                video_info = gr.Textbox(
-                    value="No video selected",
-                    label="Video Info",
-                    interactive=False,
-                    lines=2,
-                )
+                # Upload option
+                with gr.Column(visible=False) as upload_group:
+                    video_uploads = gr.File(
+                        label="Upload Videos (up to 4)",
+                        file_count="multiple",
+                        file_types=[".mp4", ".avi", ".mov"],
+                    )
             
             # PIPELINE PARAMETERS
             with gr.Group():
@@ -117,7 +102,7 @@ def create_2dgs_tab(
                         choices=["fast", "balanced", "high", "ultra"],
                         value="high",
                         label="Mesh Quality",
-                        info="Higher = better geometry, slower extraction",
+                        info="Higher = better geometry, slower",
                     )
                 
                 with gr.Row():
@@ -130,114 +115,122 @@ def create_2dgs_tab(
                         value=MESH_DEFAULT_OUTPUT_DIR,
                         label="Output Directory",
                     )
-            
-            # EXECUTION
-            with gr.Group():
-                gr.Markdown("### Output")
-                output_stats = gr.JSON(
-                    label="Pipeline Statistics",
-                    value={},
+                
+                output_name = gr.Textbox(
+                    value="mesh_output",
+                    label="Output Name",
                 )
             
+            # GENERATE BUTTON
             generate_btn = gr.Button(
                 "Generate 3D Mesh",
                 variant="primary",
                 size="lg",
             )
-            cancel_btn = gr.Button(
-                "⏹️ Cancel",
-                variant="stop",
-                size="lg",
-                visible=False,
-            )
             status_text = gr.Textbox(
-                value="Ready to start...",
+                value="Ready - Select videos to begin",
                 label="Status",
                 interactive=False,
                 lines=2,
             )
+            
+            # STATS
+            with gr.Accordion("Pipeline Statistics", open=False):
+                output_stats = gr.JSON(
+                    label="Statistics",
+                    value={},
+                )
         
-        # RIGHT COLUMN: Preview outputs
+        # RIGHT COLUMN: Previews
         with gr.Column(scale=1):
-            output_file = gr.File(
-                label="Downloaded Mesh",
-                file_types=[".glb", ".obj", ".ply"],
-            )
+            gr.Markdown("### Selected Videos (0/4)")
+            selected_videos_label = gr.Markdown("*No videos selected*")
+            
+            # Video preview grid (2x2)
+            with gr.Row():
+                video_preview_1 = gr.Video(
+                    label="Video 1",
+                    height=180,
+                    visible=True,
+                    interactive=False,
+                )
+                video_preview_2 = gr.Video(
+                    label="Video 2", 
+                    height=180,
+                    visible=True,
+                    interactive=False,
+                )
+            with gr.Row():
+                video_preview_3 = gr.Video(
+                    label="Video 3",
+                    height=180,
+                    visible=True,
+                    interactive=False,
+                )
+                video_preview_4 = gr.Video(
+                    label="Video 4",
+                    height=180,
+                    visible=True,
+                    interactive=False,
+                )
+            
+            # 3D Output Preview
+            gr.Markdown("### 3D Mesh Output")
             twodgs_3d_viewer = gr.Model3D(
                 label="3D Preview",
-                height=400,
+                height=350,
                 clear_color=[0.1, 0.1, 0.1, 1.0],
             )
+            output_file = gr.File(
+                label="Download Mesh",
+                file_types=[".glb", ".obj", ".ply"],
+            )
     
-    # ===========================================
-    # ENDPOINT CONFIGURATION (Accordion)
-    # ===========================================
-    with gr.Accordion("⚙️ Endpoint Settings", open=False):
-        with gr.Row():
-            endpoint_id = gr.Textbox(
-                value=default_endpoint_id,
-                label="2DGS Endpoint ID",
-                placeholder="s9txp6edtf2vg4",
-                info="RunPod serverless endpoint ID"
-            )
-            api_key = gr.Textbox(
-                value=default_api_key,
-                label="API Key",
-                type="password",
-                placeholder="rp_...",
-                info="Your RunPod API key"
-            )
-        
-        with gr.Row():
-            s3_bucket = gr.Textbox(
-                value="arkrunr",
-                label="S3 Bucket",
-                info="For video upload and mesh download"
-            )
-            s3_region = gr.Textbox(
-                value="us-west-1",
-                label="S3 Region",
-            )
+    # Note: Endpoint settings moved to Settings page
+    # These are placeholder State components that get populated from settings
     
     # ===========================================
     # VISIBILITY HANDLERS
     # ===========================================
-    def update_video_source_visibility(source):
+    def update_source_visibility(source):
         return (
+            gr.update(visible=source == "Select Videos"),
             gr.update(visible=source == "Upload Video"),
-            gr.update(visible=source == "Video Path"),
-            gr.update(visible=source == "Use Gen3C Output"),
         )
     
     video_source.change(
-        fn=update_video_source_visibility,
+        fn=update_source_visibility,
         inputs=[video_source],
-        outputs=[upload_group, path_group, gen3c_group],
+        outputs=[select_group, upload_group],
     )
     
     # Return all components for external event binding
     return {
-        # Video input
+        # Video selection
         "video_source": video_source,
-        "upload_group": upload_group,
-        "video_upload": video_upload,
-        "path_group": path_group,
-        "video_path": video_path,
-        "gen3c_group": gen3c_group,
-        "gen3c_output_dir": gen3c_output_dir,
-        "video_dropdown": video_dropdown,
+        "select_group": select_group,
+        "video_checkboxes": video_checkboxes,
         "refresh_videos_btn": refresh_videos_btn,
-        "video_info": video_info,
+        "selected_count": selected_count,
+        "upload_group": upload_group,
+        "video_uploads": video_uploads,
+        
+        # Video previews
+        "selected_videos_label": selected_videos_label,
+        "video_preview_1": video_preview_1,
+        "video_preview_2": video_preview_2,
+        "video_preview_3": video_preview_3,
+        "video_preview_4": video_preview_4,
         
         # Parameters
         "iterations": iterations,
         "mesh_quality": mesh_quality,
         "output_format": output_format,
         "output_dir": output_dir,
+        "output_name": output_name,
         
         # Execution
         "generate_btn": generate_btn,
-        "cancel_btn": cancel_btn,
         "status_text": status_text,
         
         # Output
@@ -245,11 +238,18 @@ def create_2dgs_tab(
         "output_stats": output_stats,
         "twodgs_3d_viewer": twodgs_3d_viewer,
         
-        # Settings
-        "endpoint_id": endpoint_id,
-        "api_key": api_key,
-        "s3_bucket": s3_bucket,
-        "s3_region": s3_region,
+        # Settings (populated from Settings page - these are just placeholders)
+        "endpoint_id": gr.State(default_endpoint_id),
+        "api_key": gr.State(default_api_key),
+        "s3_bucket": gr.State("arkrunr"),
+        "s3_region": gr.State("us-west-1"),
+        
+        # Legacy compatibility (for old handlers)
+        "video_path": gr.State(""),
+        "video_upload": video_uploads,
+        "video_dropdown": video_checkboxes,
+        "gen3c_output_dir": gr.State(GEN3C_DEFAULT_OUTPUT_DIR),
+        "video_info": gr.State(""),
     }
 
 

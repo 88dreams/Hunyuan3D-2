@@ -42,6 +42,17 @@ CHECKPOINT_DIR = os.environ.get("GEN3C_CHECKPOINT_DIR", "/workspace/checkpoints"
 
 # LTX-2 Configuration
 LTX2_MODEL_ID = os.environ.get("LTX2_MODEL_ID", "Lightricks/LTX-Video")
+LTX2_MODEL_VARIANTS = {
+    # High-quality full-precision
+    "19b-dev": "Lightricks/ltx-2-19b-dev",
+    # Recommended for 24 GB GPUs (default)
+    "19b-dev-fp8": "Lightricks/ltx-2-19b-dev-fp8",
+    # Memory-constrained
+    "19b-dev-fp4": "Lightricks/ltx-2-19b-dev-fp4",
+    # Fastest, lower quality
+    "19b-distilled": "Lightricks/ltx-2-19b-distilled",
+}
+LTX2_DEFAULT_VARIANT = os.environ.get("LTX2_DEFAULT_VARIANT", "19b-dev-fp8")
 LTX2_CHECKPOINT_DIR = os.environ.get("LTX2_CHECKPOINT_DIR", "/runpod-volume/checkpoints/ltx2")
 
 # LTX-2 Camera Control LoRAs
@@ -400,6 +411,7 @@ _sharp_validated = False
 _ltx2_validated = False
 _ltx2_pipeline = None
 _ltx2_current_lora = None
+_ltx2_loaded_model_id: Optional[str] = None
 
 
 def validate_gen3c():
@@ -1749,14 +1761,17 @@ def validate_ltx2() -> bool:
         return False
 
 
-def load_ltx2_model():
-    """Load LTX-2 pipeline (lazy initialization)."""
-    global _ltx2_pipeline
-    
-    if _ltx2_pipeline is not None:
+def load_ltx2_model(model_variant: Optional[str] = None):
+    """Load LTX-2 pipeline (lazy initialization, with model variant)."""
+    global _ltx2_pipeline, _ltx2_loaded_model_id
+
+    target_model_id = LTX2_MODEL_VARIANTS.get(model_variant or LTX2_DEFAULT_VARIANT, LTX2_MODEL_ID)
+
+    # Re-use if already loaded and matches target
+    if _ltx2_pipeline is not None and _ltx2_loaded_model_id == target_model_id:
         return _ltx2_pipeline
-    
-    logger.info("Loading LTX-2 model...")
+
+    logger.info(f"Loading LTX-2 model (variant={model_variant or LTX2_DEFAULT_VARIANT}, id={target_model_id})...")
     import time
     start_time = time.time()
     
@@ -1765,7 +1780,7 @@ def load_ltx2_model():
         from diffusers import LTXPipeline
         
         _ltx2_pipeline = LTXPipeline.from_pretrained(
-            LTX2_MODEL_ID,
+            target_model_id,
             torch_dtype=torch.bfloat16,
             cache_dir=LTX2_CHECKPOINT_DIR
         )
@@ -1778,6 +1793,7 @@ def load_ltx2_model():
             logger.warning(f"Could not enable CPU offload: {e}")
         
         load_time = time.time() - start_time
+        _ltx2_loaded_model_id = target_model_id
         logger.info(f"LTX-2 model loaded in {load_time:.1f}s")
         
         return _ltx2_pipeline
@@ -1831,6 +1847,7 @@ def run_ltx2(
     prompt: str = "",
     negative_prompt: str = "",
     camera_motion: str = "none",
+    model_variant: Optional[str] = None,
     num_frames: int = 97,
     width: int = 768,
     height: int = 512,
@@ -1867,7 +1884,7 @@ def run_ltx2(
     start_time = time.time()
     
     # Load model
-    pipe = load_ltx2_model()
+    pipe = load_ltx2_model(model_variant=model_variant)
     
     # Load camera LoRA if specified
     load_ltx2_camera_lora(camera_motion)
@@ -1947,6 +1964,7 @@ def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool
     prompt = job_input.get("prompt", "")
     negative_prompt = job_input.get("negative_prompt", "")
     camera_motion = job_input.get("camera_motion", "none")
+    model_variant = job_input.get("model_variant", LTX2_DEFAULT_VARIANT)
     num_frames = int(job_input.get("num_frames", 97))
     width = int(job_input.get("width", 768))
     height = int(job_input.get("height", 512))
@@ -1960,6 +1978,11 @@ def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool
         return {
             "status": "error",
             "message": f"Invalid camera_motion '{camera_motion}'. Valid: {LTX2_VALID_CAMERA_MOTIONS}"
+        }
+    if model_variant not in LTX2_MODEL_VARIANTS and model_variant != LTX2_DEFAULT_VARIANT:
+        return {
+            "status": "error",
+            "message": f"Invalid model_variant '{model_variant}'. Valid: {list(LTX2_MODEL_VARIANTS.keys())}"
         }
     
     # Validate dimensions (must be divisible by 32)
@@ -1985,6 +2008,7 @@ def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool
             prompt=prompt,
             negative_prompt=negative_prompt,
             camera_motion=camera_motion,
+            model_variant=model_variant,
             num_frames=num_frames,
             width=width,
             height=height,

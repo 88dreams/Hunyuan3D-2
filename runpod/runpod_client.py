@@ -11,7 +11,7 @@ import requests
 import time
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass
 from enum import Enum
 
@@ -2683,6 +2683,7 @@ class LTX2ServerlessClient:
         prompt: str = "",
         negative_prompt: str = "",
         camera_motion: str = "dolly_out",
+        model_variant: str = "19b-dev-fp8",
         num_frames: int = 97,
         width: int = 768,
         height: int = 512,
@@ -2735,6 +2736,7 @@ class LTX2ServerlessClient:
             "prompt": prompt,
             "negative_prompt": negative_prompt,
             "camera_motion": camera_motion,
+            "model_variant": model_variant,
             "num_frames": num_frames,
             "width": width,
             "height": height,
@@ -2833,6 +2835,7 @@ class LTX2ServerlessClient:
         prompt: str = "",
         negative_prompt: str = "",
         camera_motion: str = "dolly_out",
+        model_variant: str = "19b-dev-fp8",
         num_frames: int = 97,
         width: int = 768,
         height: int = 512,
@@ -2884,6 +2887,11 @@ class LTX2ServerlessClient:
                 success=False,
                 error=f"Invalid camera_motion '{camera_motion}'. Valid: {self.VALID_CAMERA_MOTIONS}"
             )
+        if model_variant not in ["19b-dev", "19b-dev-fp8", "19b-dev-fp4", "19b-distilled"]:
+            return LTX2Result(
+                success=False,
+                error="model_variant must be one of ['19b-dev', '19b-dev-fp8', '19b-dev-fp4', '19b-distilled']"
+            )
         
         # Submit job
         logs.append(f"Submitting LTX-2 job...")
@@ -2892,6 +2900,7 @@ class LTX2ServerlessClient:
             prompt=prompt,
             negative_prompt=negative_prompt,
             camera_motion=camera_motion,
+            model_variant=model_variant,
             num_frames=num_frames,
             width=width,
             height=height,

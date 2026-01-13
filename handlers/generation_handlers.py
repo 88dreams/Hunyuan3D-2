@@ -958,11 +958,22 @@ def handle_2dgs_pipeline(
             
     elif video_source == "Use Gen3C Output":
         if not video_dropdown:
-            return None, {}, "❌ No video selected from Gen3C outputs"
-        local_video_path = str(Path(gen3c_output_dir) / video_dropdown)
+            return None, {}, "❌ No video selected from dropdown"
+        
+        # Handle new format: "[Gen3C] filename.mp4" or "[LTX-2] filename.mp4"
+        if video_dropdown.startswith("[Gen3C] "):
+            filename = video_dropdown.replace("[Gen3C] ", "")
+            local_video_path = str(Path(gen3c_output_dir) / filename)
+        elif video_dropdown.startswith("[LTX-2] "):
+            filename = video_dropdown.replace("[LTX-2] ", "")
+            local_video_path = str(Path("/srv/searidge_share/outputs/ltx2") / filename)
+        else:
+            # Fallback to old format (just filename)
+            local_video_path = str(Path(gen3c_output_dir) / video_dropdown)
+        
         if not Path(local_video_path).exists():
-            return None, {}, f"❌ Gen3C video not found: {local_video_path}"
-        logs.append(f"Using Gen3C video: {local_video_path}")
+            return None, {}, f"❌ Video not found: {local_video_path}"
+        logs.append(f"Using video: {local_video_path}")
     
     # Upload to S3 if local file
     if local_video_path and not video_url:
@@ -1052,13 +1063,42 @@ def handle_2dgs_pipeline(
 def list_gen3c_videos(output_dir: str) -> list:
     """List MP4 videos in the Gen3C output directory."""
     from pathlib import Path
-    
+
     output_path = Path(output_dir)
     if not output_path.exists():
         return []
-    
+
     videos = sorted(output_path.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
     return [v.name for v in videos[:20]]  # Return 20 most recent
+
+
+def list_all_videos(gen3c_dir: str = "/srv/searidge_share/outputs/gen3c",
+                    ltx2_dir: str = "/srv/searidge_share/outputs/ltx2") -> list:
+    """List MP4 videos from both Gen3C and LTX-2 output directories.
+    
+    Returns list of tuples: (display_name, full_path)
+    """
+    from pathlib import Path
+    
+    videos = []
+    
+    # Scan Gen3C directory
+    gen3c_path = Path(gen3c_dir)
+    if gen3c_path.exists():
+        for v in gen3c_path.glob("*.mp4"):
+            videos.append((f"[Gen3C] {v.name}", str(v)))
+    
+    # Scan LTX-2 directory
+    ltx2_path = Path(ltx2_dir)
+    if ltx2_path.exists():
+        for v in ltx2_path.glob("*.mp4"):
+            videos.append((f"[LTX-2] {v.name}", str(v)))
+    
+    # Sort by modification time (newest first)
+    videos.sort(key=lambda x: Path(x[1]).stat().st_mtime, reverse=True)
+    
+    # Return top 30 most recent
+    return videos[:30]
 
 
 def get_video_info(video_path: str) -> str:
