@@ -2656,6 +2656,80 @@ class LTX2ServerlessClient:
             "Content-Type": "application/json"
         }
     
+    def _upload_to_s3(
+        self,
+        file_path: str,
+        bucket: str,
+        s3_key: str,
+        region: str
+    ) -> Optional[str]:
+        """Upload file to S3 and return URL."""
+        try:
+            import boto3
+            import os
+            from dotenv import load_dotenv
+            
+            load_dotenv()
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=region,
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            )
+            
+            # Upload
+            s3_client.upload_file(file_path, bucket, s3_key)
+            
+            # Return URL
+            url = f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            return url
+            
+        except Exception as e:
+            print(f"S3 upload error: {e}")
+            return None
+    
+    def _download_from_s3(
+        self,
+        s3_url: str,
+        local_path: str,
+        region: str = "us-west-1"
+    ) -> bool:
+        """Download file from S3 URL."""
+        try:
+            import boto3
+            from urllib.parse import urlparse
+            import os
+            from dotenv import load_dotenv
+            
+            load_dotenv()
+            
+            # Parse URL
+            parsed = urlparse(s3_url)
+            if ".s3." in parsed.netloc:
+                bucket = parsed.netloc.split(".s3.")[0]
+            else:
+                bucket = "arkrunr"
+            key = parsed.path.lstrip("/")
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=region,
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            )
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            
+            # Download
+            s3_client.download_file(bucket, key, local_path)
+            return True
+            
+        except Exception as e:
+            print(f"S3 download error: {e}")
+            return False
+    
     def health_check(self) -> Dict[str, Any]:
         """Check endpoint health."""
         try:
@@ -2721,8 +2795,10 @@ class LTX2ServerlessClient:
         
         # Upload input image to S3
         try:
-            s3_key = f"MediaContent/inputs/ltx2/{os.path.basename(image_path)}"
-            image_url = upload_file_to_s3(
+            import time as time_module
+            timestamp = int(time_module.time())
+            s3_key = f"MediaContent/inputs/ltx2/{timestamp}_{os.path.basename(image_path)}"
+            image_url = self._upload_to_s3(
                 image_path, s3_bucket, s3_key, s3_region
             )
             if not image_url:
