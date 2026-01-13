@@ -29,7 +29,7 @@ This document summarizes the work completed and provides context for new convers
 
 ## Current Work In Progress
 
-### 2DGS Pipeline: ViPE + 2DGS (January 11, 2026)
+### 2DGS Pipeline: ViPE + 2DGS (January 11-12, 2026)
 
 **Goal**: Convert Gen3C video output into 3D mesh using video pose estimation and 2D Gaussian Splatting.
 
@@ -39,6 +39,7 @@ This document summarizes the work completed and provides context for new convers
 3. **Point Cloud Generator** creates initial 3D points from depth maps
 4. **2DGS Training** produces Gaussian splats from video frames
 5. **Mesh Extraction** via marching cubes
+6. **Post-processing**: 180° X-axis rotation to correct mesh orientation
 
 **Current Status**: ✅ **WORKING** (v20) - Successfully generates 36MB+ meshes with 727K+ vertices
 
@@ -81,7 +82,23 @@ This document summarizes the work completed and provides context for new convers
 
 ## Recent Work Completed
 
-### 1. 2DGS Pipeline Development (Current Session - Jan 11, 2026)
+### 1. UI Improvements & Mesh Orientation Fix (Jan 12, 2026)
+
+**UI Changes:**
+- Settings page: 4-column layout with stacked Test/Save buttons
+- Added 2DGS Pipeline endpoint to Settings page
+- Moved Logs accordions inside left column for consistent width
+- Fixed Gen3C and 2DGS to update global output path display
+- Removed emoji from 2DGS Generate button
+- Hidden FP16 option on Hunyuan page, defaulted to "full" model
+
+**2DGS Mesh Orientation Fix:**
+- Added 180° X-axis rotation to correct mesh orientation after download
+- Meshes from 2DGS pipeline were rotated vs original video frames
+- Rotation applied automatically in `TwoDGSPipelineClient.generate_sync()`
+- Added `scripts/test_mesh_rotation.py` for manual testing
+
+### 2. 2DGS Pipeline Development (Jan 11, 2026)
 
 Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstruction:
 
@@ -91,7 +108,7 @@ Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstructio
 - Added missing dependencies (mediapy, scikit-image)
 - Created test script with S3 upload support
 
-### 2. SHARP Video Rendering (Previous Session)
+### 3. SHARP Video Rendering (Previous Session)
 
 **Problem**: SHARP's `--render` flag for video generation was intermittently failing.
 
@@ -158,6 +175,7 @@ docker push 88dreams/2dgs-pipeline:vXX
 | `runpod/2dgs-pipeline/vipe_to_2dgs.py` | ViPE → COLMAP format converter |
 | `runpod/2dgs-pipeline/init_points_from_depth.py` | Point cloud from depth maps |
 | `scripts/test_2dgs_pipeline.py` | Test script with S3 upload |
+| `scripts/test_mesh_rotation.py` | Test 180° X-axis rotation on mesh files |
 
 ### Unified Handler
 | File | Purpose |
@@ -225,6 +243,7 @@ RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py --health
 ### 1. 2DGS Pipeline (v20) ✅ COMPLETE
 - Successfully generates high-quality meshes from Gen3C video
 - Auto-downloads to `/srv/searidge_share/outputs/mesh_2dgs/`
+- **Mesh orientation fix**: 180° X-axis rotation applied automatically after download
 
 ### 2. Lyra Integration
 - SDG step takes 60-90 minutes
@@ -265,5 +284,5 @@ RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py --health
 
 ---
 
-*Last Updated: January 12, 2026*
+*Last Updated: January 12, 2026 (evening)*
 

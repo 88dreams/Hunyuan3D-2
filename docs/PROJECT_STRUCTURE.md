@@ -1,6 +1,6 @@
 # ARKRUNR WORLDS - Project Structure
 
-**Last Updated:** January 11, 2026
+**Last Updated:** January 12, 2026
 
 This document describes the structure of the ARKRUNR WORLDS project, a multi-model 3D generation system built on top of Hunyuan3D-2.
 
@@ -28,7 +28,7 @@ Hunyuan3D-2-Fork/
 ## Core Application Files
 
 ### `app_sidebar.py`
-**Main entry point** - The primary Gradio application with sidebar navigation (~2,070 lines).
+**Main entry point** - The primary Gradio application with sidebar navigation (~2,380 lines).
 
 - **Purpose**: Unified UI for all 3D generation models
 - **Key Features**:
@@ -144,7 +144,7 @@ Individual tab implementations (legacy, mostly integrated into `app_sidebar.py`)
 | `trellis_tab.py` | TRELLIS.2 tab |
 | `hunyuan_tab.py` | Hunyuan3D tab |
 | `mesh_extraction_tab.py` | Mesh cleanup/extraction tab |
-| `create_tab.py` | Create tab component |
+| `create_tab.py` | 2DGS Pipeline tab (video → mesh) |
 | `placeholder_tabs.py` | Placeholder tabs for future features |
 
 ### `ui/styles.py`
@@ -157,12 +157,13 @@ CSS styles and color palette for the Gradio UI.
 ### Client Library
 
 #### `runpod/runpod_client.py`
-**Primary client** for RunPod API interactions.
+**Primary client** for RunPod API interactions (~2,090 lines).
 
 - **Classes**:
   - `RunPodGEN3CClient` - Pod-based API client
   - `RunPodServerlessClient` - Serverless endpoint client
   - `UnifiedServerlessClient` - Multi-model serverless client (recommended)
+  - `TwoDGSPipelineClient` - 2DGS pipeline client (video → mesh)
 - **Key Methods**:
   - `submit_*_job()` - Submit jobs for each model
   - `generate_*_sync()` - Synchronous job execution with polling
@@ -171,6 +172,7 @@ CSS styles and color palette for the Gradio UI.
   - S3 upload/download for large files
   - Base64 encoding for small files
   - Automatic timeout handling
+  - 180° X-axis mesh rotation correction for 2DGS outputs
 
 ### Docker Images
 
@@ -246,6 +248,7 @@ Combined serverless endpoint for video-to-mesh reconstruction:
 | `vipe_to_2dgs.py` | Convert ViPE output to 2DGS COLMAP format |
 | `test_2dgs_pipeline.py` | Test script for 2dgs-pipeline endpoint |
 | `test_vipe.py` | Test script for ViPE endpoint |
+| `test_mesh_rotation.py` | Test 180° X-axis rotation on mesh files |
 
 ---
 
