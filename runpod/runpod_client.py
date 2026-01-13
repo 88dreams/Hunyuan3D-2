@@ -1843,6 +1843,47 @@ class TwoDGSPipelineClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    def _rotate_mesh_180_x(self, mesh_path: str, logs: list) -> str:
+        """
+        Rotate mesh 180 degrees around X axis to correct orientation.
+        
+        The 2DGS pipeline outputs meshes rotated 180° on X axis compared
+        to the original video frames. This corrects that orientation.
+        
+        Args:
+            mesh_path: Path to the mesh file
+            logs: List to append log messages to
+            
+        Returns:
+            Path to the rotated mesh (same path, overwritten)
+        """
+        import trimesh
+        import numpy as np
+        
+        logs.append("Applying 180° X-axis rotation to correct orientation...")
+        
+        # Load the mesh
+        mesh = trimesh.load(mesh_path)
+        
+        # Create 180-degree rotation matrix around X axis
+        # cos(180°) = -1, sin(180°) = 0
+        # This flips Y and Z while keeping X the same
+        rotation_matrix = np.array([
+            [ 1,  0,  0,  0],
+            [ 0, -1,  0,  0],
+            [ 0,  0, -1,  0],
+            [ 0,  0,  0,  1]
+        ])
+        
+        # Apply rotation
+        mesh.apply_transform(rotation_matrix)
+        
+        # Export back to same file
+        mesh.export(mesh_path)
+        
+        logs.append(f"✅ Mesh rotated 180° on X-axis: {mesh_path}")
+        return mesh_path
+    
     def wait_for_completion(
         self,
         job_id: str,
@@ -1971,6 +2012,12 @@ class TwoDGSPipelineClient:
                     
                     file_size = os.path.getsize(output_path)
                     logs.append(f"✅ Downloaded: {output_path} ({file_size / 1024 / 1024:.2f} MB)")
+                    
+                    # Apply 180° X-axis rotation to correct orientation from 2DGS pipeline
+                    try:
+                        output_path = self._rotate_mesh_180_x(output_path, logs)
+                    except Exception as e:
+                        logs.append(f"⚠️ Rotation skipped: {e}")
                 except Exception as e:
                     logs.append(f"❌ Download failed: {e}")
                     logs.append(f"Manual download: {mesh_url}")

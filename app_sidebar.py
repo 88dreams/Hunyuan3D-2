@@ -174,6 +174,8 @@ DEFAULT_HUNYUAN_ENDPOINT = _runpod_config.get("hunyuan_endpoint_id", "")
 DEFAULT_HUNYUAN_API_KEY = _runpod_config.get("hunyuan_api_key", DEFAULT_GEN3C_API_KEY)
 DEFAULT_MESH_ENDPOINT = _runpod_config.get("mesh_extraction_endpoint_id", DEFAULT_GEN3C_ENDPOINT)
 DEFAULT_MESH_API_KEY = _runpod_config.get("mesh_extraction_api_key", DEFAULT_GEN3C_API_KEY)
+DEFAULT_2DGS_ENDPOINT = _runpod_config.get("2dgs_endpoint_id", "s9txp6edtf2vg4")
+DEFAULT_2DGS_API_KEY = _runpod_config.get("2dgs_api_key", DEFAULT_GEN3C_API_KEY)
 
 
 # =============================================================================
@@ -342,6 +344,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     sharp_generate_btn = gr.Button("Generate PLY", variant="primary", size="lg")
                                     sharp_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                    
+                                    with gr.Accordion("📋 Logs", open=False):
+                                        sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
                                     sharp_3d_viewer = gr.Model3D(
@@ -349,9 +354,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         height=400,
                                         clear_color=[0.1, 0.1, 0.1, 1.0],
                                     )
-                            
-                            with gr.Accordion("📋 Logs", open=False):
-                                sharp_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                         
                         # TAB: Render Video
                         with gr.Tab("Render Video"):
@@ -419,32 +421,32 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     sharp_render_video_btn = gr.Button("Render Video", variant="primary", size="lg")
                                     sharp_video_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                    
+                                    with gr.Accordion("📋 Trajectory Types Explained", open=False):
+                                        gr.Markdown("""
+                                        | Type | Description |
+                                        |------|-------------|
+                                        | **rotate_forward** | Circular rotation with forward zoom (default, best for most scenes) |
+                                        | **rotate** | Pure circular rotation around the scene center |
+                                        | **swipe** | Left-to-right horizontal pan |
+                                        | **shake** | Horizontal shake followed by vertical shake |
+                                        
+                                        **Parameters:**
+                                        - **Frames**: Total frames in video (60 = ~2s at 30fps)
+                                        - **Repeats**: How many times to loop the trajectory
+                                        - **Lateral Offset**: How far camera moves sideways (higher = more dramatic)
+                                        - **Zoom/Forward**: How far camera moves forward (higher = more zoom effect)
+                                        - **Look-At Mode**: "point" keeps camera focused on scene center, "ahead" looks straight ahead
+                                        """)
+                                    
+                                    with gr.Accordion("📋 Logs", open=False):
+                                        sharp_video_logs = gr.Textbox(label="Render Logs", lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
                                     sharp_video_preview = gr.Video(
                                         label="Video Preview",
                                         height=400,
                                     )
-                            
-                            with gr.Accordion("📋 Trajectory Types Explained", open=False):
-                                gr.Markdown("""
-                                | Type | Description |
-                                |------|-------------|
-                                | **rotate_forward** | Circular rotation with forward zoom (default, best for most scenes) |
-                                | **rotate** | Pure circular rotation around the scene center |
-                                | **swipe** | Left-to-right horizontal pan |
-                                | **shake** | Horizontal shake followed by vertical shake |
-                                
-                                **Parameters:**
-                                - **Frames**: Total frames in video (60 = ~2s at 30fps)
-                                - **Repeats**: How many times to loop the trajectory
-                                - **Lateral Offset**: How far camera moves sideways (higher = more dramatic)
-                                - **Zoom/Forward**: How far camera moves forward (higher = more zoom effect)
-                                - **Look-At Mode**: "point" keeps camera focused on scene center, "ahead" looks straight ahead
-                                """)
-                            
-                            with gr.Accordion("📋 Logs", open=False):
-                                sharp_video_logs = gr.Textbox(label="Render Logs", lines=8, interactive=False)
                 
                 # PAGE: GEN3C
                 with gr.TabItem("GEN3C", id="gen3c"):
@@ -494,6 +496,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             gen3c_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
                             gen3c_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            
+                            with gr.Accordion("📋 Logs", open=False):
+                                gen3c_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
                             gen3c_video_viewer = gr.Video(
@@ -502,9 +507,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 autoplay=True,
                                 loop=True,
                             )
-                    
-                    with gr.Accordion("📋 Logs", open=False):
-                        gen3c_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                 
                 # PAGE: LYRA
                 with gr.TabItem("Lyra", id="lyra"):
@@ -545,6 +547,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     lyra_generate_btn = gr.Button("Generate 3DGS", variant="primary", size="lg")
                                     lyra_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                    
+                                    with gr.Accordion("📋 Logs", open=False):
+                                        lyra_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
                                     lyra_3d_viewer = gr.Model3D(
@@ -552,9 +557,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         height=400,
                                         clear_color=[0.1, 0.1, 0.1, 1.0],
                                     )
-                            
-                            with gr.Accordion("📋 Logs", open=False):
-                                lyra_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Tab("Post-Process"):
                             gr.Markdown("### Convert Lyra PLY Output")
@@ -595,6 +597,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             
                             trellis_generate_btn = gr.Button("Generate 3D", variant="primary", size="lg")
                             trellis_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            
+                            with gr.Accordion("📋 Logs", open=False):
+                                trellis_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
                             trellis_3d_viewer = gr.Model3D(
@@ -602,9 +607,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 height=400,
                                 clear_color=[0.1, 0.1, 0.1, 1.0],
                             )
-                    
-                    with gr.Accordion("📋 Logs", open=False):
-                        trellis_logs = gr.Textbox(lines=8, interactive=False)
                 
                 # PAGE: HUNYUAN3D
                 with gr.TabItem("Hunyuan3D", id="hunyuan"):
@@ -619,7 +621,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                         with gr.Column(scale=1):
                             hunyuan_model = gr.Dropdown(
                                 ["mini", "full"], 
-                                value="mini", 
+                                value="full", 
                                 label="Model",
                                 info="mini: faster (2-5 min), full: higher quality (5-15 min)"
                             )
@@ -644,6 +646,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             hunyuan_exec_mode = gr.Radio(["RunPod Serverless", "Local"], value="RunPod Serverless", label="Mode", visible=False)
                             hunyuan_generate_btn = gr.Button("Generate Mesh", variant="primary", size="lg")
                             hunyuan_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                            
+                            with gr.Accordion("📋 Logs", open=False):
+                                hunyuan_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
                             hunyuan_3d_viewer = gr.Model3D(
@@ -651,9 +656,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 height=400,
                                 clear_color=[0.1, 0.1, 0.1, 1.0],
                             )
-                    
-                    with gr.Accordion("📋 Logs", open=False):
-                        hunyuan_logs = gr.Textbox(lines=8, interactive=False)
                 
                 # PAGE: MESH EXTRACTION
                 with gr.TabItem("Mesh", id="mesh"):
@@ -710,6 +712,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     
                                     mesh_extract_btn = gr.Button("Extract Mesh", variant="primary", size="lg")
                                     mesh_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                    
+                                    with gr.Accordion("📋 Logs", open=False):
+                                        mesh_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
                                     mesh_3d_viewer = gr.Model3D(
@@ -717,9 +722,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         height=400,
                                         clear_color=[0.1, 0.1, 0.1, 1.0],
                                     )
-                            
-                            with gr.Accordion("📋 Logs", open=False):
-                                mesh_logs = gr.Textbox(lines=8, interactive=False)
                         
                         with gr.Tab("Cleanup"):
                             gr.Markdown("### Clean Up Generated Meshes")
@@ -785,6 +787,9 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         cleanup_analyze_btn = gr.Button("Analyze", variant="secondary", size="lg")
                                         cleanup_run_btn = gr.Button("Clean Up", variant="primary", size="lg")
                                     cleanup_status = gr.Textbox(value="Ready", label="Status", interactive=False)
+                                    
+                                    with gr.Accordion("📋 Cleanup Log", open=False):
+                                        cleanup_logs = gr.Textbox(lines=8, interactive=False)
                                 
                                 with gr.Column(scale=1):
                                     gr.Markdown("### 3D Preview")
@@ -806,9 +811,6 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                         interactive=False,
                                         placeholder="Click 'Analyze' to inspect mesh...",
                                     )
-                            
-                            with gr.Accordion("📋 Cleanup Log", open=False):
-                                cleanup_logs = gr.Textbox(lines=8, interactive=False)
                 
                 # PAGE: 2DGS (Video → Mesh Pipeline)
                 with gr.TabItem("2DGS", id="create"):
@@ -837,47 +839,43 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.Markdown("### RunPod Endpoints")
                     gr.Markdown("Configure API credentials for each model. Credentials are saved locally.")
                     
-                    # Row 1: Gen3C/Sharp/Lyra and TRELLIS
+                    # All endpoints in one row with narrower columns
                     with gr.Row(elem_classes=["settings-row"]):
-                        with gr.Column(scale=1, min_width=300):
+                        with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
                                 gr.Markdown("**GEN3C / SHARP / Lyra**")
                                 settings_gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
                                 settings_gen3c_key = gr.Textbox(value=DEFAULT_GEN3C_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    settings_gen3c_test = gr.Button("Test", size="sm")
-                                    settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_gen3c_test = gr.Button("Test", size="sm")
+                                settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_gen3c_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                         
-                        with gr.Column(scale=1, min_width=300):
+                        with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
                                 gr.Markdown("**TRELLIS.2**")
                                 settings_trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint ID")
                                 settings_trellis_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    settings_trellis_test = gr.Button("Test", size="sm")
-                                    settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_trellis_test = gr.Button("Test", size="sm")
+                                settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_trellis_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
-                    
-                    # Row 2: Hunyuan and AWS
-                    with gr.Row(elem_classes=["settings-row"]):
-                        with gr.Column(scale=1, min_width=300):
+                        
+                        with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
                                 gr.Markdown("**Hunyuan3D**")
                                 settings_hunyuan_endpoint = gr.Textbox(value=DEFAULT_HUNYUAN_ENDPOINT, label="Endpoint ID")
                                 settings_hunyuan_key = gr.Textbox(value=DEFAULT_HUNYUAN_API_KEY, label="API Key", type="password")
-                                with gr.Row():
-                                    settings_hunyuan_test = gr.Button("Test", size="sm")
-                                    settings_hunyuan_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_hunyuan_test = gr.Button("Test", size="sm")
+                                settings_hunyuan_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_hunyuan_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                         
-                        with gr.Column(scale=1, min_width=300):
+                        with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
-                                gr.Markdown("**AWS S3**")
-                                aws_configured = "Configured" if os.environ.get("AWS_ACCESS_KEY_ID") else "Not configured"
-                                gr.Textbox(value=aws_configured, label="Status", interactive=False)
-                                gr.Markdown("S3 for files >30MB. Configure in:")
-                                gr.Markdown("`~/.config/3d_studio/aws_credentials.env`")
+                                gr.Markdown("**2DGS Pipeline**")
+                                settings_2dgs_endpoint = gr.Textbox(value=DEFAULT_2DGS_ENDPOINT, label="Endpoint ID")
+                                settings_2dgs_key = gr.Textbox(value=DEFAULT_2DGS_API_KEY, label="API Key", type="password")
+                                settings_2dgs_test = gr.Button("Test", size="sm")
+                                settings_2dgs_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_2dgs_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                 
                 # PAGE: UPDATE
                 with gr.TabItem("Update", id="update"):
@@ -1770,8 +1768,14 @@ Min Component Ratio: 1% (default)
     # GEN3C EVENT HANDLERS
     # =========================================================================
     
+    def gen3c_generate_with_output(*args):
+        """Wrapper that returns output path for display."""
+        result = handle_gen3c_generation(*args)
+        output_path, logs, progress = result
+        return output_path, output_path, logs, progress
+    
     gen3c_generate_btn.click(
-        fn=handle_gen3c_generation,
+        fn=gen3c_generate_with_output,
         inputs=[
             input_image, image_scale, gr.State("RunPod Serverless"),
             settings_gen3c_endpoint, settings_gen3c_key,
@@ -1781,7 +1785,7 @@ Min Component Ratio: 1% (default)
             gen3c_video_name, gen3c_seed, gen3c_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[gen3c_video_viewer, gen3c_logs, gen3c_progress],
+        outputs=[output_display, gen3c_video_viewer, gen3c_logs, gen3c_progress],
     )
     
     # =========================================================================
@@ -2129,7 +2133,7 @@ Min Component Ratio: 1% (default)
                     print(f"[2DGS] Preview conversion failed: {e}")
                     preview_path = None
         
-        return output_path, stats, status, preview_path
+        return output_path, output_path, stats, status, preview_path
     
     twodgs_components["generate_btn"].click(
         fn=run_2dgs_pipeline_with_preview,
@@ -2149,6 +2153,7 @@ Min Component Ratio: 1% (default)
             twodgs_components["s3_region"],
         ],
         outputs=[
+            output_display,
             twodgs_components["output_file"],
             twodgs_components["output_stats"],
             twodgs_components["status_text"],
@@ -2194,6 +2199,18 @@ Min Component Ratio: 1% (default)
         fn=lambda e, k: save_serverless_credentials(e, k, "hunyuan")[0],
         inputs=[settings_hunyuan_endpoint, settings_hunyuan_key],
         outputs=[settings_hunyuan_status],
+    )
+    
+    settings_2dgs_test.click(
+        fn=check_serverless_status,
+        inputs=[settings_2dgs_endpoint, settings_2dgs_key],
+        outputs=[settings_2dgs_status],
+    )
+    
+    settings_2dgs_save.click(
+        fn=lambda e, k: save_serverless_credentials(e, k, "2dgs")[0],
+        inputs=[settings_2dgs_endpoint, settings_2dgs_key],
+        outputs=[settings_2dgs_status],
     )
     
     # =========================================================================

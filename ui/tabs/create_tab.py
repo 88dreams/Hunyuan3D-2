@@ -140,7 +140,7 @@ def create_2dgs_tab(
                 )
             
             generate_btn = gr.Button(
-                "🚀 Generate 3D Mesh",
+                "Generate 3D Mesh",
                 variant="primary",
                 size="lg",
             )
