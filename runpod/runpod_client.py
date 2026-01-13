@@ -2053,6 +2053,955 @@ class TwoDGSPipelineClient:
             )
 
 
+# =============================================================================
+# SEVA (Stable Virtual Camera) CLIENT
+# =============================================================================
+
+class SEVAServerlessClient:
+    """
+    Client for the SEVA (Stable Virtual Camera) serverless endpoint.
+    
+    Generates novel view videos from single images with precise camera control.
+    
+    Supported trajectories:
+        - orbit: 360° rotation around subject
+        - pan: Horizontal camera movement  
+        - tilt: Vertical camera angle change
+        - spiral: Spiral path around subject
+        - zoom-out: Camera moves backward
+        - dolly-zoom-out: Vertigo/Hitchcock effect
+        - arc: Curved path
+        - crane: Vertical + horizontal movement
+        - left, right, up, down: Simple directional movements
+        - custom: User-defined camera poses (C2W matrices)
+    """
+    
+    RUNPOD_API_BASE = "https://api.runpod.ai/v2"
+    DEFAULT_ENDPOINT_ID = ""  # Set when endpoint is created
+    
+    VALID_TRAJECTORIES = [
+        "orbit", "pan", "tilt", "spiral", 
+        "zoom-out", "dolly-zoom-out", "arc", "crane",
+        "left", "right", "up", "down",
+        "custom"
+    ]
+    
+    def __init__(
+        self, 
+        endpoint_id: str = "", 
+        api_key: str = "",
+        timeout: int = 30
+    ):
+        """
+        Initialize the SEVA client.
+        
+        Args:
+            endpoint_id: RunPod serverless endpoint ID
+            api_key: Your RunPod API key
+            timeout: Request timeout in seconds
+        """
+        self.endpoint_id = endpoint_id or self.DEFAULT_ENDPOINT_ID
+        self.api_key = api_key
+        self.timeout = timeout
+        self.base_url = f"{self.RUNPOD_API_BASE}/{self.endpoint_id}"
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def health_check(self) -> Dict[str, Any]:
+        """Check endpoint health."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "status": "healthy",
+                    "workers": data.get("workers", {}),
+                    "jobs": data.get("jobs", {}),
+                    "endpoint_id": self.endpoint_id
+                }
+            else:
+                return {"status": "error", "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    def submit_job(
+        self,
+        image_path: str,
+        trajectory: str = "orbit",
+        duration: float = 5.0,
+        fps: int = 24,
+        num_frames: Optional[int] = None,
+        custom_poses: Optional[List] = None,
+        seed: Optional[int] = None,
+        output_name: str = "seva_output",
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1"
+    ) -> Dict[str, Any]:
+        """
+        Submit a SEVA job.
+        
+        Args:
+            image_path: Path to input image (will be uploaded to S3)
+            trajectory: Camera trajectory type
+            duration: Video duration in seconds (1-30)
+            fps: Frames per second (12-60)
+            num_frames: Override frame count (ignores duration if set)
+            custom_poses: List of 4x4 C2W matrices for custom trajectory
+            seed: Random seed for reproducibility
+            output_name: Name for output file (without extension)
+            s3_bucket: S3 bucket for input/output
+            s3_region: S3 region
+            
+        Returns:
+            Dict with job_id and status
+        """
+        # Validate trajectory
+        if trajectory not in self.VALID_TRAJECTORIES:
+            return {
+                "status": "error", 
+                "error": f"Invalid trajectory '{trajectory}'. Valid: {self.VALID_TRAJECTORIES}"
+            }
+        
+        # Validate parameters
+        duration = max(1.0, min(30.0, duration))
+        fps = max(12, min(60, fps))
+        
+        # Upload image to S3
+        image_url = self._upload_to_s3(image_path, s3_bucket, s3_region)
+        if not image_url:
+            return {"status": "error", "error": "Failed to upload image to S3"}
+        
+        # Build payload
+        payload = {
+            "input": {
+                "image_url": image_url,
+                "trajectory": trajectory,
+                "duration": duration,
+                "fps": fps,
+                "output_name": output_name,
+                "return_base64": False  # We'll download from S3
+            }
+        }
+        
+        if num_frames is not None:
+            payload["input"]["num_frames"] = num_frames
+        if custom_poses is not None:
+            payload["input"]["custom_poses"] = custom_poses
+        if seed is not None:
+            payload["input"]["seed"] = seed
+        
+        # Submit job
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return {
+            "job_id": result.get("id", ""),
+            "status": result.get("status", "unknown").lower(),
+            "model": "seva"
+        }
+    
+    def _upload_to_s3(
+        self, 
+        file_path: str, 
+        bucket: str, 
+        region: str
+    ) -> Optional[str]:
+        """Upload file to S3 and return URL."""
+        try:
+            import boto3
+            from pathlib import Path
+            import os
+            from dotenv import load_dotenv
+            
+            load_dotenv()
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=region,
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            )
+            
+            # Generate S3 key
+            filename = Path(file_path).name
+            timestamp = int(time.time())
+            s3_key = f"MediaContent/inputs/seva/{timestamp}_{filename}"
+            
+            # Upload
+            s3_client.upload_file(file_path, bucket, s3_key)
+            
+            # Return URL
+            url = f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            return url
+            
+        except Exception as e:
+            print(f"S3 upload error: {e}")
+            return None
+    
+    def _download_from_s3(
+        self,
+        s3_url: str,
+        local_path: str,
+        region: str = "us-west-1"
+    ) -> bool:
+        """Download file from S3 URL."""
+        try:
+            import boto3
+            from urllib.parse import urlparse
+            import os
+            from dotenv import load_dotenv
+            
+            load_dotenv()
+            
+            # Parse URL
+            parsed = urlparse(s3_url)
+            if ".s3." in parsed.netloc:
+                bucket = parsed.netloc.split(".s3.")[0]
+            else:
+                bucket = "arkrunr"
+            key = parsed.path.lstrip("/")
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=region,
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            )
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            
+            # Download
+            s3_client.download_file(bucket, key, local_path)
+            return True
+            
+        except Exception as e:
+            print(f"S3 download error: {e}")
+            return False
+    
+    def get_status(self, job_id: str) -> Dict[str, Any]:
+        """Get job status."""
+        response = requests.get(
+            f"{self.base_url}/status/{job_id}",
+            headers=self._headers(),
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        runpod_status = result.get("status", "unknown").upper()
+        status_map = {
+            "IN_QUEUE": "pending",
+            "IN_PROGRESS": "running",
+            "COMPLETED": "completed",
+            "FAILED": "failed",
+            "CANCELLED": "failed"
+        }
+        
+        normalized = {
+            "job_id": job_id,
+            "status": status_map.get(runpod_status, "unknown"),
+            "runpod_status": runpod_status
+        }
+        
+        if "logs" in result:
+            normalized["logs"] = result["logs"]
+        
+        if runpod_status == "COMPLETED" and "output" in result:
+            output = result["output"]
+            if isinstance(output, dict):
+                normalized["video_url"] = output.get("video_url")
+                normalized["video_path"] = output.get("video_path")
+                normalized["duration"] = output.get("duration")
+                normalized["fps"] = output.get("fps")
+                normalized["frame_count"] = output.get("frame_count")
+                normalized["trajectory"] = output.get("trajectory")
+                if output.get("status") == "error":
+                    normalized["status"] = "failed"
+                    normalized["error"] = output.get("message")
+        
+        if runpod_status == "FAILED":
+            normalized["error"] = result.get("error", "Unknown error")
+        
+        return normalized
+    
+    def wait_for_completion(
+        self, 
+        job_id: str,
+        poll_interval: int = 10,
+        max_wait: int = 600,
+        progress_callback: Optional[callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Wait for job to complete.
+        
+        Args:
+            job_id: Job ID to poll
+            poll_interval: Seconds between polls
+            max_wait: Maximum wait time in seconds
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Final job status
+        """
+        start_time = time.time()
+        last_status = None
+        
+        while time.time() - start_time < max_wait:
+            status = self.get_status(job_id)
+            
+            if status.get("status") != last_status:
+                last_status = status.get("status")
+                if progress_callback:
+                    elapsed = time.time() - start_time
+                    progress_callback(status, elapsed)
+            
+            if status.get("status") in ["completed", "failed"]:
+                return status
+            
+            time.sleep(poll_interval)
+        
+        return {
+            "job_id": job_id,
+            "status": "timeout",
+            "error": f"Job did not complete within {max_wait} seconds"
+        }
+    
+    def generate_sync(
+        self,
+        image_path: str,
+        output_dir: str = "./outputs/seva",
+        output_name: str = "seva_output",
+        trajectory: str = "orbit",
+        duration: float = 5.0,
+        fps: int = 24,
+        num_frames: Optional[int] = None,
+        custom_poses: Optional[List] = None,
+        seed: Optional[int] = None,
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1",
+        poll_interval: int = 10,
+        max_wait: int = 600,
+        progress_callback: Optional[callable] = None
+    ) -> "SEVAResult":
+        """
+        Generate novel view video synchronously (submit, wait, download).
+        
+        Args:
+            image_path: Path to input image
+            output_dir: Local directory for output
+            output_name: Name for output file (without extension)
+            trajectory: Camera trajectory type
+            duration: Video duration in seconds
+            fps: Frames per second
+            num_frames: Override frame count
+            custom_poses: List of 4x4 C2W matrices for custom trajectory
+            seed: Random seed
+            s3_bucket: S3 bucket
+            s3_region: S3 region  
+            poll_interval: Seconds between status polls
+            max_wait: Maximum wait time in seconds
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            SEVAResult with video path and metadata
+        """
+        start_time = time.time()
+        
+        # Submit job
+        submit_result = self.submit_job(
+            image_path=image_path,
+            trajectory=trajectory,
+            duration=duration,
+            fps=fps,
+            num_frames=num_frames,
+            custom_poses=custom_poses,
+            seed=seed,
+            output_name=output_name,
+            s3_bucket=s3_bucket,
+            s3_region=s3_region
+        )
+        
+        if submit_result.get("status") == "error":
+            return SEVAResult(
+                success=False,
+                error=submit_result.get("error", "Unknown error"),
+                duration_seconds=time.time() - start_time
+            )
+        
+        job_id = submit_result.get("job_id")
+        if not job_id:
+            return SEVAResult(
+                success=False,
+                error="No job ID returned",
+                duration_seconds=time.time() - start_time
+            )
+        
+        # Wait for completion
+        final_status = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        elapsed = time.time() - start_time
+        logs = final_status.get("logs", "")
+        
+        if final_status.get("status") != "completed":
+            return SEVAResult(
+                success=False,
+                error=final_status.get("error", f"Job status: {final_status.get('status')}"),
+                duration_seconds=elapsed,
+                logs=logs
+            )
+        
+        # Download video from S3
+        video_url = final_status.get("video_url")
+        if not video_url:
+            return SEVAResult(
+                success=False,
+                error="No video URL in result",
+                duration_seconds=elapsed,
+                logs=logs
+            )
+        
+        # Create output directory
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        local_path = os.path.join(output_dir, f"{output_name}.mp4")
+        
+        # Download
+        if not self._download_from_s3(video_url, local_path, s3_region):
+            return SEVAResult(
+                success=False,
+                error="Failed to download video from S3",
+                video_url=video_url,
+                duration_seconds=elapsed,
+                logs=logs
+            )
+        
+        return SEVAResult(
+            success=True,
+            video_path=local_path,
+            video_url=video_url,
+            video_duration=final_status.get("duration", duration),
+            fps=final_status.get("fps", fps),
+            frame_count=final_status.get("frame_count"),
+            trajectory=trajectory,
+            duration_seconds=elapsed,
+            logs=logs
+        )
+
+
+class SEVAResult:
+    """Result from SEVA video generation."""
+    
+    def __init__(
+        self,
+        success: bool,
+        video_path: Optional[str] = None,
+        video_url: Optional[str] = None,
+        video_duration: Optional[float] = None,
+        fps: Optional[int] = None,
+        frame_count: Optional[int] = None,
+        trajectory: Optional[str] = None,
+        error: Optional[str] = None,
+        duration_seconds: float = 0,
+        logs: str = ""
+    ):
+        self.success = success
+        self.video_path = video_path
+        self.video_url = video_url
+        self.video_duration = video_duration
+        self.fps = fps
+        self.frame_count = frame_count
+        self.trajectory = trajectory
+        self.error = error
+        self.duration_seconds = duration_seconds
+        self.logs = logs
+    
+    def __repr__(self) -> str:
+        if self.success:
+            return f"SEVAResult(success=True, video_path='{self.video_path}', duration={self.video_duration}s)"
+        else:
+            return f"SEVAResult(success=False, error='{self.error}')"
+
+
+# Default SEVA client
+_seva_client: Optional[SEVAServerlessClient] = None
+
+
+def get_seva_client(
+    endpoint_id: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional[SEVAServerlessClient]:
+    """Get or create the SEVA client."""
+    global _seva_client
+    
+    if endpoint_id and api_key:
+        _seva_client = SEVAServerlessClient(
+            endpoint_id=endpoint_id,
+            api_key=api_key
+        )
+    
+    return _seva_client
+
+
+# =============================================================================
+# LTX-2 CLIENT (Lightricks Video Generation)
+# =============================================================================
+
+class LTX2Result:
+    """Result from LTX-2 video generation."""
+
+    def __init__(
+        self,
+        success: bool,
+        video_path: Optional[str] = None,
+        video_url: Optional[str] = None,
+        num_frames: Optional[int] = None,
+        duration: Optional[float] = None,
+        fps: Optional[int] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        camera_motion: Optional[str] = None,
+        seed: Optional[int] = None,
+        error: Optional[str] = None,
+        duration_seconds: float = 0,
+        logs: str = ""
+    ):
+        self.success = success
+        self.video_path = video_path
+        self.video_url = video_url
+        self.num_frames = num_frames
+        self.duration = duration
+        self.fps = fps
+        self.width = width
+        self.height = height
+        self.camera_motion = camera_motion
+        self.seed = seed
+        self.error = error
+        self.duration_seconds = duration_seconds
+        self.logs = logs
+
+    def __repr__(self) -> str:
+        if self.success:
+            return f"LTX2Result(success=True, video_path='{self.video_path}', duration={self.duration}s)"
+        else:
+            return f"LTX2Result(success=False, error='{self.error}')"
+
+
+class LTX2ServerlessClient:
+    """
+    Client for the LTX-2 serverless endpoint.
+    
+    Generates high-quality videos from images using Lightricks' LTX-2 model.
+    
+    Camera Motion Options:
+        - dolly_left: Camera moves laterally left
+        - dolly_right: Camera moves laterally right
+        - dolly_in: Camera pushes toward subject
+        - dolly_out: Camera pulls away (best for 3D reconstruction)
+        - jib_up: Camera rises vertically
+        - static: No camera movement
+        - none: No camera LoRA applied
+    """
+    
+    RUNPOD_API_BASE = "https://api.runpod.ai/v2"
+    DEFAULT_ENDPOINT_ID = ""  # Set when endpoint is created
+    
+    VALID_CAMERA_MOTIONS = [
+        "dolly_left", "dolly_right",
+        "dolly_in", "dolly_out",
+        "jib_up", "static", "none"
+    ]
+    
+    def __init__(
+        self,
+        endpoint_id: str = "",
+        api_key: str = "",
+        timeout: int = 30
+    ):
+        """
+        Initialize the LTX-2 client.
+        
+        Args:
+            endpoint_id: RunPod serverless endpoint ID
+            api_key: Your RunPod API key
+            timeout: Request timeout in seconds
+        """
+        self.endpoint_id = endpoint_id or self.DEFAULT_ENDPOINT_ID
+        self.api_key = api_key
+        self.timeout = timeout
+        self.base_url = f"{self.RUNPOD_API_BASE}/{self.endpoint_id}"
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def health_check(self) -> Dict[str, Any]:
+        """Check endpoint health."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/health",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "status": "healthy",
+                    "workers": data.get("workers", {}),
+                    "jobs": data.get("jobs", {}),
+                    "endpoint_id": self.endpoint_id
+                }
+            else:
+                return {"status": "error", "error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    def submit_job(
+        self,
+        image_path: str,
+        prompt: str = "",
+        negative_prompt: str = "",
+        camera_motion: str = "dolly_out",
+        num_frames: int = 97,
+        width: int = 768,
+        height: int = 512,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 7.5,
+        fps: int = 24,
+        seed: Optional[int] = None,
+        output_name: str = "ltx2_output",
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1"
+    ) -> Dict[str, Any]:
+        """
+        Submit an LTX-2 job.
+        
+        Args:
+            image_path: Path to input image (will be uploaded to S3)
+            prompt: Text prompt for video generation
+            negative_prompt: What to avoid
+            camera_motion: Camera LoRA to use
+            num_frames: Number of frames (must be 8n+1)
+            width: Output width (divisible by 32)
+            height: Output height (divisible by 32)
+            num_inference_steps: Diffusion steps
+            guidance_scale: CFG scale
+            fps: Frames per second
+            seed: Random seed
+            output_name: Name for output file
+            s3_bucket: S3 bucket for input/output
+            s3_region: S3 region
+            
+        Returns:
+            Dict with job_id or error
+        """
+        import os
+        
+        # Upload input image to S3
+        try:
+            s3_key = f"MediaContent/inputs/ltx2/{os.path.basename(image_path)}"
+            image_url = upload_file_to_s3(
+                image_path, s3_bucket, s3_key, s3_region
+            )
+            if not image_url:
+                return {"error": "Failed to upload image to S3"}
+        except Exception as e:
+            return {"error": f"S3 upload failed: {e}"}
+        
+        # Build job input
+        job_input = {
+            "image_url": image_url,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "camera_motion": camera_motion,
+            "num_frames": num_frames,
+            "width": width,
+            "height": height,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "fps": fps,
+            "output_name": output_name
+        }
+        
+        if seed is not None:
+            job_input["seed"] = seed
+        
+        # Submit job
+        try:
+            response = requests.post(
+                f"{self.base_url}/run",
+                headers=self._headers(),
+                json={"input": job_input},
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {"job_id": data.get("id"), "status": data.get("status")}
+            else:
+                return {"error": f"HTTP {response.status_code}: {response.text}"}
+                
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Get the status of a job."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/status/{job_id}",
+                headers=self._headers(),
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def wait_for_completion(
+        self,
+        job_id: str,
+        poll_interval: int = 10,
+        max_wait: int = 600,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Wait for a job to complete.
+        
+        Args:
+            job_id: The job ID to wait for
+            poll_interval: Seconds between status checks
+            max_wait: Maximum time to wait in seconds
+            progress_callback: Optional callback(status_dict, elapsed_seconds)
+            
+        Returns:
+            Final job status dict
+        """
+        import time
+        
+        start_time = time.time()
+        
+        while True:
+            elapsed = time.time() - start_time
+            
+            if elapsed > max_wait:
+                return {"error": f"Timeout after {max_wait}s", "status": "TIMEOUT"}
+            
+            status = self.get_job_status(job_id)
+            
+            if progress_callback:
+                progress_callback(status, elapsed)
+            
+            job_status = status.get("status", "").upper()
+            
+            if job_status == "COMPLETED":
+                return status
+            elif job_status in ["FAILED", "CANCELLED", "ERROR"]:
+                return status
+            
+            time.sleep(poll_interval)
+    
+    def generate_sync(
+        self,
+        image_path: str,
+        output_dir: str,
+        output_name: str = "ltx2_output",
+        prompt: str = "",
+        negative_prompt: str = "",
+        camera_motion: str = "dolly_out",
+        num_frames: int = 97,
+        width: int = 768,
+        height: int = 512,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 7.5,
+        fps: int = 24,
+        seed: Optional[int] = None,
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1",
+        poll_interval: int = 10,
+        max_wait: int = 600,
+        progress_callback: Optional[Callable] = None
+    ) -> LTX2Result:
+        """
+        Generate video synchronously (submit and wait).
+        
+        Args:
+            image_path: Path to input image
+            output_dir: Local directory for output video
+            output_name: Name for output file
+            prompt: Text prompt
+            negative_prompt: Negative prompt
+            camera_motion: Camera LoRA to use
+            num_frames: Number of frames
+            width: Output width
+            height: Output height
+            num_inference_steps: Diffusion steps
+            guidance_scale: CFG scale
+            fps: Frames per second
+            seed: Random seed
+            s3_bucket: S3 bucket
+            s3_region: S3 region
+            poll_interval: Poll interval in seconds
+            max_wait: Max wait time
+            progress_callback: Progress callback
+            
+        Returns:
+            LTX2Result with video path and metadata
+        """
+        import os
+        import time
+        
+        start_time = time.time()
+        logs = []
+        
+        # Validate camera motion
+        if camera_motion not in self.VALID_CAMERA_MOTIONS:
+            return LTX2Result(
+                success=False,
+                error=f"Invalid camera_motion '{camera_motion}'. Valid: {self.VALID_CAMERA_MOTIONS}"
+            )
+        
+        # Submit job
+        logs.append(f"Submitting LTX-2 job...")
+        submit_result = self.submit_job(
+            image_path=image_path,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            camera_motion=camera_motion,
+            num_frames=num_frames,
+            width=width,
+            height=height,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            fps=fps,
+            seed=seed,
+            output_name=output_name,
+            s3_bucket=s3_bucket,
+            s3_region=s3_region
+        )
+        
+        if "error" in submit_result:
+            return LTX2Result(
+                success=False,
+                error=submit_result["error"],
+                logs="\n".join(logs)
+            )
+        
+        job_id = submit_result.get("job_id")
+        logs.append(f"Job submitted: {job_id}")
+        
+        # Wait for completion
+        logs.append("Waiting for completion...")
+        result = self.wait_for_completion(
+            job_id=job_id,
+            poll_interval=poll_interval,
+            max_wait=max_wait,
+            progress_callback=progress_callback
+        )
+        
+        elapsed = time.time() - start_time
+        
+        if result.get("status", "").upper() != "COMPLETED":
+            error = result.get("error") or result.get("status", "Unknown error")
+            return LTX2Result(
+                success=False,
+                error=error,
+                duration_seconds=elapsed,
+                logs="\n".join(logs)
+            )
+        
+        # Extract output
+        output = result.get("output", {})
+        video_url = output.get("video_url")
+        
+        if not video_url:
+            return LTX2Result(
+                success=False,
+                error="No video URL in response",
+                duration_seconds=elapsed,
+                logs="\n".join(logs)
+            )
+        
+        # Download video
+        os.makedirs(output_dir, exist_ok=True)
+        local_path, msg = download_from_s3(video_url, output_dir)
+        logs.append(msg)
+        
+        if not local_path:
+            return LTX2Result(
+                success=False,
+                video_url=video_url,
+                error=f"Download failed: {msg}",
+                duration_seconds=elapsed,
+                logs="\n".join(logs)
+            )
+        
+        logs.append(f"Video saved to: {local_path}")
+        
+        return LTX2Result(
+            success=True,
+            video_path=local_path,
+            video_url=video_url,
+            num_frames=output.get("num_frames", num_frames),
+            duration=output.get("duration", num_frames / fps),
+            fps=output.get("fps", fps),
+            width=output.get("width", width),
+            height=output.get("height", height),
+            camera_motion=output.get("camera_motion", camera_motion),
+            seed=output.get("seed", seed),
+            duration_seconds=elapsed,
+            logs="\n".join(logs)
+        )
+
+
+# Default LTX-2 client
+_ltx2_client: Optional[LTX2ServerlessClient] = None
+
+
+def get_ltx2_client(
+    endpoint_id: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional[LTX2ServerlessClient]:
+    """Get or create the LTX-2 client."""
+    global _ltx2_client
+    
+    if endpoint_id and api_key:
+        _ltx2_client = LTX2ServerlessClient(
+            endpoint_id=endpoint_id,
+            api_key=api_key
+        )
+    
+    return _ltx2_client
+
+
+# =============================================================================
+# 2DGS PIPELINE CLIENT (existing)
+# =============================================================================
+
 # Default 2DGS client
 _2dgs_client: Optional[TwoDGSPipelineClient] = None
 

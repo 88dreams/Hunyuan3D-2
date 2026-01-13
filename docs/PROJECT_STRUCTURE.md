@@ -109,6 +109,8 @@ Model-specific Python modules that handle local and RunPod execution.
 | `hunyuan.py` | Hunyuan3D (Tencent) | Image to 3D mesh (GLB) |
 | `sugar.py` | SuGaR | 3DGS to mesh conversion (Poisson reconstruction) |
 | `vipe_integration.py` | ViPE (NVIDIA) | Video pose estimation integration |
+| `ltx2.py` | LTX-2 (Lightricks) | High-quality video with camera LoRAs (4K) ⭐ |
+| `seva.py` | SEVA (Stability AI) | Novel view synthesis with camera control |
 
 ### Common Pattern
 Each generator module typically contains:
@@ -217,6 +219,39 @@ Combined serverless endpoint for video-to-mesh reconstruction:
 3. Point cloud generated from depth maps
 4. 2DGS training produces Gaussian splats
 5. Mesh extraction via marching cubes
+
+#### `runpod/ltx2/` - LTX-2 Video Generation ⭐ NEW
+High-quality video generation with camera control LoRAs:
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | LTX-2 Docker image |
+| `handler_ltx2.py` | Serverless handler with camera LoRAs |
+| `start_ltx2.sh` | Startup script |
+| `README.md` | Deployment instructions |
+
+**Capabilities:**
+- Single image → video with camera movement (4K @ 50fps)
+- Camera LoRAs: dolly_left/right/in/out, jib_up, static
+- Open weights (no HuggingFace approval needed)
+- Fast inference with distilled model (8 steps)
+- Commercial-friendly license
+
+#### `runpod/seva/` - Stable Virtual Camera
+Novel view synthesis with precise camera control:
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | SEVA Docker image |
+| `handler_seva.py` | Serverless handler |
+| `start_seva.sh` | Startup script |
+| `README.md` | Deployment instructions |
+
+**Capabilities:**
+- Single image → video with camera movement
+- 14+ preset trajectories (orbit, pan, tilt, spiral, etc.)
+- Custom camera trajectories via C2W matrices
+- Up to 1,000 frames with 3D consistency
+
+⚠️ **Note:** Blocked on HuggingFace model access approval
 
 #### `runpod/vipe/` - Standalone ViPE (Reference)
 | File | Purpose |
@@ -371,16 +406,17 @@ python app_sidebar.py
 
 | Image | Models | Current Version |
 |-------|--------|-----------------|
-| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
-| `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, **TRELLIS.2**, **LTX-2** ⭐ | v51 → **v52** |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
 | `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 ✅ |
+| `88dreams/seva-runpod` | SEVA (camera control video) | v1 (blocked - HF access) |
+| ~~`88dreams/trellis-runpod`~~ | ~~TRELLIS.2~~ | **DEPRECATED** - Use unified |
 
 ## RunPod Serverless Endpoints
 
 | Endpoint Name | Image | Purpose |
 |---------------|-------|---------|
-| `gen3c-serverless` | gen3c-runpod | Multi-model (Gen3C, Lyra, SHARP) |
-| `trellis-serverless` | trellis-runpod | TRELLIS.2 3D generation |
+| `gen3c-serverless` | gen3c-runpod:**v52** | Multi-model (Gen3C, Lyra, SHARP, **TRELLIS.2**, **LTX-2**) ⭐ |
 | `hunyuan-serverless` | hunyuan-runpod | Hunyuan3D mesh generation |
 | `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
+| `seva-serverless` | seva-runpod:v1 | Novel view video - blocked (HF access) |

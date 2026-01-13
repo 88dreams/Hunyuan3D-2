@@ -1,0 +1,53 @@
+# =============================================================================
+# Patch Dockerfile v52 - LTX-2 + TRELLIS.2 Consolidated
+# =============================================================================
+# 
+# v51: Added LTX-2 video generation with camera control LoRAs
+# v52: Consolidated TRELLIS.2 into unified handler (no more separate endpoint)
+#
+# Models now in unified handler:
+#   - GEN3C: Image to video (NVIDIA Cosmos)
+#   - SHARP: Image to 3DGS PLY + video (Apple)
+#   - Lyra: Image/Video to 3D/4D Gaussian Splatting (NVIDIA)
+#   - TRELLIS.2: Image to 3D GLB mesh (Microsoft) - NOW UNIFIED!
+#   - SuGaR: 3DGS to mesh conversion
+#   - LTX-2: High-quality video with camera LoRAs (Lightricks)
+#
+# Usage:
+#   docker build -f Dockerfile.patch.v52 -t 88dreams/gen3c-runpod:v52 .
+#   docker push 88dreams/gen3c-runpod:v52
+#
+# =============================================================================
+
+# Base on v51 (which has LTX-2 support)
+FROM 88dreams/gen3c-runpod:v51
+
+# =============================================================================
+# Add TRELLIS.2 Inference Script
+# =============================================================================
+# This script wraps TRELLIS.2's Python API for subprocess-based inference
+COPY trellis_inference.py /workspace/trellis_inference.py
+RUN chmod +x /workspace/trellis_inference.py
+
+# =============================================================================
+# Update Handler with Fixed TRELLIS.2 Support
+# =============================================================================
+COPY handler_unified.py /workspace/handler.py
+
+# Verify trellis_inference.py is in place
+RUN test -f /workspace/trellis_inference.py && echo "✓ trellis_inference.py installed"
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+# Ensure TRELLIS.2 paths are set
+ENV TRELLIS_DIR="/workspace/TRELLIS2"
+ENV TRELLIS_CHECKPOINT_DIR="/runpod-volume/checkpoints/trellis"
+
+# Create TRELLIS.2 output directory
+RUN mkdir -p /runpod-volume/outputs/trellis
+
+# =============================================================================
+# Startup Command (unchanged)
+# =============================================================================
+CMD ["/workspace/start.sh"]

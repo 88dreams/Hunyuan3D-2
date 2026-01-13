@@ -168,8 +168,7 @@ DEFAULT_SHARP_ENDPOINT = _runpod_config.get("sharp_endpoint_id", DEFAULT_GEN3C_E
 DEFAULT_SHARP_API_KEY = _runpod_config.get("sharp_api_key", DEFAULT_GEN3C_API_KEY)
 DEFAULT_LYRA_ENDPOINT = _runpod_config.get("lyra_endpoint_id", DEFAULT_GEN3C_ENDPOINT)
 DEFAULT_LYRA_API_KEY = _runpod_config.get("lyra_api_key", DEFAULT_GEN3C_API_KEY)
-DEFAULT_TRELLIS_ENDPOINT = _runpod_config.get("trellis_endpoint_id", "")
-DEFAULT_TRELLIS_API_KEY = _runpod_config.get("trellis_api_key", DEFAULT_GEN3C_API_KEY)
+# TRELLIS.2 now uses unified endpoint (gen3c) - no separate settings needed
 DEFAULT_HUNYUAN_ENDPOINT = _runpod_config.get("hunyuan_endpoint_id", "")
 DEFAULT_HUNYUAN_API_KEY = _runpod_config.get("hunyuan_api_key", DEFAULT_GEN3C_API_KEY)
 DEFAULT_MESH_ENDPOINT = _runpod_config.get("mesh_extraction_endpoint_id", DEFAULT_GEN3C_ENDPOINT)
@@ -843,21 +842,12 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     with gr.Row(elem_classes=["settings-row"]):
                         with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
-                                gr.Markdown("**GEN3C / SHARP / Lyra**")
+                                gr.Markdown("**GEN3C / SHARP / Lyra / TRELLIS.2**")
                                 settings_gen3c_endpoint = gr.Textbox(value=DEFAULT_GEN3C_ENDPOINT, label="Endpoint ID")
                                 settings_gen3c_key = gr.Textbox(value=DEFAULT_GEN3C_API_KEY, label="API Key", type="password")
                                 settings_gen3c_test = gr.Button("Test", size="sm")
                                 settings_gen3c_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_gen3c_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
-                        
-                        with gr.Column(scale=1, min_width=200):
-                            with gr.Group(elem_classes=["settings-card"]):
-                                gr.Markdown("**TRELLIS.2**")
-                                settings_trellis_endpoint = gr.Textbox(value=DEFAULT_TRELLIS_ENDPOINT, label="Endpoint ID")
-                                settings_trellis_key = gr.Textbox(value=DEFAULT_TRELLIS_API_KEY, label="API Key", type="password")
-                                settings_trellis_test = gr.Button("Test", size="sm")
-                                settings_trellis_save = gr.Button("Save", size="sm", variant="primary")
-                                settings_trellis_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                         
                         with gr.Column(scale=1, min_width=200):
                             with gr.Group(elem_classes=["settings-card"]):
@@ -1862,7 +1852,7 @@ Min Component Ratio: 1% (default)
         fn=trellis_generate_with_preview,
         inputs=[
             input_image, image_scale,
-            settings_trellis_endpoint, settings_trellis_key,
+            settings_gen3c_endpoint, settings_gen3c_key,  # Uses unified endpoint
             trellis_resolution, trellis_guidance, trellis_seed,
             trellis_output_name, trellis_output_dir, trellis_format,
             global_log_params, global_encode_params,
@@ -2177,18 +2167,8 @@ Min Component Ratio: 1% (default)
         outputs=[settings_gen3c_status],
     )
     
-    settings_trellis_test.click(
-        fn=check_trellis_status,
-        inputs=[settings_trellis_endpoint, settings_trellis_key],
-        outputs=[settings_trellis_status],
-    )
-    
-    settings_trellis_save.click(
-        fn=lambda e, k: save_serverless_credentials(e, k, "trellis")[0],
-        inputs=[settings_trellis_endpoint, settings_trellis_key],
-        outputs=[settings_trellis_status],
-    )
-    
+    # TRELLIS.2 now uses unified endpoint (gen3c) - no separate settings needed
+
     settings_hunyuan_test.click(
         fn=check_hunyuan_runpod_status,
         inputs=[settings_hunyuan_endpoint, settings_hunyuan_key],

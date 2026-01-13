@@ -235,8 +235,7 @@ DEFAULT_SHARP_ENDPOINT = _runpod_config.get("sharp_endpoint_id", DEFAULT_SERVERL
 DEFAULT_SHARP_API_KEY = _runpod_config.get("sharp_api_key", DEFAULT_SERVERLESS_API_KEY)
 DEFAULT_LYRA_ENDPOINT = _runpod_config.get("lyra_endpoint_id", DEFAULT_SERVERLESS_ENDPOINT)
 DEFAULT_LYRA_API_KEY = _runpod_config.get("lyra_api_key", DEFAULT_SERVERLESS_API_KEY)
-DEFAULT_TRELLIS_ENDPOINT = _runpod_config.get("trellis_endpoint_id", "")
-DEFAULT_TRELLIS_API_KEY = _runpod_config.get("trellis_api_key", DEFAULT_SERVERLESS_API_KEY)
+# TRELLIS.2 now uses unified endpoint (gen3c) - no separate settings needed
 DEFAULT_HUNYUAN_ENDPOINT = _runpod_config.get("hunyuan_endpoint_id", "")
 DEFAULT_HUNYUAN_API_KEY = _runpod_config.get("hunyuan_api_key", DEFAULT_SERVERLESS_API_KEY)
 # Mesh extraction uses the same endpoint as GEN3C/SHARP/Lyra by default
@@ -244,8 +243,7 @@ DEFAULT_MESH_ENDPOINT = _runpod_config.get("mesh_extraction_endpoint_id", DEFAUL
 DEFAULT_MESH_API_KEY = _runpod_config.get("mesh_extraction_api_key", DEFAULT_SERVERLESS_API_KEY)
 
 print(f"[CONFIG] Loaded RunPod credentials:")
-print(f"  - GEN3C/SHARP/Lyra: endpoint={'set' if DEFAULT_GEN3C_ENDPOINT else 'not set'}")
-print(f"  - TRELLIS: endpoint={'set' if DEFAULT_TRELLIS_ENDPOINT else 'not set'}")
+print(f"  - GEN3C/SHARP/Lyra/TRELLIS: endpoint={'set' if DEFAULT_GEN3C_ENDPOINT else 'not set'}")
 print(f"  - Hunyuan: endpoint={'set' if DEFAULT_HUNYUAN_ENDPOINT else 'not set'}")
 print(f"  - Mesh Extraction: endpoint={'set' if DEFAULT_MESH_ENDPOINT else 'not set'}")
 
@@ -1040,8 +1038,8 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 # TAB 5: TRELLIS.2
                 with gr.TabItem("TRELLIS.2", id="trellis"):
                     trellis = create_trellis_tab(
-                        default_endpoint_id=DEFAULT_TRELLIS_ENDPOINT,
-                        default_api_key=DEFAULT_TRELLIS_API_KEY,
+                        default_endpoint_id=DEFAULT_GEN3C_ENDPOINT,  # Uses unified endpoint
+                        default_api_key=DEFAULT_GEN3C_API_KEY,
                     )
                 
                 # TAB 6: MESH EXTRACTION (SuGaR)

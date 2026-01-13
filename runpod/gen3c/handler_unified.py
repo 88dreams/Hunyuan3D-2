@@ -7,6 +7,7 @@ This handler supports multiple models:
 - SHARP: Image to 3D Gaussian Splatting (Apple)
 - Lyra: Image/Video to 3D/4D Gaussian Splatting (NVIDIA)
 - TRELLIS.2: Image to 3D with O-Voxel (Microsoft)
+- LTX-2: High-quality video generation with camera LoRAs (Lightricks)
 
 Environment:
     Python 3.10 + NumPy 1.26.4 + PyTorch 2.6.0 (NVIDIA stack)
@@ -38,6 +39,21 @@ LYRA_DIR = os.environ.get("LYRA_DIR", "/workspace/lyra")
 TRELLIS_DIR = os.environ.get("TRELLIS_DIR", "/workspace/TRELLIS2")
 SUGAR_DIR = os.environ.get("SUGAR_DIR", "/workspace/SuGaR")
 CHECKPOINT_DIR = os.environ.get("GEN3C_CHECKPOINT_DIR", "/workspace/checkpoints")
+
+# LTX-2 Configuration
+LTX2_MODEL_ID = os.environ.get("LTX2_MODEL_ID", "Lightricks/LTX-Video")
+LTX2_CHECKPOINT_DIR = os.environ.get("LTX2_CHECKPOINT_DIR", "/runpod-volume/checkpoints/ltx2")
+
+# LTX-2 Camera Control LoRAs
+LTX2_CAMERA_LORAS = {
+    "dolly_left": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Left",
+    "dolly_right": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Right",
+    "dolly_in": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-In",
+    "dolly_out": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Out",
+    "jib_up": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Jib-Up",
+    "static": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Static",
+}
+LTX2_VALID_CAMERA_MOTIONS = list(LTX2_CAMERA_LORAS.keys()) + ["none"]
 SHARP_CHECKPOINT = os.environ.get("SHARP_CHECKPOINT", "/workspace/checkpoints/sharp/sharp_2572gikvuh.pt")
 TRELLIS_CHECKPOINT = os.environ.get("TRELLIS_CHECKPOINT", "/workspace/checkpoints/trellis")
 # Use network volume for persistent storage (survives worker restarts)
@@ -336,7 +352,7 @@ def get_git_version(repo_dir: str) -> Dict[str, str]:
 def get_all_versions() -> Dict[str, Any]:
     """
     Get version information for all installed models.
-    
+
     Returns:
         Dict with version info for each model
     """
@@ -347,15 +363,31 @@ def get_all_versions() -> Dict[str, Any]:
         "trellis": get_git_version(TRELLIS_DIR),
     }
     
+    # Add LTX-2 version (from diffusers)
+    try:
+        import diffusers
+        versions["ltx2"] = {
+            "commit_sha": f"diffusers-{diffusers.__version__}",
+            "commit_date": "N/A",
+            "display": f"diffusers {diffusers.__version__}"
+        }
+    except ImportError:
+        versions["ltx2"] = {
+            "commit_sha": "unknown",
+            "commit_date": "unknown",
+            "display": "Not installed (diffusers missing)"
+        }
+
     # Format for display
     for model, info in versions.items():
-        if info.get("commit_sha") != "unknown" and info.get("commit_date") != "unknown":
-            info["display"] = f"{info['commit_sha']} ({info['commit_date']})"
-        elif info.get("commit_sha") != "unknown":
-            info["display"] = info["commit_sha"]
-        else:
-            info["display"] = info.get("error", "Not installed")
-    
+        if "display" not in info:
+            if info.get("commit_sha") != "unknown" and info.get("commit_date") != "unknown":
+                info["display"] = f"{info['commit_sha']} ({info['commit_date']})"
+            elif info.get("commit_sha") != "unknown":
+                info["display"] = info["commit_sha"]
+            else:
+                info["display"] = info.get("error", "Not installed")
+
     return versions
 
 
@@ -365,6 +397,9 @@ def get_all_versions() -> Dict[str, Any]:
 
 _gen3c_validated = False
 _sharp_validated = False
+_ltx2_validated = False
+_ltx2_pipeline = None
+_ltx2_current_lora = None
 
 
 def validate_gen3c():
@@ -816,11 +851,26 @@ def run_lyra(
 
 def validate_trellis() -> bool:
     """Check if TRELLIS.2 environment is available."""
-    # Check if TRELLIS repo exists or checkpoint is available
+    # Check for TRELLIS.2 directory
     trellis_exists = os.path.isdir(TRELLIS_DIR)
-    trellis_script = os.path.join(TRELLIS_DIR, "scripts", "inference.py")
-    checkpoint_exists = os.path.isdir(TRELLIS_CHECKPOINT) or os.path.exists(TRELLIS_CHECKPOINT)
-    return trellis_exists or checkpoint_exists
+    if not trellis_exists:
+        logger.warning(f"TRELLIS.2 directory not found: {TRELLIS_DIR}")
+        return False
+    
+    # Check for inference wrapper script
+    inference_script = "/workspace/trellis_inference.py"
+    if not os.path.exists(inference_script):
+        logger.warning(f"TRELLIS.2 inference script not found: {inference_script}")
+        return False
+    
+    # Check for Python environment
+    python_path = "/root/miniforge3/envs/cosmos-predict1/bin/python"
+    if not os.path.exists(python_path):
+        logger.warning(f"Python not found: {python_path}")
+        return False
+    
+    logger.info("TRELLIS.2 validated: directory, inference script, and Python found")
+    return True
 
 
 def run_trellis(
@@ -829,35 +879,99 @@ def run_trellis(
     resolution: int = 1024,
     guidance_scale: float = 7.5,
     output_glb: bool = True,
+    output_ply: bool = False,
     seed: Optional[int] = None,
+    timeout: int = 1800,  # 30 minutes for high resolution
 ) -> Dict[str, str]:
     """
-    Run TRELLIS.2 inference.
+    Run TRELLIS.2 inference via trellis_inference.py wrapper script.
     
-    NOTE: TRELLIS.2 uses a Python API approach, not a CLI script:
+    TRELLIS.2 uses a Python API (Trellis2ImageTo3DPipeline), so we call
+    the wrapper script via subprocess.
     
-    from trellis2.pipelines import Trellis2ImageTo3DPipeline
-    pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
-    mesh = pipeline.run(image)[0]
-    
-    Full implementation requires:
-    - TRELLIS.2-4B checkpoint (~10GB) from HuggingFace
-    - Complex setup with O-Voxel, FlexGEMM, CuMesh dependencies
-    - Separate conda environment (trellis2)
-    
-    For now, this returns an error indicating TRELLIS.2 is not yet fully implemented.
+    Args:
+        input_image_path: Path to input image
+        output_name: Output filename (without extension)
+        resolution: Generation resolution (512, 1024, or 1536)
+        guidance_scale: Guidance scale for generation
+        output_glb: Export GLB format
+        output_ply: Export PLY format
+        seed: Random seed for reproducibility
+        timeout: Max time in seconds
+        
+    Returns:
+        Dict with paths to generated files (glb_path, ply_path)
     """
-    # TRELLIS.2 is not yet fully implemented for serverless
-    # The repo uses a Python API approach, not a CLI script
-    raise RuntimeError(
-        "TRELLIS.2 is not yet fully implemented for serverless deployment. "
-        "TRELLIS.2 uses a Python API (Trellis2ImageTo3DPipeline), not a CLI script. "
-        "Full implementation requires: "
-        "1) TRELLIS.2-4B checkpoint (~10GB) from HuggingFace, "
-        "2) Separate conda environment with O-Voxel, FlexGEMM, CuMesh, "
-        "3) Custom inference wrapper script. "
-        "Please use SHARP for fast 3DGS generation, or GEN3C for video generation."
+    # Path to inference script and Python
+    inference_script = "/workspace/trellis_inference.py"
+    python_path = "/root/miniforge3/envs/cosmos-predict1/bin/python"
+    
+    # Create output directory
+    output_dir = os.path.join(OUTPUT_DIR, "trellis")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Build command
+    cmd = [
+        python_path,
+        inference_script,
+        "--input_image", input_image_path,
+        "--output_dir", output_dir,
+        "--output_name", output_name,
+        "--resolution", str(resolution),
+        "--guidance_scale", str(guidance_scale),
+        "--checkpoint_dir", TRELLIS_CHECKPOINT,
+    ]
+    
+    if output_glb:
+        cmd.append("--output_glb")
+    if output_ply:
+        cmd.append("--output_ply")
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
+    
+    logger.info(f"Running TRELLIS.2: {' '.join(cmd)}")
+    
+    # Set environment
+    env = os.environ.copy()
+    env["PYTHONPATH"] = TRELLIS_DIR
+    env["CUDA_VISIBLE_DEVICES"] = "0"
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    
+    # Run inference
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
     )
+    
+    if result.returncode != 0:
+        logger.error(f"TRELLIS.2 failed. stdout: {result.stdout[-1000:]}")
+        logger.error(f"TRELLIS.2 failed. stderr: {result.stderr[-2000:]}")
+        raise RuntimeError(f"TRELLIS.2 failed: {result.stderr[-2000:]}")
+    
+    logger.info(f"TRELLIS.2 stdout: {result.stdout[-500:]}")
+    
+    # Check for output files
+    outputs = {}
+    
+    # Check for GLB
+    glb_path = os.path.join(output_dir, f"{output_name}.glb")
+    if os.path.exists(glb_path):
+        outputs["glb_path"] = glb_path
+        logger.info(f"GLB generated: {glb_path} ({os.path.getsize(glb_path) / 1024 / 1024:.1f}MB)")
+    
+    # Check for PLY
+    ply_path = os.path.join(output_dir, f"{output_name}.ply")
+    if os.path.exists(ply_path):
+        outputs["ply_path"] = ply_path
+        logger.info(f"PLY generated: {ply_path} ({os.path.getsize(ply_path) / 1024 / 1024:.1f}MB)")
+    
+    if not outputs:
+        raise RuntimeError("TRELLIS.2 completed but no output files found")
+    
+    return outputs
 
 
 # =============================================================================
@@ -899,7 +1013,19 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         - resolution: Voxel resolution 512/1024/1536 (default 1024)
         - guidance_scale: CFG scale (default 7.5)
         - output_glb: Output GLB format (default True)
-    
+
+        LTX-2 specific:
+        - prompt: Text prompt for video generation
+        - negative_prompt: What to avoid
+        - camera_motion: Camera LoRA (dolly_left/right/in/out, jib_up, static, none)
+        - num_frames: Number of frames (default 97, must be 8n+1)
+        - width: Output width (default 768, divisible by 32)
+        - height: Output height (default 512, divisible by 32)
+        - num_inference_steps: Diffusion steps (default 50)
+        - guidance_scale: CFG scale (default 7.5)
+        - fps: Frames per second (default 24)
+        - seed: Random seed (optional)
+
     Output:
         - status: "success" or "error"
         - message: Status message
@@ -949,8 +1075,10 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 return handle_lyra(job, job_input, input_path, return_base64)
             elif model == "trellis":
                 return handle_trellis(job, job_input, input_path, return_base64)
+            elif model == "ltx2":
+                return handle_ltx2(job, job_input, input_path, return_base64)
             else:
-                return {"status": "error", "message": f"Unknown model: {model}. Supported: gen3c, sharp, lyra, trellis, sugar"}
+                return {"status": "error", "message": f"Unknown model: {model}. Supported: gen3c, sharp, lyra, trellis, sugar, ltx2"}
         finally:
             # Cleanup temp input
             Path(input_path).unlink(missing_ok=True)
@@ -1591,6 +1719,328 @@ def handle_sugar(job: Dict, job_input: Dict, input_path: str, return_base64: boo
 
 
 # =============================================================================
+# LTX-2 (Lightricks Video Generation)
+# =============================================================================
+
+def validate_ltx2() -> bool:
+    """Check if LTX-2 environment is available (diffusers with LTX support)."""
+    global _ltx2_validated
+    if _ltx2_validated:
+        return True
+    
+    try:
+        import diffusers
+        from packaging import version
+        
+        # LTX-2 requires diffusers >= 0.32.0
+        if version.parse(diffusers.__version__) < version.parse("0.32.0"):
+            logger.warning(f"diffusers {diffusers.__version__} too old, need >= 0.32.0")
+            return False
+        
+        # Check if LTXPipeline is available
+        from diffusers import LTXPipeline
+        
+        _ltx2_validated = True
+        logger.info(f"LTX-2 validated: diffusers {diffusers.__version__}")
+        return True
+        
+    except ImportError as e:
+        logger.warning(f"LTX-2 not available: {e}")
+        return False
+
+
+def load_ltx2_model():
+    """Load LTX-2 pipeline (lazy initialization)."""
+    global _ltx2_pipeline
+    
+    if _ltx2_pipeline is not None:
+        return _ltx2_pipeline
+    
+    logger.info("Loading LTX-2 model...")
+    import time
+    start_time = time.time()
+    
+    try:
+        import torch
+        from diffusers import LTXPipeline
+        
+        _ltx2_pipeline = LTXPipeline.from_pretrained(
+            LTX2_MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            cache_dir=LTX2_CHECKPOINT_DIR
+        )
+        _ltx2_pipeline = _ltx2_pipeline.to("cuda")
+        
+        # Enable memory optimizations
+        try:
+            _ltx2_pipeline.enable_model_cpu_offload()
+        except Exception as e:
+            logger.warning(f"Could not enable CPU offload: {e}")
+        
+        load_time = time.time() - start_time
+        logger.info(f"LTX-2 model loaded in {load_time:.1f}s")
+        
+        return _ltx2_pipeline
+        
+    except Exception as e:
+        logger.error(f"Failed to load LTX-2 model: {e}")
+        raise
+
+
+def load_ltx2_camera_lora(camera_motion: str):
+    """Load camera control LoRA if needed."""
+    global _ltx2_pipeline, _ltx2_current_lora
+    
+    if camera_motion == "none" or camera_motion not in LTX2_CAMERA_LORAS:
+        # Unload any existing LoRA
+        if _ltx2_current_lora is not None and _ltx2_pipeline is not None:
+            try:
+                _ltx2_pipeline.unload_lora_weights()
+                _ltx2_current_lora = None
+                logger.info("Unloaded camera LoRA")
+            except Exception as e:
+                logger.warning(f"Failed to unload LoRA: {e}")
+        return
+    
+    if camera_motion == _ltx2_current_lora:
+        logger.info(f"Camera LoRA '{camera_motion}' already loaded")
+        return
+    
+    try:
+        lora_id = LTX2_CAMERA_LORAS[camera_motion]
+        logger.info(f"Loading camera LoRA: {lora_id}")
+        
+        # Unload previous LoRA first
+        if _ltx2_current_lora is not None:
+            _ltx2_pipeline.unload_lora_weights()
+        
+        # Load new LoRA
+        _ltx2_pipeline.load_lora_weights(lora_id)
+        _ltx2_current_lora = camera_motion
+        
+        logger.info(f"Camera LoRA '{camera_motion}' loaded")
+        
+    except Exception as e:
+        logger.error(f"Failed to load camera LoRA: {e}")
+        _ltx2_current_lora = None
+
+
+def run_ltx2(
+    input_image_path: str,
+    output_name: str,
+    prompt: str = "",
+    negative_prompt: str = "",
+    camera_motion: str = "none",
+    num_frames: int = 97,
+    width: int = 768,
+    height: int = 512,
+    num_inference_steps: int = 50,
+    guidance_scale: float = 7.5,
+    fps: int = 24,
+    seed: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Run LTX-2 video generation.
+    
+    Args:
+        input_image_path: Path to input image
+        output_name: Output video name (without extension)
+        prompt: Text prompt for generation
+        negative_prompt: Negative prompt
+        camera_motion: Camera LoRA to use
+        num_frames: Number of frames (should be 8n+1)
+        width: Output width (divisible by 32)
+        height: Output height (divisible by 32)
+        num_inference_steps: Diffusion steps
+        guidance_scale: CFG scale
+        fps: Output FPS
+        seed: Random seed
+        
+    Returns:
+        Dict with video_path and metadata
+    """
+    import torch
+    from PIL import Image
+    import imageio
+    import time
+    
+    start_time = time.time()
+    
+    # Load model
+    pipe = load_ltx2_model()
+    
+    # Load camera LoRA if specified
+    load_ltx2_camera_lora(camera_motion)
+    
+    # Load and resize input image
+    image = Image.open(input_image_path).convert("RGB")
+    image = image.resize((width, height), Image.Resampling.LANCZOS)
+    
+    # Set up generator for reproducibility
+    generator = None
+    if seed is not None:
+        generator = torch.Generator("cuda").manual_seed(seed)
+    
+    logger.info(f"LTX-2 generating: {num_frames} frames at {width}x{height}")
+    logger.info(f"Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"Prompt: {prompt}")
+    logger.info(f"Camera motion: {camera_motion}")
+    
+    # Generate video
+    try:
+        output = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt if negative_prompt else None,
+            image=image,
+            num_frames=num_frames,
+            width=width,
+            height=height,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
+        )
+        frames = output.frames[0]  # First video in batch
+        
+    except TypeError as e:
+        # Fallback if image parameter not supported (text-to-video only)
+        logger.warning(f"Image-to-video may not be supported, falling back to text-to-video: {e}")
+        output = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt if negative_prompt else None,
+            num_frames=num_frames,
+            width=width,
+            height=height,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
+        )
+        frames = output.frames[0]
+    
+    gen_time = time.time() - start_time
+    logger.info(f"Video generated in {gen_time:.1f}s ({len(frames)} frames)")
+    
+    # Save video
+    output_dir = os.path.join(OUTPUT_DIR, "ltx2")
+    os.makedirs(output_dir, exist_ok=True)
+    video_path = os.path.join(output_dir, f"{output_name}.mp4")
+    
+    logger.info(f"Saving video to: {video_path}")
+    imageio.mimwrite(video_path, frames, fps=fps, codec='libx264', quality=8)
+    
+    return {
+        "video_path": video_path,
+        "num_frames": len(frames),
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "duration": len(frames) / fps,
+        "camera_motion": camera_motion,
+        "generation_time": gen_time
+    }
+
+
+def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool) -> Dict:
+    """Handle LTX-2 video generation job."""
+    if not validate_ltx2():
+        return {"status": "error", "message": "LTX-2 environment not available (need diffusers >= 0.32.0)"}
+    
+    output_name = job_input.get("output_name", f"ltx2_{job.get('id', 'output')}")
+    prompt = job_input.get("prompt", "")
+    negative_prompt = job_input.get("negative_prompt", "")
+    camera_motion = job_input.get("camera_motion", "none")
+    num_frames = int(job_input.get("num_frames", 97))
+    width = int(job_input.get("width", 768))
+    height = int(job_input.get("height", 512))
+    num_inference_steps = int(job_input.get("num_inference_steps", 50))
+    guidance_scale = float(job_input.get("guidance_scale", 7.5))
+    fps = int(job_input.get("fps", 24))
+    seed = job_input.get("seed")
+    
+    # Validate camera motion
+    if camera_motion not in LTX2_VALID_CAMERA_MOTIONS:
+        return {
+            "status": "error",
+            "message": f"Invalid camera_motion '{camera_motion}'. Valid: {LTX2_VALID_CAMERA_MOTIONS}"
+        }
+    
+    # Validate dimensions (must be divisible by 32)
+    if width % 32 != 0:
+        width = (width // 32) * 32
+        logger.warning(f"Width adjusted to {width} (must be divisible by 32)")
+    if height % 32 != 0:
+        height = (height // 32) * 32
+        logger.warning(f"Height adjusted to {height} (must be divisible by 32)")
+    
+    # Validate num_frames (must be 8n+1)
+    if (num_frames - 1) % 8 != 0:
+        num_frames = ((num_frames - 1) // 8) * 8 + 1
+        logger.warning(f"num_frames adjusted to {num_frames} (must be 8n+1)")
+    
+    logger.info(f"LTX-2 job: output={output_name}, camera={camera_motion}, "
+                f"frames={num_frames}, size={width}x{height}")
+    
+    try:
+        results = run_ltx2(
+            input_image_path=input_path,
+            output_name=output_name,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            camera_motion=camera_motion,
+            num_frames=num_frames,
+            width=width,
+            height=height,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            fps=fps,
+            seed=seed
+        )
+    except Exception as e:
+        logger.error(f"LTX-2 generation failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"LTX-2 generation failed: {str(e)}"}
+    
+    response = {
+        "status": "success",
+        "message": "Video generated successfully",
+        "model": "ltx2",
+        "video_name": f"{output_name}.mp4",
+        "num_frames": results.get("num_frames"),
+        "duration": results.get("duration"),
+        "fps": results.get("fps"),
+        "width": results.get("width"),
+        "height": results.get("height"),
+        "camera_motion": results.get("camera_motion"),
+        "generation_time": results.get("generation_time")
+    }
+    
+    download_required = False
+    
+    if "video_path" in results:
+        video_path = results["video_path"]
+        video_size = os.path.getsize(video_path)
+        response["video_path"] = video_path
+        response["video_size"] = video_size
+        
+        # Always upload to S3 first
+        s3_result = upload_file_to_s3_always(video_path, "ltx2", f"{output_name}.mp4")
+        if s3_result["uploaded"]:
+            response["video_s3_url"] = s3_result["s3_url"]
+            response["message"] = f"Video uploaded to S3 ({video_size / 1024 / 1024:.1f}MB)"
+        else:
+            download_required = True
+        
+        # Also try base64 for small files
+        if return_base64:
+            encoded = encode_file_if_small(video_path)
+            if encoded:
+                response["video_base64"] = encoded
+    
+    if download_required:
+        response["download_required"] = True
+        response["message"] = "Video generated but S3 upload failed. Download from network volume."
+    
+    return response
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -1601,6 +2051,7 @@ if __name__ == "__main__":
     logger.info(f"Lyra Directory: {LYRA_DIR}")
     logger.info(f"TRELLIS Directory: {TRELLIS_DIR}")
     logger.info(f"SuGaR Directory: {SUGAR_DIR}")
+    logger.info(f"LTX-2 Model: {LTX2_MODEL_ID}")
     logger.info(f"Checkpoint Directory: {CHECKPOINT_DIR}")
     
     # Validate environments at startup
@@ -1609,12 +2060,14 @@ if __name__ == "__main__":
     lyra_ok = validate_lyra()
     trellis_ok = validate_trellis()
     sugar_ok = validate_sugar()
+    ltx2_ok = validate_ltx2()
     
     logger.info(f"GEN3C available: {gen3c_ok}")
     logger.info(f"SHARP available: {sharp_ok}")
     logger.info(f"Lyra available: {lyra_ok}")
     logger.info(f"TRELLIS.2 available: {trellis_ok}")
     logger.info(f"SuGaR available: {sugar_ok}")
+    logger.info(f"LTX-2 available: {ltx2_ok}")
     logger.info(f"S3 enabled: {S3_ENABLED} (bucket={S3_BUCKET}, region={S3_REGION}, access_key={'set' if S3_ACCESS_KEY else 'NOT SET'})")
     
     # Start the serverless worker

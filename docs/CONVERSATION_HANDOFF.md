@@ -18,6 +18,8 @@ This document summarizes the work completed and provides context for new convers
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
 | **2DGS Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
+| **LTX-2** | Lightricks | Video (4K, camera LoRAs) | 🔧 Infrastructure Ready |
+| **SEVA** | Stability AI | Video (camera control) | ⏸️ Blocked (HF access) |
 
 ### Architecture
 
@@ -28,6 +30,92 @@ This document summarizes the work completed and provides context for new convers
 ---
 
 ## Current Work In Progress
+
+### LTX-2 Integration (January 13, 2026) ⭐ NEW
+
+**Goal**: High-quality video generation from images with camera control LoRAs.
+
+**Use Case**: Generate camera movement videos (dolly, jib) that can be fed into the 2DGS pipeline for 3D reconstruction. **No HuggingFace approval needed** - open weights!
+
+**Status**: 🔧 Ready for Build - Added to Unified Handler
+
+**Why LTX-2 over SEVA**:
+- ✅ Open weights (no HF access wait)
+- ✅ Higher quality (native 4K @ 50fps)
+- ✅ Faster inference (8-step distilled model)
+- ✅ Commercial-friendly license
+
+**Approach**: Added to unified handler (same pattern as Trellis) - no separate Docker needed!
+
+**Completed**:
+- `runpod/gen3c/handler_unified.py` - Added handle_ltx2(), validate_ltx2(), run_ltx2() ✅
+- `runpod/gen3c/Dockerfile.patch.v51` - Patch to add diffusers ✅
+- `runpod/runpod_client.py` - Added LTX2ServerlessClient, LTX2Result ✅
+- `generators/ltx2.py` - Generator module ✅
+- Standalone files also available in `runpod/ltx2/` as fallback
+
+**Camera Motion LoRAs**:
+- `dolly_out` - Best for 3D reconstruction (pulls away from subject)
+- `dolly_in` - Pushes toward subject
+- `dolly_left` / `dolly_right` - Lateral movement
+- `jib_up` - Vertical rise
+- `static` - No camera movement
+
+**Next Steps**:
+1. Build v51 image: `docker build -f Dockerfile.patch.v51 -t 88dreams/gen3c-runpod:v51 .`
+2. Push to Docker Hub
+3. Update existing gen3c-serverless endpoint to v51
+4. Add UI integration
+
+**Usage**: Same endpoint as Gen3C/SHARP/Lyra, just use `"model": "ltx2"`
+
+**Documentation**: `docs/LTX2_INTEGRATION_PLAN.md`
+
+---
+
+### TRELLIS.2 Consolidated into Unified (January 13, 2026)
+
+**Change**: TRELLIS.2 moved from separate endpoint to unified handler.
+
+**Why**: The dependency issue (transformers 4.48.0) is now resolved in unified v52.
+
+**Before**: Separate `trellis-serverless` endpoint with `trellis-runpod:v10` image  
+**After**: Use `gen3c-serverless` with `"model": "trellis"`
+
+**Files Changed**:
+- `runpod/gen3c/handler_unified.py` - Fixed `run_trellis()` implementation
+- `runpod/gen3c/trellis_inference.py` - Copied from trellis/ directory
+- `runpod/gen3c/Dockerfile.patch.v52` - Includes trellis_inference.py
+
+**UI Note**: In Settings, users can now use the unified Gen3C endpoint ID for TRELLIS.2 generation (the separate Trellis endpoint field is for backwards compatibility only).
+
+---
+
+### SEVA (Stable Virtual Camera) Integration (January 13, 2026)
+
+**Goal**: Add precise camera control video generation from single images.
+
+**Use Case**: Generate camera movement videos (pan, tilt, orbit, etc.) that can be fed into the 2DGS pipeline for better 3D reconstruction than Gen3C provides.
+
+**Status**: ⏸️ **Blocked** - Awaiting HuggingFace Model Access
+
+**Completed**:
+- `runpod/seva/Dockerfile` - Docker image definition ✅
+- `runpod/seva/handler_seva.py` - Serverless handler with S3 support ✅
+- `runpod/seva/start_seva.sh` - Startup script with HF login ✅
+- `runpod/seva/README.md` - Deployment documentation ✅
+- `runpod/runpod_client.py` - Added SEVAServerlessClient, SEVAResult ✅
+- `generators/seva.py` - Generator module with trajectory helpers ✅
+- Docker image built and pushed: `88dreams/seva-runpod:v1` ✅
+
+**Next Steps**:
+1. Request HuggingFace access: https://huggingface.co/stabilityai/stable-virtual-camera
+2. Create RunPod serverless endpoint with `88dreams/seva-runpod:v1`
+3. Add UI integration
+
+**Documentation**: `docs/STABLE_VIRTUAL_CAMERA_PLAN.md`
+
+---
 
 ### 2DGS Pipeline: ViPE + 2DGS (January 11-12, 2026)
 
@@ -133,10 +221,11 @@ Created combined ViPE + 2DGS serverless endpoint for video-to-mesh reconstructio
 
 | Image | Models | Current Version |
 |-------|--------|-----------------|
-| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR | v50 |
-| `88dreams/trellis-runpod` | TRELLIS.2 | v10 |
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, **LTX-2**, **TRELLIS.2** ⭐ | v51 → **v52** |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
 | `88dreams/2dgs-pipeline` | ViPE + 2DGS | v20 ✅ |
+| `88dreams/seva-runpod` | SEVA (camera control) | v1 (blocked - HF access) |
+| ~~`88dreams/trellis-runpod`~~ | ~~TRELLIS.2~~ | **DEPRECATED** - Use unified |
 
 ### Build Commands
 
@@ -158,14 +247,34 @@ docker push 88dreams/2dgs-pipeline:vXX
 
 | Endpoint Name | Image | Purpose |
 |---------------|-------|---------|
-| `gen3c-serverless` | gen3c-runpod:v50 | Multi-model (Gen3C, Lyra, SHARP) |
-| `trellis-serverless` | trellis-runpod:v10 | TRELLIS.2 3D generation |
+| `gen3c-serverless` | gen3c-runpod:**v52** | Multi-model (Gen3C, Lyra, SHARP, **TRELLIS.2**, **LTX-2**) ⭐ |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
 | `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
+| `seva-serverless` | seva-runpod:v1 | Novel view video - blocked (HF access) |
+| ~~`trellis-serverless`~~ | ~~trellis-runpod:v10~~ | **TERMINATED** - Use gen3c-serverless |
 
 ---
 
 ## Key Files
+
+### LTX-2 (Lightricks Video) ⭐ NEW - Added to Unified Handler
+| File | Purpose |
+|------|---------|
+| `runpod/gen3c/handler_unified.py` | Added handle_ltx2(), validate_ltx2(), run_ltx2() |
+| `runpod/gen3c/Dockerfile.patch.v51` | Patch to add diffusers to v50 |
+| `generators/ltx2.py` | Generator module |
+| `docs/LTX2_INTEGRATION_PLAN.md` | Integration plan |
+| `runpod/ltx2/*` | Standalone fallback (if unified doesn't work) |
+
+### SEVA (Stable Virtual Camera)
+| File | Purpose |
+|------|---------|
+| `runpod/seva/Dockerfile` | Docker image definition |
+| `runpod/seva/handler_seva.py` | Serverless handler |
+| `runpod/seva/start_seva.sh` | Startup script with HF login |
+| `runpod/seva/README.md` | Deployment instructions |
+| `generators/seva.py` | Generator module with trajectory helpers |
+| `docs/STABLE_VIRTUAL_CAMERA_PLAN.md` | Integration plan |
 
 ### 2DGS Pipeline
 | File | Purpose |
@@ -240,6 +349,11 @@ RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py --health
 
 ## Known Issues / Next Steps
 
+### 0. SEVA Integration 🔧 IN PROGRESS
+- Infrastructure complete (Dockerfile, handler, client, generator)
+- **Blocker**: Requires HuggingFace model access approval
+- Next: Build Docker image, create RunPod endpoint, add UI
+
 ### 1. 2DGS Pipeline (v20) ✅ COMPLETE
 - Successfully generates high-quality meshes from Gen3C video
 - Auto-downloads to `/srv/searidge_share/outputs/mesh_2dgs/`
@@ -284,5 +398,5 @@ RUNPOD_API_KEY="your_key" python scripts/test_2dgs_pipeline.py --health
 
 ---
 
-*Last Updated: January 12, 2026 (evening)*
+*Last Updated: January 13, 2026 (added LTX-2 integration)*
 

@@ -1,0 +1,61 @@
+# =============================================================================
+# Patch Dockerfile v51 - Add LTX-2 Support
+# =============================================================================
+# 
+# Adds Lightricks LTX-2 video generation with camera control LoRAs
+# to the existing unified multi-model handler.
+#
+# New model: LTX-2 (Lightricks)
+#   - High-quality video generation (up to 4K @ 50fps)
+#   - Camera control via LoRAs (dolly, jib, static)
+#   - Uses diffusers pipeline
+#
+# Usage:
+#   docker build -f Dockerfile.patch.v51 -t 88dreams/gen3c-runpod:v51 .
+#   docker push 88dreams/gen3c-runpod:v51
+#
+# =============================================================================
+
+# Base on current stable version
+FROM 88dreams/gen3c-runpod:v50
+
+# =============================================================================
+# Install LTX-2 Dependencies
+# =============================================================================
+# LTX-2 uses diffusers pipeline - simple pip install
+RUN source /root/miniforge3/bin/activate cosmos-predict1 && \
+    echo "Installing LTX-2 dependencies (diffusers)..." && \
+    pip install --no-cache-dir \
+        "diffusers>=0.32.0" \
+        sentencepiece \
+        packaging && \
+    echo "✓ LTX-2 dependencies installed"
+
+# Verify diffusers installation
+RUN source /root/miniforge3/bin/activate cosmos-predict1 && \
+    python -c "import diffusers; print(f'diffusers version: {diffusers.__version__}')" && \
+    python -c "from diffusers import LTXPipeline; print('✓ LTXPipeline available')"
+
+# =============================================================================
+# Update Handler with LTX-2 Support
+# =============================================================================
+COPY handler_unified.py /workspace/handler.py
+
+# Update startup script if needed (no changes required for v51)
+COPY start_unified.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+# Add LTX-2 specific environment variables
+ENV LTX2_MODEL_ID="Lightricks/LTX-Video"
+ENV LTX2_CHECKPOINT_DIR="/runpod-volume/checkpoints/ltx2"
+
+# Create LTX-2 output directory
+RUN mkdir -p /runpod-volume/outputs/ltx2
+
+# =============================================================================
+# Startup Command
+# =============================================================================
+CMD ["/workspace/start.sh"]

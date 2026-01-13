@@ -17,8 +17,8 @@ import gradio as gr  # type: ignore
 TRELLIS_DEFAULT_OUTPUT_DIR = "/srv/searidge_share/outputs/trellis"
 
 
-# TRELLIS.2 has its own dedicated endpoint
-TRELLIS_DEFAULT_ENDPOINT_ID = "lmhhb0z7aig0r4"
+# TRELLIS.2 now uses unified endpoint (gen3c-serverless)
+# No separate endpoint needed
 
 
 def create_trellis_tab(
@@ -35,8 +35,8 @@ def create_trellis_tab(
     Returns:
         Dictionary of all UI components for event handler binding
     """
-    # Use provided default (from saved config), fallback to hardcoded if not set
-    trellis_endpoint = default_endpoint_id or TRELLIS_DEFAULT_ENDPOINT_ID
+    # Use provided default (from saved config)
+    trellis_endpoint = default_endpoint_id
     
     gr.Markdown("""
     **Image → High-Quality 3D with PBR Materials**
@@ -44,7 +44,7 @@ def create_trellis_tab(
     Microsoft's TRELLIS.2 generates production-ready 3D models with O-Voxel representation.
     Outputs GLB files with full PBR materials (Base Color, Roughness, Metallic, Opacity).
     
-    *4B parameter model - Runs on dedicated TRELLIS.2 endpoint*
+    *4B parameter model - Uses unified Gen3C endpoint*
     """)
     
     # Execution Settings
@@ -63,12 +63,11 @@ def create_trellis_tab(
         )
         
         # RunPod Serverless Settings
-        # TRELLIS.2 uses its own dedicated endpoint
+        # TRELLIS.2 uses unified endpoint (gen3c-serverless)
         with gr.Group(visible=True) as serverless_settings:
-            # TRELLIS.2 has a dedicated endpoint, but shares API key
             _has_api_key = bool(default_api_key)
             
-            gr.Markdown(f"*Using dedicated TRELLIS.2 endpoint: `{trellis_endpoint}`*")
+            gr.Markdown(f"*Using unified endpoint (configure in Settings tab)*")
             
             with gr.Row():
                 check_serverless_btn = gr.Button("Check Status", size="sm")
@@ -76,11 +75,11 @@ def create_trellis_tab(
                 edit_creds_btn = gr.Button("Edit Credentials", size="sm")
             
             with gr.Group(visible=not _has_api_key) as creds_group:
-                # Endpoint ID is pre-set for TRELLIS.2
+                # Uses unified endpoint from Settings
                 endpoint_id = gr.Textbox(
                     value=trellis_endpoint,
-                    label="Endpoint ID (TRELLIS.2 dedicated)",
-                    interactive=False,  # Don't allow editing - it's fixed
+                    label="Endpoint ID (from Settings)",
+                    interactive=False,
                 )
                 api_key = gr.Textbox(
                     value=default_api_key,
