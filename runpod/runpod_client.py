@@ -2667,15 +2667,36 @@ class LTX2ServerlessClient:
         try:
             import boto3
             import os
+            from pathlib import Path
             from dotenv import load_dotenv
             
+            # Load credentials
             load_dotenv()
+            
+            # Also try loading from the 3d_studio config
+            config_path = Path.home() / ".config" / "3d_studio" / "aws_credentials.env"
+            if config_path.exists():
+                load_dotenv(config_path)
+            
+            access_key = os.getenv("AWS_ACCESS_KEY_ID")
+            secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+            
+            if not access_key or not secret_key:
+                print(f"[LTX2] ERROR: AWS credentials not found in environment")
+                return None
+            
+            # Verify file exists
+            if not os.path.exists(file_path):
+                print(f"[LTX2] ERROR: File not found: {file_path}")
+                return None
+            
+            print(f"[LTX2] Uploading {file_path} to s3://{bucket}/{s3_key}")
             
             s3_client = boto3.client(
                 's3',
                 region_name=region,
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key
             )
             
             # Upload
@@ -2683,10 +2704,13 @@ class LTX2ServerlessClient:
             
             # Return URL
             url = f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            print(f"[LTX2] Upload successful: {url}")
             return url
             
         except Exception as e:
-            print(f"S3 upload error: {e}")
+            print(f"[LTX2] S3 upload error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _download_from_s3(
