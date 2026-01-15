@@ -959,4 +959,230 @@ button[role="tab"][aria-selected="true"],
     background: var(--text-muted);
 }
 
+/* ============================================
+   VIDEO LIST - SINGLE COLUMN LAYOUT (2DGS Tab)
+   ============================================ */
+
+/* Force single column layout for video checkbox group */
+.video-list-single-column {
+    max-height: 350px !important;
+    overflow-y: auto !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px !important;
+    background: var(--bg-primary) !important;
+    padding: 8px !important;
+}
+
+.video-list-single-column > div {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+}
+
+/* Each checkbox item as a row */
+.video-list-single-column label {
+    display: flex !important;
+    align-items: center !important;
+    padding: 8px 12px !important;
+    margin: 0 !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    transition: background 0.15s ease !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.video-list-single-column label:hover {
+    background: rgba(255, 124, 0, 0.1) !important;
+}
+
+.video-list-single-column label:has(input:checked) {
+    background: rgba(255, 124, 0, 0.2) !important;
+    border-left: 3px solid var(--accent-primary) !important;
+}
+
+.video-list-single-column input[type="checkbox"] {
+    margin-right: 12px !important;
+    flex-shrink: 0 !important;
+}
+
+.video-list-single-column label span {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 0.95em !important;
+}
+
+/* Model tag styling within video names */
+.video-list-single-column label span:first-of-type {
+    font-family: monospace !important;
+}
+
+/* Currently playing video highlight in list */
+.video-list-single-column label.video-playing {
+    background: rgba(34, 197, 94, 0.25) !important;
+    border-left: 3px solid var(--success) !important;
+    animation: pulse-playing 2s ease-in-out infinite !important;
+}
+
+@keyframes pulse-playing {
+    0%, 100% { background: rgba(34, 197, 94, 0.25); }
+    50% { background: rgba(34, 197, 94, 0.35); }
+}
+
+/* Video slot labels above preview boxes */
+.video-slot-label {
+    margin-bottom: 4px !important;
+    padding: 4px 8px !important;
+    background: var(--bg-tertiary) !important;
+    border-radius: 4px !important;
+    font-size: 0.85em !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    transition: opacity 0.15s ease !important;
+}
+
+.video-slot-label p {
+    margin: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Smooth transitions for video preview updates (2DGS and LTX-2) */
+#twodgs-video-1,
+#twodgs-video-2,
+#twodgs-video-3,
+#twodgs-video-4,
+#ltx2-video-1,
+#ltx2-video-2,
+#ltx2-video-3,
+#ltx2-video-4 {
+    transition: opacity 0.15s ease !important;
+}
+
+#twodgs-video-1 video,
+#twodgs-video-2 video,
+#twodgs-video-3 video,
+#twodgs-video-4 video,
+#ltx2-video-1 video,
+#ltx2-video-2 video,
+#ltx2-video-3 video,
+#ltx2-video-4 video {
+    transition: opacity 0.2s ease !important;
+}
+
+/* Play All button styling (2DGS and LTX-2) */
+#play-all-btn,
+#play-all-btn button,
+#ltx2-play-all-btn,
+#ltx2-play-all-btn button {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-color) !important;
+    font-size: 0.9em !important;
+    padding: 6px 12px !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    color: var(--text-primary) !important;
+}
+
+#play-all-btn:hover,
+#play-all-btn button:hover,
+#ltx2-play-all-btn:hover,
+#ltx2-play-all-btn button:hover {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    color: #ffffff !important;
+}
+
+#play-all-btn:active,
+#play-all-btn button:active,
+#ltx2-play-all-btn:active,
+#ltx2-play-all-btn button:active {
+    transform: scale(0.95) !important;
+    background: var(--accent-secondary) !important;
+    color: #ffffff !important;
+}
+
+"""
+
+# JavaScript for video preview interactions
+VIDEO_PREVIEW_JS = """
+<script>
+(function() {
+    // Track which video slot maps to which display name
+    let videoSlotMap = {};
+    let listenersAttached = new Set();
+    
+    // Read slot map from hidden span element
+    function updateSlotMapFromDOM() {
+        const dataEl = document.getElementById('slot-map-data');
+        if (dataEl) {
+            videoSlotMap = {
+                1: dataEl.dataset.slot1 || null,
+                2: dataEl.dataset.slot2 || null,
+                3: dataEl.dataset.slot3 || null,
+                4: dataEl.dataset.slot4 || null
+            };
+        }
+    }
+    
+    // Initialize video event listeners
+    function initVideoListeners() {
+        updateSlotMapFromDOM();
+        
+        for (let i = 1; i <= 4; i++) {
+            const container = document.getElementById('twodgs-video-' + i);
+            if (container) {
+                const video = container.querySelector('video');
+                if (video && !listenersAttached.has(video)) {
+                    video.dataset.slotIndex = i;
+                    
+                    // On play, highlight corresponding item in list
+                    video.addEventListener('play', function() {
+                        updateSlotMapFromDOM();
+                        highlightVideoInList(parseInt(this.dataset.slotIndex));
+                    });
+                    
+                    listenersAttached.add(video);
+                }
+            }
+        }
+    }
+    
+    // Highlight the video item in the checkbox list
+    function highlightVideoInList(slotIndex) {
+        document.querySelectorAll('.video-list-single-column label.video-playing').forEach(el => {
+            el.classList.remove('video-playing');
+        });
+        
+        const displayName = videoSlotMap[slotIndex];
+        if (displayName) {
+            const labels = document.querySelectorAll('.video-list-single-column label');
+            labels.forEach(label => {
+                const span = label.querySelector('span');
+                if (span && span.textContent.trim() === displayName) {
+                    label.classList.add('video-playing');
+                    label.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            });
+        }
+    }
+    
+    // Initialize video listeners
+    function init() {
+        initVideoListeners();
+    }
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        setTimeout(init, 500);
+    }
+    
+    // Re-init periodically to catch dynamically loaded videos
+    setInterval(initVideoListeners, 2000);
+})();
+</script>
 """

@@ -68,20 +68,37 @@ def create_2dgs_tab(
                 # Select from directories option (default)
                 with gr.Column(visible=True) as select_group:
                     gr.Markdown("**Available Videos** (Gen3C + LTX-2)")
+                    
+                    # Sort and filter controls
+                    with gr.Row():
+                        video_sort_by = gr.Dropdown(
+                            choices=["Date (newest)", "Date (oldest)", "Filename (A-Z)", "Filename (Z-A)", "Model (Gen3C first)", "Model (LTX-2 first)"],
+                            value="Date (newest)",
+                            label="Sort by",
+                            scale=2,
+                        )
+                        video_limit = gr.Dropdown(
+                            choices=["10", "20", "30", "50", "All"],
+                            value="10",
+                            label="Show",
+                            scale=1,
+                        )
+                        refresh_videos_btn = gr.Button("🔄", size="sm", scale=0, min_width=40)
+                    
+                    # Single-column video list with custom CSS
                     video_checkboxes = gr.CheckboxGroup(
                         choices=[],
                         value=[],
-                        label="Select up to 4 videos",
-                        info="Videos from Gen3C and LTX-2 directories",
+                        label="",
+                        info="",
+                        elem_classes=["video-list-single-column"],
                     )
-                    with gr.Row():
-                        refresh_videos_btn = gr.Button("Refresh", size="sm")
-                        selected_count = gr.Markdown("**Selected: 0/4**")
+                    selected_count = gr.Markdown("**Selected: 0**")
                 
                 # Upload option
                 with gr.Column(visible=False) as upload_group:
                     video_uploads = gr.File(
-                        label="Upload Videos (up to 4)",
+                        label="Upload Videos (max configurable in Advanced Options)",
                         file_count="multiple",
                         file_types=[".mp4", ".avi", ".mov"],
                     )
@@ -121,6 +138,31 @@ def create_2dgs_tab(
                     label="Output Name",
                 )
             
+            # ADVANCED OPTIONS
+            with gr.Accordion("Advanced Options", open=False):
+                with gr.Row():
+                    max_videos = gr.Slider(
+                        minimum=4,
+                        maximum=8,
+                        value=4,
+                        step=1,
+                        label="Max Videos",
+                        info="More videos = better quality, longer processing"
+                    )
+                    depth_threshold = gr.Slider(
+                        minimum=0.3,
+                        maximum=0.7,
+                        value=0.5,
+                        step=0.1,
+                        label="Depth Coverage Threshold",
+                        info="Frames below this coverage % are skipped"
+                    )
+                gr.Markdown("""
+                **Advanced Settings:**
+                - **Max Videos**: More camera angles improve 3D reconstruction quality
+                - **Depth Threshold**: Higher values filter out more low-quality frames
+                """)
+            
             # GENERATE BUTTON
             generate_btn = gr.Button(
                 "Generate 3D Mesh",
@@ -143,36 +185,50 @@ def create_2dgs_tab(
         
         # RIGHT COLUMN: Previews
         with gr.Column(scale=1):
-            gr.Markdown("### Selected Videos (0/4)")
+            with gr.Row():
+                gr.Markdown("### Video Previews")
+                play_all_btn = gr.Button("▶ Play All", size="sm", scale=0, min_width=100, elem_id="play-all-btn")
             selected_videos_label = gr.Markdown("*No videos selected*")
             
-            # Video preview grid (2x2)
+            # Video preview grid (2x2) with filename labels above each
             with gr.Row():
-                video_preview_1 = gr.Video(
-                    label="Video 1",
-                    height=180,
-                    visible=True,
-                    interactive=False,
-                )
-                video_preview_2 = gr.Video(
-                    label="Video 2", 
-                    height=180,
-                    visible=True,
-                    interactive=False,
-                )
+                with gr.Column(scale=1, min_width=150):
+                    video_label_1 = gr.Markdown("**1.** —", elem_classes=["video-slot-label"])
+                    video_preview_1 = gr.Video(
+                        label="",
+                        height=170,
+                        visible=True,
+                        interactive=False,
+                        elem_id="twodgs-video-1",
+                    )
+                with gr.Column(scale=1, min_width=150):
+                    video_label_2 = gr.Markdown("**2.** —", elem_classes=["video-slot-label"])
+                    video_preview_2 = gr.Video(
+                        label="", 
+                        height=170,
+                        visible=True,
+                        interactive=False,
+                        elem_id="twodgs-video-2",
+                    )
             with gr.Row():
-                video_preview_3 = gr.Video(
-                    label="Video 3",
-                    height=180,
-                    visible=True,
-                    interactive=False,
-                )
-                video_preview_4 = gr.Video(
-                    label="Video 4",
-                    height=180,
-                    visible=True,
-                    interactive=False,
-                )
+                with gr.Column(scale=1, min_width=150):
+                    video_label_3 = gr.Markdown("**3.** —", elem_classes=["video-slot-label"])
+                    video_preview_3 = gr.Video(
+                        label="",
+                        height=170,
+                        visible=True,
+                        interactive=False,
+                        elem_id="twodgs-video-3",
+                    )
+                with gr.Column(scale=1, min_width=150):
+                    video_label_4 = gr.Markdown("**4.** —", elem_classes=["video-slot-label"])
+                    video_preview_4 = gr.Video(
+                        label="",
+                        height=170,
+                        visible=True,
+                        interactive=False,
+                        elem_id="twodgs-video-4",
+                    )
             
             # 3D Output Preview
             gr.Markdown("### 3D Mesh Output")
@@ -210,6 +266,8 @@ def create_2dgs_tab(
         "video_source": video_source,
         "select_group": select_group,
         "video_checkboxes": video_checkboxes,
+        "video_sort_by": video_sort_by,
+        "video_limit": video_limit,
         "refresh_videos_btn": refresh_videos_btn,
         "selected_count": selected_count,
         "upload_group": upload_group,
@@ -217,10 +275,15 @@ def create_2dgs_tab(
         
         # Video previews
         "selected_videos_label": selected_videos_label,
+        "video_label_1": video_label_1,
+        "video_label_2": video_label_2,
+        "video_label_3": video_label_3,
+        "video_label_4": video_label_4,
         "video_preview_1": video_preview_1,
         "video_preview_2": video_preview_2,
         "video_preview_3": video_preview_3,
         "video_preview_4": video_preview_4,
+        "play_all_btn": play_all_btn,
         
         # Parameters
         "iterations": iterations,
@@ -228,6 +291,10 @@ def create_2dgs_tab(
         "output_format": output_format,
         "output_dir": output_dir,
         "output_name": output_name,
+        
+        # Advanced options
+        "max_videos": max_videos,
+        "depth_threshold": depth_threshold,
         
         # Execution
         "generate_btn": generate_btn,

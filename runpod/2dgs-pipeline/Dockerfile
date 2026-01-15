@@ -151,6 +151,7 @@ WORKDIR /opt/pipeline
 COPY handler.py /opt/pipeline/
 COPY vipe_to_2dgs.py /opt/pipeline/
 COPY init_points_from_depth.py /opt/pipeline/
+COPY multi_video_merge.py /opt/pipeline/
 
 # Install RunPod
 RUN pip install runpod boto3 requests

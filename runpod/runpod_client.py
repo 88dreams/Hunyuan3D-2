@@ -1786,6 +1786,133 @@ class TwoDGSPipelineClient:
             "model": "2dgs"
         }
     
+    def submit_multi_video_job(
+        self,
+        video_paths: List[str],
+        iterations: int = 5000,
+        mesh_quality: str = "high",
+        output_format: str = "glb",
+        depth_threshold: float = 0.5,
+        s3_bucket: str = "arkrunr",
+        s3_region: str = "us-west-1",
+        s3_prefix: str = "MediaContent/2dgs-pipeline/inputs/",
+        progress_callback: Optional[Callable[[str, float], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        Submit a multi-video 2DGS pipeline job.
+        
+        Multiple videos from different camera angles are combined for
+        better 3D reconstruction quality. Frame 0 is used as the anchor
+        point for pose alignment.
+        
+        Args:
+            video_paths: List of local video file paths (1-8 videos)
+            iterations: 2DGS training iterations
+            mesh_quality: Mesh quality preset (fast, balanced, high, ultra)
+            output_format: Output format (glb, obj, ply)
+            depth_threshold: Min depth coverage to keep frame (0.0-1.0)
+            s3_bucket: S3 bucket for input/output
+            s3_region: S3 region
+            s3_prefix: S3 key prefix for video uploads
+            progress_callback: Optional callback(status_msg, elapsed_seconds)
+            
+        Returns:
+            Dict with job_id and status
+        """
+        import os
+        import boto3
+        from datetime import datetime
+        
+        start_time = time.time()
+        
+        def log(msg: str):
+            print(msg)
+            if progress_callback:
+                progress_callback(msg, time.time() - start_time)
+        
+        # Validate video count
+        if len(video_paths) < 1:
+            return {"status": "error", "error": "At least 1 video is required"}
+        if len(video_paths) > 8:
+            return {"status": "error", "error": f"Maximum 8 videos allowed, got {len(video_paths)}"}
+        
+        # Validate all videos exist
+        for path in video_paths:
+            if not os.path.exists(path):
+                return {"status": "error", "error": f"Video not found: {path}"}
+        
+        log(f"[2DGS Multi] Uploading {len(video_paths)} videos to S3...")
+        
+        # Upload all videos to S3
+        video_urls = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        try:
+            access_key = os.getenv("AWS_ACCESS_KEY_ID")
+            secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+            
+            if not access_key or not secret_key:
+                return {"status": "error", "error": "AWS credentials not found"}
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=s3_region,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key
+            )
+            
+            for idx, video_path in enumerate(video_paths):
+                filename = os.path.basename(video_path)
+                s3_key = f"{s3_prefix}{timestamp}/video_{idx:02d}_{filename}"
+                
+                log(f"  [{idx+1}/{len(video_paths)}] Uploading {filename}...")
+                s3_client.upload_file(video_path, s3_bucket, s3_key)
+                
+                url = f"https://{s3_bucket}.s3.{s3_region}.amazonaws.com/{s3_key}"
+                video_urls.append(url)
+                
+            log(f"[2DGS Multi] All {len(video_urls)} videos uploaded")
+            
+        except Exception as e:
+            return {"status": "error", "error": f"S3 upload failed: {str(e)}"}
+        
+        # Build payload with video_urls array
+        payload = {
+            "input": {
+                "video_urls": video_urls,
+                "iterations": iterations,
+                "mesh_quality": mesh_quality,
+                "output_format": output_format,
+                "depth_threshold": depth_threshold,
+                "output_s3": {
+                    "bucket": s3_bucket,
+                    "region": s3_region,
+                    "prefix": f"MediaContent/2dgs-pipeline/outputs/{timestamp}/"
+                }
+            }
+        }
+        
+        log(f"[2DGS Multi] Submitting job with {len(video_urls)} videos...")
+        
+        response = requests.post(
+            f"{self.base_url}/run",
+            headers=self._headers(),
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        job_id = result.get("id", "")
+        log(f"[2DGS Multi] Job submitted: {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "status": result.get("status", "unknown").lower(),
+            "model": "2dgs-multi",
+            "videos_submitted": len(video_urls)
+        }
+    
     def get_status(self, job_id: str) -> Dict[str, Any]:
         """Get job status."""
         response = requests.get(
@@ -1821,6 +1948,11 @@ class TwoDGSPipelineClient:
                 normalized["num_frames"] = output.get("num_frames")
                 normalized["iterations"] = output.get("iterations")
                 normalized["elapsed_seconds"] = output.get("elapsed_seconds")
+                
+                # Include quality_stats from multi-video mode
+                if "quality_stats" in output:
+                    normalized["quality_stats"] = output["quality_stats"]
+                
                 if output.get("status") == "error":
                     normalized["status"] = "failed"
                     normalized["error"] = output.get("error", "Unknown error")

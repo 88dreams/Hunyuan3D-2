@@ -348,14 +348,74 @@ def log_mesh_cleanup_experiment(
 # =============================================================================
 
 def sharp_param_filename(base_name: str, guidance: float, steps: int, ext: str = ".glb") -> str:
-    """Generate SHARP param-encoded filename."""
+    """Generate SHARP param-encoded filename for PLY generation."""
     return generate_param_filename(base_name, "sharp", {"g": guidance, "s": steps}, ext)
 
 
-def gen3c_param_filename(base_name: str, frames: int, trajectory: str, ext: str = ".mp4") -> str:
-    """Generate Gen3C param-encoded filename."""
+def sharp_video_param_filename(
+    base_name: str, 
+    guidance: float, 
+    steps: int, 
+    lateral_offset: float,
+    zoom_forward: float,
+    ext: str = ".mp4"
+) -> str:
+    """Generate SHARP video param-encoded filename.
+    
+    Args:
+        base_name: Base filename
+        guidance: Guidance scale
+        steps: Inference steps
+        lateral_offset: Lateral camera movement (max_disparity)
+        zoom_forward: Forward zoom movement (max_zoom)
+        ext: File extension
+    
+    Returns:
+        Encoded filename like: sharp_kitchen_g75_s50_lo008_zf015.mp4
+    """
+    # Format floats without decimal: 0.08 -> 008, 0.15 -> 015
+    lo_str = f"{int(lateral_offset * 100):03d}"
+    zf_str = f"{int(zoom_forward * 100):03d}"
+    return generate_param_filename(
+        base_name, "sharp", 
+        {"g": guidance, "s": steps, "lo": lo_str, "zf": zf_str}, 
+        ext
+    )
+
+
+def gen3c_param_filename(
+    base_name: str, 
+    frames: int, 
+    trajectory: str, 
+    movement_distance: float = 1.0,
+    guidance: float = 1.0,
+    seed: int = 42,
+    ext: str = ".mp4"
+) -> str:
+    """Generate Gen3C param-encoded filename.
+    
+    Args:
+        base_name: Base filename
+        frames: Number of frames
+        trajectory: Camera trajectory name
+        movement_distance: Camera movement distance
+        guidance: Guidance scale
+        seed: Random seed
+        ext: File extension
+    
+    Returns:
+        Encoded filename like: gen3c_room_f121_tclo_md10_g10_s42.mp4
+    """
     traj_short = trajectory[:3] if trajectory else "unk"
-    return generate_param_filename(base_name, "gen3c", {"f": frames, "t": traj_short}, ext)
+    # Format movement distance: 1.0 -> 10, 0.5 -> 05
+    md_str = f"{int(movement_distance * 10):02d}"
+    # Format guidance: 1.0 -> 10
+    g_str = f"{int(guidance * 10):02d}"
+    return generate_param_filename(
+        base_name, "gen3c", 
+        {"f": frames, "t": traj_short, "md": md_str, "g": g_str, "s": seed}, 
+        ext
+    )
 
 
 def lyra_param_filename(base_name: str, guidance: float, sdg_steps: int, ext: str = ".ply") -> str:
@@ -378,6 +438,81 @@ def cleanup_param_filename(base_name: str, target_tris: int, preserve_detail: bo
     return generate_param_filename(base_name, "cleanup", {"t": target_tris, "pd": preserve_detail, "ps": post_smooth}, ext)
 
 
+def ltx2_param_filename(
+    base_name: str,
+    model: str,
+    duration: float,
+    resolution: str,
+    camera_motion: str,
+    ext: str = ".mp4"
+) -> str:
+    """Generate LTX-2 param-encoded filename.
+    
+    Args:
+        base_name: Base filename
+        model: Model name (ltx-video-2-1 or ltx-video-2-1-fast)
+        duration: Video duration in seconds
+        resolution: Resolution string (e.g., "1080p", "720p")
+        camera_motion: Camera motion type (underscores removed)
+        ext: File extension
+    
+    Returns:
+        Encoded filename like: ltx2_CBGB1_mpro_d6_r1080p_dollyout.mp4
+    """
+    # Shorten model name: ltx-video-2-1 -> pro, ltx-video-2-1-fast -> fast
+    model_short = "fast" if "fast" in model.lower() else "pro"
+    # Remove underscores from motion
+    motion_clean = camera_motion.replace("_", "") if camera_motion else "static"
+    # Format duration as integer
+    dur_int = int(duration) if duration else 5
+    # Clean resolution (keep just the number+p)
+    res_clean = resolution.lower().replace(" ", "") if resolution else "720p"
+    
+    return f"ltx2_{base_name}_m{model_short}_d{dur_int}_{res_clean}_{motion_clean}{ext}"
+
+
+def twodgs_param_filename(input_basenames: list, ext: str = ".glb") -> str:
+    """Generate 2DGS param-encoded filename from input video basenames.
+    
+    Args:
+        input_basenames: List of input video base names (without extension/motion suffix)
+        ext: File extension
+    
+    Returns:
+        Encoded filename like: 2dgs_CBGB1.glb or 2dgs_CBGB1_CBGB2.glb
+    """
+    if not input_basenames:
+        return f"2dgs_output{ext}"
+    
+    # Deduplicate and join basenames
+    unique_names = []
+    for name in input_basenames:
+        if name and name not in unique_names:
+            unique_names.append(name)
+    
+    names_str = "_".join(unique_names[:3])  # Limit to 3 to avoid overly long names
+    if len(unique_names) > 3:
+        names_str += f"_plus{len(unique_names) - 3}"
+    
+    return f"2dgs_{names_str}{ext}"
+
+
+def mesh_extract_param_filename(input_filename: str, ext: str = ".glb") -> str:
+    """Generate Mesh Extraction param-encoded filename.
+    
+    Args:
+        input_filename: Full input filename (with or without extension)
+        ext: Output file extension
+    
+    Returns:
+        Encoded filename like: lyra_bedroom_g75_sdg250_processed.glb
+    """
+    from pathlib import Path
+    # Get the full stem (name without extension)
+    stem = Path(input_filename).stem if input_filename else "mesh"
+    return f"{stem}_processed{ext}"
+
+
 if __name__ == "__main__":
     # Test the logger
     print(f"Log directory: {LOG_DIR}")
@@ -386,10 +521,14 @@ if __name__ == "__main__":
     
     # Test filename generation
     print("\nFilename examples:")
-    print(f"  SHARP: {sharp_param_filename('kitchen', 10.0, 50)}")
-    print(f"  Gen3C: {gen3c_param_filename('room', 121, 'clockwise')}")
-    print(f"  Lyra: {lyra_param_filename('bedroom', 9.0, 350)}")
-    print(f"  Trellis: {trellis_param_filename('chair', 1024, 7.5)}")
-    print(f"  Hunyuan: {hunyuan_param_filename('sofa', 10.0, 9)}")
-    print(f"  Cleanup: {cleanup_param_filename('mesh', 300000, True, 2)}")
+    print(f"  SHARP (PLY):   {sharp_param_filename('kitchen', 10.0, 50)}")
+    print(f"  SHARP (video): {sharp_video_param_filename('kitchen', 7.5, 50, 0.08, 0.15)}")
+    print(f"  Gen3C:         {gen3c_param_filename('room', 121, 'clockwise', 1.0, 1.0, 42)}")
+    print(f"  Lyra:          {lyra_param_filename('bedroom', 9.0, 350)}")
+    print(f"  Trellis:       {trellis_param_filename('chair', 1024, 7.5)}")
+    print(f"  Hunyuan:       {hunyuan_param_filename('sofa', 10.0, 9)}")
+    print(f"  Cleanup:       {cleanup_param_filename('mesh', 300000, True, 2)}")
+    print(f"  LTX-2:         {ltx2_param_filename('CBGB1', 'ltx-video-2-1', 6.0, '1080p', 'dolly_out')}")
+    print(f"  2DGS:          {twodgs_param_filename(['CBGB1', 'CBGB2'])}")
+    print(f"  Mesh Extract:  {mesh_extract_param_filename('lyra_bedroom_g75.ply')}")
 

@@ -76,13 +76,26 @@ def handle_sharp_generation(
     effective_output_name = output_name
     if encode_params:
         try:
-            from scripts.experiment_logger import sharp_param_filename
-            encoded_name = sharp_param_filename(
-                base_name=output_name,
-                guidance=7.5,  # Default - not exposed in UI
-                steps=50,  # Default - not exposed in UI
-                ext=""  # No extension
-            )
+            if render_video:
+                # Video mode: include lateral offset and zoom forward
+                from scripts.experiment_logger import sharp_video_param_filename
+                encoded_name = sharp_video_param_filename(
+                    base_name=output_name,
+                    guidance=7.5,  # Default - not exposed in UI
+                    steps=50,  # Default - not exposed in UI
+                    lateral_offset=float(max_disparity),
+                    zoom_forward=float(max_zoom),
+                    ext=""  # No extension
+                )
+            else:
+                # PLY-only mode
+                from scripts.experiment_logger import sharp_param_filename
+                encoded_name = sharp_param_filename(
+                    base_name=output_name,
+                    guidance=7.5,  # Default - not exposed in UI
+                    steps=50,  # Default - not exposed in UI
+                    ext=""  # No extension
+                )
             effective_output_name = encoded_name.rstrip(".")
         except Exception as e:
             print(f"[SHARP] Warning: Could not encode params in filename: {e}")
@@ -200,6 +213,9 @@ def handle_gen3c_generation(
                 base_name=video_name,
                 frames=int(frames) if frames else 121,
                 trajectory=trajectory,
+                movement_distance=float(movement_distance) if movement_distance else 1.0,
+                guidance=float(guidance) if guidance else 1.0,
+                seed=int(seed) if seed else 42,
                 ext=""  # No extension
             )
             effective_video_name = encoded_name.rstrip(".")
@@ -1072,33 +1088,72 @@ def list_gen3c_videos(output_dir: str) -> list:
     return [v.name for v in videos[:20]]  # Return 20 most recent
 
 
-def list_all_videos(gen3c_dir: str = "/srv/searidge_share/outputs/gen3c",
-                    ltx2_dir: str = "/srv/searidge_share/outputs/ltx2") -> list:
+def list_all_videos(
+    gen3c_dir: str = "/srv/searidge_share/outputs/gen3c",
+    ltx2_dir: str = "/srv/searidge_share/outputs/ltx2",
+    sort_by: str = "Date (newest)",
+    limit: str = "10"
+) -> list:
     """List MP4 videos from both Gen3C and LTX-2 output directories.
-    
-    Returns list of tuples: (display_name, full_path)
+
+    Args:
+        gen3c_dir: Path to Gen3C output directory
+        ltx2_dir: Path to LTX-2 output directory
+        sort_by: Sort method - "Date (newest)", "Date (oldest)", "Filename (A-Z)", 
+                 "Filename (Z-A)", "Model (Gen3C first)", "Model (LTX-2 first)"
+        limit: Number of videos to return - "10", "20", "30", "50", "All"
+
+    Returns:
+        List of tuples: (display_name, full_path, model, mtime)
     """
     from pathlib import Path
-    
+
     videos = []
-    
+
     # Scan Gen3C directory
     gen3c_path = Path(gen3c_dir)
     if gen3c_path.exists():
         for v in gen3c_path.glob("*.mp4"):
-            videos.append((f"[Gen3C] {v.name}", str(v)))
-    
+            try:
+                mtime = v.stat().st_mtime
+                videos.append((f"[Gen3C] {v.name}", str(v), "Gen3C", mtime))
+            except OSError:
+                pass
+
     # Scan LTX-2 directory
     ltx2_path = Path(ltx2_dir)
     if ltx2_path.exists():
         for v in ltx2_path.glob("*.mp4"):
-            videos.append((f"[LTX-2] {v.name}", str(v)))
-    
-    # Sort by modification time (newest first)
-    videos.sort(key=lambda x: Path(x[1]).stat().st_mtime, reverse=True)
-    
-    # Return top 30 most recent
-    return videos[:30]
+            try:
+                mtime = v.stat().st_mtime
+                videos.append((f"[LTX-2] {v.name}", str(v), "LTX-2", mtime))
+            except OSError:
+                pass
+
+    # Sort based on sort_by parameter
+    if sort_by == "Date (newest)":
+        videos.sort(key=lambda x: x[3], reverse=True)
+    elif sort_by == "Date (oldest)":
+        videos.sort(key=lambda x: x[3], reverse=False)
+    elif sort_by == "Filename (A-Z)":
+        videos.sort(key=lambda x: x[0].lower())
+    elif sort_by == "Filename (Z-A)":
+        videos.sort(key=lambda x: x[0].lower(), reverse=True)
+    elif sort_by == "Model (Gen3C first)":
+        videos.sort(key=lambda x: (0 if x[2] == "Gen3C" else 1, -x[3]))
+    elif sort_by == "Model (LTX-2 first)":
+        videos.sort(key=lambda x: (0 if x[2] == "LTX-2" else 1, -x[3]))
+
+    # Apply limit
+    if limit != "All":
+        try:
+            limit_int = int(limit)
+            videos = videos[:limit_int]
+        except ValueError:
+            videos = videos[:10]
+
+    # Return only (display_name, full_path) for compatibility
+    return [(v[0], v[1]) for v in videos]
 
 
 def get_video_info(video_path: str) -> str:

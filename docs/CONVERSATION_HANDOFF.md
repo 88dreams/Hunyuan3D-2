@@ -17,7 +17,7 @@ This document summarizes the work completed and provides context for new convers
 | **Lyra** | NVIDIA | 3D/4D Gaussian Splatting | ✅ Working |
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
-| **2DGS Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
+| **2DGS Pipeline** | ViPE + 2DGS | Multi-Video → Mesh (GLB) | ✅ Working (v2) |
 | **LTX-2** | Lightricks | Video (official API) | ✅ Working |
 | **SEVA** | Stability AI | Video (camera control) | ⏸️ Blocked (HF access) |
 
@@ -65,13 +65,21 @@ Camera motion is controlled through the prompt text:
 
 Preset prompts are available in the UI dropdown.
 
+#### UI Features
+
+- **Multi-video generation**: Select multiple camera motions, generates all videos
+- **4-video preview grid**: 2x2 preview layout with filename labels
+- **Play All button**: Play/pause all previews simultaneously
+- **Parameter encoding**: Filenames encode model, duration, resolution, motion
+
 #### Files Modified
 
 | File | Changes |
 |------|---------|
 | `runpod/runpod_client.py` | Added `LTXAPIClient` class for official API |
 | `generators/ltx2.py` | New `run_ltx2_api()` function, kept legacy RunPod support |
-| `app_sidebar.py` | New LTX-2 UI with model/resolution/duration selectors, LTX API key in Settings |
+| `app_sidebar.py` | LTX-2 UI with 4-video previews, Play All, multi-motion selection |
+| `scripts/experiment_logger.py` | Added `ltx2_param_filename()` for parameter encoding |
 
 #### API Configuration
 
@@ -113,20 +121,31 @@ No RunPod endpoint needed - API calls go directly to Lightricks.
 
 ---
 
-### 2DGS Pipeline: ViPE + 2DGS
+### 2DGS Pipeline: Multi-Video to Mesh
 
-**Status**: ✅ **WORKING** (v20)
+**Status**: ✅ **WORKING** (v2 - Multi-Video Support)
 
 **Pipeline Flow**:
-1. ViPE extracts camera poses, depth maps, intrinsics
-2. Converter transforms to COLMAP format
-3. Point cloud generated from depth maps
-4. 2DGS training produces Gaussian splats
-5. Mesh extraction via marching cubes
-6. 180° X-axis rotation correction applied
+1. Accept up to 4 input videos
+2. ViPE extracts camera poses, depth maps, intrinsics per video
+3. **Frame 0 alignment**: First frame (input image) used as anchor to align poses
+4. **Depth coverage filter**: Skip frames with low depth coverage
+5. Converter merges all videos to unified COLMAP format
+6. 2DGS training produces Gaussian splats
+7. Mesh extraction via marching cubes
+8. 180° X-axis rotation correction applied
 
-**Docker Image**: `88dreams/2dgs-pipeline:v20`
-**RunPod Endpoint**: `2dgs-serverless` (ID: `s9txp6edtf2vg4`)
+**Key Enhancement**: Multi-video input provides diverse viewpoints for better 3D reconstruction.
+
+**Docker Image**: `88dreams/2dgs-pipeline:v2`
+**RunPod Endpoint**: `2dgs-serverless`
+
+**UI Features**:
+- 4-video preview grid with filename labels
+- Play All button for simultaneous playback
+- Video list with sort (date/filename/model) and limit (10/20/30/50/All)
+- Single-column video list layout
+- Highlight currently playing video in list
 
 ---
 
@@ -134,10 +153,12 @@ No RunPod endpoint needed - API calls go directly to Lightricks.
 
 | Image | Models | Current Version |
 |-------|--------|-----------------|
-| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2, LTX-2 | **v55g** |
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2 | **v55g** |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/2dgs-pipeline` | ViPE + 2DGS | v20 |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video) | **v2** |
 | `88dreams/seva-runpod` | SEVA (camera control) | v1 (blocked) |
+
+**Note**: LTX-2 uses official API - no Docker image needed.
 
 ### Version History (LTX-2 Development)
 
@@ -155,16 +176,49 @@ No RunPod endpoint needed - API calls go directly to Lightricks.
 ### Build Commands
 
 ```bash
-# Unified Image (LTX-2 diffusers)
+# Unified Image
 cd runpod/gen3c
-docker build --no-cache -f Dockerfile.ltx2.diffusers -t 88dreams/gen3c-runpod:v55g .
+docker build --no-cache -f Dockerfile.unified -t 88dreams/gen3c-runpod:v55g .
 docker push 88dreams/gen3c-runpod:v55g
 
-# 2DGS Pipeline
+# 2DGS Pipeline (Multi-Video)
 cd runpod/2dgs-pipeline
-docker build -t 88dreams/2dgs-pipeline:vXX .
-docker push 88dreams/2dgs-pipeline:vXX
+docker build -t 88dreams/2dgs-pipeline:v2 .
+docker push 88dreams/2dgs-pipeline:v2
 ```
+
+---
+
+## UI Features (January 2026)
+
+### Automatic Output Naming
+
+When an image is loaded, output filenames are automatically set to `{input_name}-{model}`:
+- Load `CBGB1.jpg` → Gen3C output: `CBGB1-gen3c`
+- Load `CBGB1.jpg` → LTX-2 output: `CBGB1-ltx2`
+
+User can still edit the output name before generation.
+
+### Encode Parameters in Filename
+
+When "Encode in Filename" is enabled in Settings, output filenames include key parameters:
+
+| Model | Encoded Parameters | Example |
+|-------|-------------------|---------|
+| **SHARP (PLY)** | guidance (g), steps (s) | `sharp_CBGB1_g7.5_s50.ply` |
+| **SHARP (Video)** | g, s, lateral_offset (lo), zoom_forward (zf) | `sharp_CBGB1_g7.5_s50_lo050_zf025.mp4` |
+| **Gen3C** | frames (f), trajectory (t), movement_distance (md), guidance (g), seed (s) | `gen3c_CBGB1_f121_torb_md10_g10_s42.mp4` |
+| **LTX-2** | model (m), duration (d), resolution, camera_motion | `ltx2_CBGB1_mpro_d6_1080p_dollyout.mp4` |
+| **2DGS** | input video basenames | `2dgs_CBGB1_dolly_orbit.glb` |
+| **Mesh Extract** | input name + "_processed" | `CBGB1_processed.glb` |
+
+### Video Preview Features
+
+Both LTX-2 and 2DGS pages have:
+- **4-video preview grid** (2x2 layout)
+- **Filename labels** above each preview
+- **Play All button** - plays/pauses all loaded videos simultaneously
+- **Resume from pause** - videos continue from where paused (not restart)
 
 ---
 
@@ -172,9 +226,11 @@ docker push 88dreams/2dgs-pipeline:vXX
 
 | Endpoint Name | Image | Purpose |
 |---------------|-------|---------|
-| `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2, LTX-2) |
+| `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2) |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | 2dgs-pipeline:**v2** | Multi-video to mesh (ViPE + 2DGS) |
+
+**Note**: LTX-2 uses official Lightricks API at https://api.ltx.video - no RunPod endpoint.
 
 ---
 
@@ -186,7 +242,18 @@ docker push 88dreams/2dgs-pipeline:vXX
 |------|---------|
 | `runpod/runpod_client.py` | `LTXAPIClient` class for official API |
 | `generators/ltx2.py` | Generator module with `run_ltx2_api()` |
-| `app_sidebar.py` | UI tab with model/resolution/duration selectors |
+| `app_sidebar.py` | UI: 4-video preview, multi-motion selection, Play All |
+| `scripts/experiment_logger.py` | `ltx2_param_filename()` for encoding |
+
+### 2DGS Pipeline (Multi-Video)
+
+| File | Purpose |
+|------|---------|
+| `runpod/2dgs-pipeline/handler.py` | Serverless handler with multi-video support |
+| `runpod/2dgs-pipeline/multi_video_merge.py` | Pose alignment and frame merging |
+| `runpod/runpod_client.py` | `TwoDGSPipelineClient.submit_multi_video_job()` |
+| `ui/tabs/create_tab.py` | 2DGS UI components |
+| `ui/styles.py` | CSS for video previews, Play All button |
 
 ### LTX API Client Functions
 
@@ -199,7 +266,6 @@ class LTXAPIClient:
 # Generator functions
 def run_ltx2_api(image_path, prompt, model, resolution, ...) -> LTX2Result
 def generate_video_for_3d(image_path, camera_motion, ...) -> LTX2Result
-def text_to_video(prompt, ...) -> LTX2Result
 ```
 
 ---
@@ -235,14 +301,22 @@ export RUNPOD_API_KEY="your_key"
 - **Solution**: Using official Lightricks API at https://api.ltx.video
 - **Camera Control**: Via prompt descriptions (built-in presets in UI)
 - **Quality**: Up to 4K @ 50fps with Pro model
+- **Multi-video**: Select multiple camera motions, 4-video preview grid
 
-### 2. SEVA Integration ⏸️ BLOCKED
+### 2. 2DGS Multi-Video Pipeline ✅ COMPLETE
+- Accepts up to 4 videos for diverse viewpoints
+- Frame 0 alignment ensures consistent pose origin
+- Depth coverage filter improves quality
+- Enhanced UI with sort/filter and Play All
+
+### 3. SEVA Integration ⏸️ BLOCKED
 - **Issue**: HuggingFace model access required
 - **Action**: Request access at https://huggingface.co/stabilityai/stable-virtual-camera
 
-### 3. 2DGS Pipeline ✅ COMPLETE
-- Successfully generates meshes from Gen3C video
-- 180° X-axis rotation applied automatically
+### 4. Potential Improvements
+- LTX API camera pose extraction (asked Lightricks if available)
+- Auto-select best frames based on depth coverage
+- Multi-GPU parallel video generation
 
 ---
 
@@ -277,4 +351,4 @@ export RUNPOD_API_KEY="your_key"
 
 ---
 
-*Last Updated: January 15, 2026 (LTX-2 official API integration complete)*
+*Last Updated: January 14, 2026 (LTX-2 multi-preview, 2DGS multi-video, UI enhancements)*

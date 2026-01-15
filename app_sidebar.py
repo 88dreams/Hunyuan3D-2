@@ -44,7 +44,7 @@ import gradio as gr
 # LOCAL IMPORTS
 # =============================================================================
 
-from ui.styles import CUSTOM_CSS
+from ui.styles import CUSTOM_CSS, VIDEO_PREVIEW_JS
 from ui.tabs import (
     create_hunyuan_tab,
     create_gen3c_tab,
@@ -201,7 +201,10 @@ NAV_ITEMS = [
 # =============================================================================
 
 with gr.Blocks(title="3D Generation Studio") as demo:
-    
+
+    # Inject JavaScript for video preview interactions
+    gr.HTML(VIDEO_PREVIEW_JS)
+
     # State for current page
     current_page = gr.State(value="sharp")
     
@@ -610,30 +613,61 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 ltx2_logs = gr.Textbox(label="Generation Logs", lines=8, interactive=False)
                         
                         with gr.Column(scale=1):
-                            ltx2_video_viewer = gr.Video(
-                                label="Video Preview",
-                                height=400,
-                                autoplay=True,
-                                loop=True,
-                            )
+                            # Video Previews header with Play All button
+                            with gr.Row():
+                                gr.Markdown("### Video Previews")
+                                ltx2_play_all_btn = gr.Button("▶ Play All", size="sm", scale=0, min_width=100, elem_id="ltx2-play-all-btn")
+                            ltx2_videos_status = gr.Markdown("*No videos generated*")
                             
-                            # Send to 2DGS button
-                            ltx2_send_to_2dgs = gr.Button("Send to 2DGS Pipeline", variant="secondary", size="sm")
+                            # Video preview grid (2x2) with labels
+                            with gr.Row():
+                                with gr.Column(scale=1, min_width=150):
+                                    ltx2_video_label_1 = gr.Markdown("**1.** —", elem_classes=["video-slot-label"])
+                                    ltx2_video_preview_1 = gr.Video(
+                                        label="",
+                                        height=170,
+                                        visible=True,
+                                        interactive=False,
+                                        elem_id="ltx2-video-1",
+                                    )
+                                with gr.Column(scale=1, min_width=150):
+                                    ltx2_video_label_2 = gr.Markdown("**2.** —", elem_classes=["video-slot-label"])
+                                    ltx2_video_preview_2 = gr.Video(
+                                        label="",
+                                        height=170,
+                                        visible=True,
+                                        interactive=False,
+                                        elem_id="ltx2-video-2",
+                                    )
+                            with gr.Row():
+                                with gr.Column(scale=1, min_width=150):
+                                    ltx2_video_label_3 = gr.Markdown("**3.** —", elem_classes=["video-slot-label"])
+                                    ltx2_video_preview_3 = gr.Video(
+                                        label="",
+                                        height=170,
+                                        visible=True,
+                                        interactive=False,
+                                        elem_id="ltx2-video-3",
+                                    )
+                                with gr.Column(scale=1, min_width=150):
+                                    ltx2_video_label_4 = gr.Markdown("**4.** —", elem_classes=["video-slot-label"])
+                                    ltx2_video_preview_4 = gr.Video(
+                                        label="",
+                                        height=170,
+                                        visible=True,
+                                        interactive=False,
+                                        elem_id="ltx2-video-4",
+                                    )
+
+                            # State for tracking generated videos
                             ltx2_last_video_path = gr.State(value=None)
-                            
+
                             gr.Markdown("""
                             **Camera Motions for 3D**:
                             - `dolly_out` - Best for 3D (reveals full object)
                             - `dolly_left/right` - Side views for multi-angle
                             - `orbit` - 360° rotation (excellent for 3D)
                             - `jib_up` - Top-down perspective
-                            
-                            **Workflow**:
-                            1. Select multiple camera motions
-                            2. Generate all videos
-                            3. Send best one to 2DGS Pipeline
-                            
-                            **Tip**: Use `dolly_out` + `dolly_left` + `dolly_right` for good coverage.
                             """)
                 
                 # PAGE: LYRA
@@ -1007,6 +1041,12 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 settings_ltx_api_key = gr.Textbox(value=DEFAULT_LTX_API_KEY, label="API Key", type="password")
                                 settings_ltx_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_ltx_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
+                        
+                        # Empty columns to match 3-column layout of RunPod settings
+                        with gr.Column(scale=1, min_width=200):
+                            pass  # Placeholder for future external APIs
+                        with gr.Column(scale=1, min_width=200):
+                            pass  # Placeholder for future external APIs
                 
                 # PAGE: UPDATE
                 with gr.TabItem("Update", id="update"):
@@ -1617,10 +1657,47 @@ Min Component Ratio: 1% (default)
     # IMAGE INPUT HANDLERS
     # =========================================================================
     
+    def get_output_name_from_input(image_path: str, model_suffix: str) -> str:
+        """Generate default output name from input filename + model suffix.
+        
+        Example: 'CBGB1.jpg' + 'gen3c' -> 'CBGB1-gen3c'
+        """
+        if not image_path:
+            return f"output-{model_suffix}"
+        
+        from pathlib import Path
+        # Get filename without extension
+        basename = Path(image_path).stem
+        # Clean up any special characters that might cause issues
+        basename = basename.replace(" ", "_")
+        return f"{basename}-{model_suffix}"
+    
+    def update_all_output_names(image_path: str):
+        """Update all model output names when input image changes."""
+        return (
+            update_image_info_display(image_path, 1.0),  # image_info (scale not available here)
+            get_output_name_from_input(image_path, "gen3c"),      # gen3c_video_name
+            get_output_name_from_input(image_path, "sharp"),      # sharp_output_name
+            get_output_name_from_input(image_path, "sharp"),      # sharp_video_output_name
+            get_output_name_from_input(image_path, "ltx2"),       # ltx2_output_name
+            get_output_name_from_input(image_path, "lyra"),       # lyra_output_name
+            get_output_name_from_input(image_path, "trellis"),    # trellis_output_name
+            get_output_name_from_input(image_path, "hunyuan"),    # hunyuan_output_name
+        )
+    
     input_image.change(
-        fn=lambda img, scale: update_image_info_display(img, scale),
-        inputs=[input_image, image_scale],
-        outputs=[image_info],
+        fn=update_all_output_names,
+        inputs=[input_image],
+        outputs=[
+            image_info,
+            gen3c_video_name,
+            sharp_output_name,
+            sharp_video_output_name,
+            ltx2_output_name,
+            lyra_output_name,
+            trellis_output_name,
+            hunyuan_output_name,
+        ],
     )
     
     image_scale.change(
@@ -1977,7 +2054,22 @@ Min Component Ratio: 1% (default)
                     full_prompt = f"{full_prompt} {custom_prompt}"
                 
                 # Create unique name for each motion
-                video_name = f"{output_name}_{motion}"
+                if encode_params:
+                    try:
+                        from scripts.experiment_logger import ltx2_param_filename
+                        video_name = ltx2_param_filename(
+                            base_name=output_name,
+                            model=model,
+                            duration=float(duration),
+                            resolution=resolution,
+                            camera_motion=motion,
+                            ext=""  # No extension - generator adds it
+                        ).rstrip(".")
+                    except Exception as e:
+                        print(f"[LTX-2] Warning: Could not encode params in filename: {e}")
+                        video_name = f"{output_name}_{motion}"
+                else:
+                    video_name = f"{output_name}_{motion}"
 
                 logs.append(f"\n[LTX-2 API] ({idx}/{total}) Generating {motion}...")
                 logs.append(f"[LTX-2 API] Prompt: {base_prompt[:60]}...")
@@ -2022,12 +2114,51 @@ Min Component Ratio: 1% (default)
             shutil.rmtree(temp_dir, ignore_errors=True)
     
     def ltx2_generate_with_output(*args):
-        """Wrapper that returns output paths for display."""
+        """Wrapper that returns output paths for 4 video previews."""
+        from pathlib import Path
+        
         result = handle_ltx2_multi_generation(*args)
         last_video, logs, progress, video_list = result
-        # Return: display, video viewer (last), logs, progress, last path for 2DGS, video list
-        return last_video, last_video, logs, progress, last_video, video_list
-    
+        
+        # Prepare 4 video slots
+        video_paths = list(video_list) if video_list else []
+        video_labels = []
+        
+        for i in range(4):
+            if i < len(video_paths) and video_paths[i]:
+                # Get filename without extension
+                filename = Path(video_paths[i]).stem
+                video_labels.append(f"**{i+1}.** {filename}")
+            else:
+                video_labels.append(f"**{i+1}.** —")
+        
+        # Pad video paths to 4
+        while len(video_paths) < 4:
+            video_paths.append(None)
+        
+        # Status text
+        if video_list:
+            status = f"*{len(video_list)} video(s) generated*"
+        else:
+            status = "*No videos generated*"
+        
+        return (
+            last_video,           # output_display
+            logs,                 # ltx2_logs
+            progress,             # ltx2_progress
+            last_video,           # ltx2_last_video_path
+            video_list,           # ltx2_generated_videos
+            status,               # ltx2_videos_status
+            video_labels[0],      # ltx2_video_label_1
+            video_labels[1],      # ltx2_video_label_2
+            video_labels[2],      # ltx2_video_label_3
+            video_labels[3],      # ltx2_video_label_4
+            video_paths[0],       # ltx2_video_preview_1
+            video_paths[1],       # ltx2_video_preview_2
+            video_paths[2],       # ltx2_video_preview_3
+            video_paths[3],       # ltx2_video_preview_4
+        )
+
     ltx2_generate_btn.click(
         fn=ltx2_generate_with_output,
         inputs=[
@@ -2039,26 +2170,64 @@ Min Component Ratio: 1% (default)
             ltx2_output_name, ltx2_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, ltx2_video_viewer, ltx2_logs, ltx2_progress, ltx2_last_video_path, ltx2_generated_videos],
-    )
-    
-    # Send to 2DGS handler
-    def send_ltx2_to_2dgs(video_path):
-        """Set the 2DGS video path field and switch to 2DGS tab."""
-        if not video_path:
-            return gr.update(), gr.update(), gr.Tabs(selected="create")
-        # Set video source to "Video Path" and populate the path
-        return gr.update(value="Video Path"), gr.update(value=video_path), gr.Tabs(selected="create")
-    
-    ltx2_send_to_2dgs.click(
-        fn=send_ltx2_to_2dgs,
-        inputs=[ltx2_last_video_path],
         outputs=[
-            twodgs_components["video_source"],
-            twodgs_components["video_path"],
-            page_tabs
+            output_display, ltx2_logs, ltx2_progress, 
+            ltx2_last_video_path, ltx2_generated_videos,
+            ltx2_videos_status,
+            ltx2_video_label_1, ltx2_video_label_2, ltx2_video_label_3, ltx2_video_label_4,
+            ltx2_video_preview_1, ltx2_video_preview_2, ltx2_video_preview_3, ltx2_video_preview_4,
         ],
     )
+
+    # LTX-2 Play All button - detect video state directly via JavaScript
+    def ltx2_get_play_label():
+        return gr.update()
+    
+    ltx2_play_all_btn.click(
+        fn=ltx2_get_play_label,
+        inputs=[],
+        outputs=[ltx2_play_all_btn],
+        js="""() => {
+            console.log('LTX-2 Play All button clicked');
+            const videos = [];
+            for (let i = 1; i <= 4; i++) {
+                const container = document.getElementById('ltx2-video-' + i);
+                if (container) {
+                    const video = container.querySelector('video');
+                    if (video && video.src) {
+                        videos.push(video);
+                    }
+                }
+            }
+            console.log('Found', videos.length, 'LTX-2 videos');
+            
+            if (videos.length === 0) {
+                console.log('No videos found');
+                return '▶ Play All';
+            }
+            
+            const anyPlaying = videos.some(v => !v.paused && !v.ended);
+            console.log('Any video playing?', anyPlaying);
+            
+            if (anyPlaying) {
+                videos.forEach(v => { 
+                    try { v.pause(); } catch(e) { console.log('Pause error:', e); } 
+                });
+                console.log('PAUSED all videos');
+                return '▶ Play All';
+            } else {
+                videos.forEach(v => { 
+                    try { 
+                        v.play().catch(e => console.log('Play error:', e)); 
+                    } catch(e) { console.log('Error:', e); } 
+                });
+                console.log('PLAYING all videos');
+                return '⏸ Pause All';
+            }
+        }"""
+    )
+
+    # Note: "Send to 2DGS" button removed - users select videos directly from 2DGS tab
 
     # =========================================================================
     # LYRA EVENT HANDLERS
@@ -2191,7 +2360,8 @@ Min Component Ratio: 1% (default)
         quality, poisson_depth, decimate,
         tsdf_voxel_size, tsdf_num_views,
         output_name, output_format, output_dir,
-        endpoint_id, api_key
+        endpoint_id, api_key,
+        encode_params
     ):
         """Wrapper that returns GLB path for 3D viewer."""
         # Map method selection to handler parameters
@@ -2205,13 +2375,28 @@ Min Component Ratio: 1% (default)
             num_views = int(tsdf_num_views)
             poisson_depth = 10  # not used for TSDF
         
+        # Generate encoded filename if requested
+        effective_output_name = output_name
+        if encode_params:
+            try:
+                from scripts.experiment_logger import mesh_extract_param_filename
+                # Get the input filename from ply_dropdown (e.g., "lyra_bedroom_g75.ply")
+                input_filename = ply_dropdown if ply_dropdown else "mesh"
+                encoded_name = mesh_extract_param_filename(
+                    input_filename=input_filename,
+                    ext=""  # No extension - handler adds it
+                ).rstrip(".")
+                effective_output_name = encoded_name
+            except Exception as e:
+                print(f"[MESH] Warning: Could not encode params in filename: {e}")
+        
         result = handle_mesh_extraction(
             ply_dropdown, input_format,
             handler_method, "dn_consistency",
             quality, poisson_depth, decimate,
             False, "2048", "short",
             voxel_size, num_views,
-            output_name, output_format, output_dir,
+            effective_output_name, output_format, output_dir,
             endpoint_id, api_key,
         )
         output_path, logs, progress = result
@@ -2245,6 +2430,7 @@ Min Component Ratio: 1% (default)
             mesh_tsdf_voxel_size, mesh_tsdf_num_views,
             mesh_output_name, mesh_output_format, mesh_output_dir,
             settings_gen3c_endpoint, settings_gen3c_key,
+            global_encode_params,
         ],
         outputs=[output_display, mesh_logs, mesh_progress, mesh_3d_viewer],
     )
@@ -2252,8 +2438,29 @@ Min Component Ratio: 1% (default)
     # Mesh PLY dropdown
     def refresh_mesh_ply():
         return gr.update(choices=scan_for_ply_files())
-    
+
     mesh_refresh_btn.click(fn=refresh_mesh_ply, outputs=[mesh_ply_dropdown])
+    
+    def update_mesh_output_name(ply_selection):
+        """Update mesh output name based on selected PLY file."""
+        from pathlib import Path
+        if not ply_selection:
+            return "mesh_output"
+        
+        # Handle display format: "filename.ply (Model)"
+        if " (" in ply_selection:
+            ply_path = ply_selection.rsplit(" (", 1)[0]
+        else:
+            ply_path = ply_selection
+        
+        basename = Path(ply_path).stem
+        return f"{basename}-mesh"
+    
+    mesh_ply_dropdown.change(
+        fn=update_mesh_output_name,
+        inputs=[mesh_ply_dropdown],
+        outputs=[mesh_output_name],
+    )
     
     # =========================================================================
     # MESH CLEANUP EVENT HANDLERS
@@ -2329,23 +2536,36 @@ Min Component Ratio: 1% (default)
     # Store video paths mapping (display name -> full path)
     _video_paths_cache = {}
 
-    # Refresh video list (Gen3C + LTX-2)
-    def refresh_video_list():
+    # Refresh video list (Gen3C + LTX-2) with sort and filter
+    def refresh_video_list(sort_by="Date (newest)", limit="10"):
         """Refresh video checkboxes with videos from Gen3C and LTX-2 directories."""
         global _video_paths_cache
         gen3c_dir = "/srv/searidge_share/outputs/gen3c"
         ltx2_dir = "/srv/searidge_share/outputs/ltx2"
-        videos = list_all_videos(gen3c_dir, ltx2_dir)
-        
+        videos = list_all_videos(gen3c_dir, ltx2_dir, sort_by=sort_by, limit=limit)
+
         # Update cache and create choices
         _video_paths_cache = {v[0]: v[1] for v in videos}
         choices = [v[0] for v in videos]
-        
+
         return gr.update(choices=choices, value=[])
 
+    # Wire refresh button
     twodgs_components["refresh_videos_btn"].click(
         fn=refresh_video_list,
-        inputs=[],
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
+        outputs=[twodgs_components["video_checkboxes"]],
+    )
+    
+    # Auto-refresh when sort or limit changes
+    twodgs_components["video_sort_by"].change(
+        fn=refresh_video_list,
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
+        outputs=[twodgs_components["video_checkboxes"]],
+    )
+    twodgs_components["video_limit"].change(
+        fn=refresh_video_list,
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
         outputs=[twodgs_components["video_checkboxes"]],
     )
 
@@ -2368,27 +2588,69 @@ Min Component Ratio: 1% (default)
 
     # Update video previews when selection changes
     def update_video_previews(selected_videos):
-        """Update video preview panels based on selection."""
+        """Update video preview panels and output name based on selection."""
+        from pathlib import Path
+        
         # Limit to 4 videos
         selected = selected_videos[:4] if selected_videos else []
         
-        # Get full paths
+        # Get full paths and display names
         video_paths = [get_video_full_path(v) for v in selected]
         
+        # Generate output name from first video
+        output_name = "mesh_output"
+        if video_paths and video_paths[0]:
+            video_basename = Path(video_paths[0]).stem
+            for suffix in ["_dolly_out", "_dolly_in", "_dolly_left", "_dolly_right", "_orbit", "_jib_up", "_static"]:
+                if video_basename.endswith(suffix):
+                    video_basename = video_basename[:-len(suffix)]
+                    break
+            output_name = f"{video_basename}-2dgs"
+        
+        # Create individual labels for each slot (filename without extension)
+        video_labels = []
+        display_names = list(selected)
+        for i, name in enumerate(display_names):
+            if name:
+                # Remove model prefix and extension
+                short_name = name.replace("[Gen3C] ", "").replace("[LTX-2] ", "")
+                # Remove extension
+                short_name = Path(short_name).stem if short_name else ""
+                video_labels.append(f"**{i+1}.** {short_name}")
+            else:
+                video_labels.append(f"**{i+1}.** —")
+        
         # Pad to 4 elements
+        while len(video_labels) < 4:
+            video_labels.append(f"**{len(video_labels)+1}.** —")
+        while len(display_names) < 4:
+            display_names.append("")
         while len(video_paths) < 4:
             video_paths.append(None)
         
         count_text = f"**Selected: {len(selected)}/4**"
-        label_text = f"*{len(selected)} video(s) selected*" if selected else "*No videos selected*"
+        
+        # Simple status text
+        if selected:
+            label_text = f"*{len(selected)} video(s) loaded*"
+        else:
+            label_text = "*No videos selected*"
+        
+        # Hidden span for JavaScript slot mapping
+        js_update = f'<span style="display:none" id="slot-map-data" data-slot1="{display_names[0]}" data-slot2="{display_names[1]}" data-slot3="{display_names[2]}" data-slot4="{display_names[3]}"></span>'
         
         return (
             count_text,
-            label_text,
+            label_text + js_update,
+            video_labels[0],
+            video_labels[1],
+            video_labels[2],
+            video_labels[3],
             video_paths[0],
             video_paths[1],
             video_paths[2],
             video_paths[3],
+            output_name,
         )
 
     twodgs_components["video_checkboxes"].change(
@@ -2397,21 +2659,86 @@ Min Component Ratio: 1% (default)
         outputs=[
             twodgs_components["selected_count"],
             twodgs_components["selected_videos_label"],
+            twodgs_components["video_label_1"],
+            twodgs_components["video_label_2"],
+            twodgs_components["video_label_3"],
+            twodgs_components["video_label_4"],
             twodgs_components["video_preview_1"],
             twodgs_components["video_preview_2"],
             twodgs_components["video_preview_3"],
             twodgs_components["video_preview_4"],
+            twodgs_components["output_name"],
         ],
+    )
+    
+    # Play All button - detect video state directly via JavaScript
+    def get_play_label():
+        # This just returns a dummy - JS handles the actual logic
+        return gr.update()
+    
+    twodgs_components["play_all_btn"].click(
+        fn=get_play_label,
+        inputs=[],
+        outputs=[twodgs_components["play_all_btn"]],
+        js="""() => {
+            console.log('Play All button clicked');
+            const videos = [];
+            for (let i = 1; i <= 4; i++) {
+                const container = document.getElementById('twodgs-video-' + i);
+                if (container) {
+                    const video = container.querySelector('video');
+                    if (video && video.src) {
+                        videos.push(video);
+                    }
+                }
+            }
+            console.log('Found', videos.length, 'videos');
+            
+            if (videos.length === 0) {
+                console.log('No videos found');
+                return '▶ Play All';
+            }
+            
+            // Check if ANY video is currently playing
+            const anyPlaying = videos.some(v => !v.paused && !v.ended);
+            console.log('Any video playing?', anyPlaying);
+            
+            if (anyPlaying) {
+                // Pause all
+                videos.forEach(v => { 
+                    try { v.pause(); } catch(e) { console.log('Pause error:', e); } 
+                });
+                console.log('PAUSED all videos');
+                return '▶ Play All';
+            } else {
+                // Resume playing from current position
+                videos.forEach(v => { 
+                    try { 
+                        v.play().catch(e => console.log('Play error:', e)); 
+                    } catch(e) { console.log('Error:', e); } 
+                });
+                console.log('PLAYING all videos (resumed)');
+                return '⏸ Pause All';
+            }
+        }"""
     )
 
     # Main generate button for multi-video
     def run_2dgs_multi_video(
         video_source, selected_videos, video_uploads,
         iterations, mesh_quality, output_format, output_dir, output_name,
-        endpoint_id, api_key, s3_bucket, s3_region
+        max_videos, depth_threshold,
+        endpoint_id, api_key, s3_bucket, s3_region,
+        encode_params
     ):
         """Run 2DGS pipeline with multiple videos."""
         from pathlib import Path
+        from runpod.runpod_client import TwoDGSPipelineClient
+        import time
+        import re
+        
+        # Convert max_videos to int
+        max_videos_limit = int(max_videos) if max_videos else 4
         
         # Determine video paths based on source
         video_paths = []
@@ -2420,8 +2747,8 @@ Min Component Ratio: 1% (default)
             if not selected_videos:
                 return None, {}, "Error: No videos selected", None
             
-            # Limit to 4
-            selected = selected_videos[:4]
+            # Limit to configured max
+            selected = selected_videos[:max_videos_limit]
             video_paths = [get_video_full_path(v) for v in selected]
             
         elif video_source == "Upload Video":
@@ -2429,7 +2756,7 @@ Min Component Ratio: 1% (default)
                 return None, {}, "Error: No videos uploaded", None
             
             # Handle uploaded files
-            uploads = video_uploads[:4] if isinstance(video_uploads, list) else [video_uploads]
+            uploads = video_uploads[:max_videos_limit] if isinstance(video_uploads, list) else [video_uploads]
             video_paths = [f.name if hasattr(f, 'name') else str(f) for f in uploads]
         
         # Validate paths exist
@@ -2443,10 +2770,8 @@ Min Component Ratio: 1% (default)
         if not valid_paths:
             return None, {}, "Error: No valid video files found", None
         
-        # For now, use single-video pipeline with first video
-        # TODO: Implement multi-video merging in handler
+        # Single video - use existing handler
         if len(valid_paths) == 1:
-            # Single video - use existing handler
             output_path, stats, status = handle_2dgs_pipeline(
                 video_source="Video Path",
                 video_path=valid_paths[0],
@@ -2463,25 +2788,108 @@ Min Component Ratio: 1% (default)
                 s3_region=s3_region,
             )
         else:
-            # Multi-video - call multi-video handler
-            # TODO: Implement handle_2dgs_multi_video
-            output_path, stats, status = handle_2dgs_pipeline(
-                video_source="Video Path",
-                video_path=valid_paths[0],  # Temporarily use first video
-                video_upload=None,
-                video_dropdown="",
-                gen3c_output_dir="/srv/searidge_share/outputs/gen3c",
-                iterations=int(iterations),
-                mesh_quality=mesh_quality,
-                output_format=output_format,
-                output_dir=output_dir,
-                endpoint_id=endpoint_id,
-                api_key=api_key,
-                s3_bucket=s3_bucket,
-                s3_region=s3_region,
-            )
-            # Note: Multi-video merging needs serverless endpoint update
-            status = f"{status}\n(Multi-video: using {len(valid_paths)} videos - merging coming soon)"
+            # Multi-video mode - use new submit_multi_video_job
+            print(f"[2DGS Multi] Processing {len(valid_paths)} videos with depth threshold {depth_threshold}")
+            
+            try:
+                client = TwoDGSPipelineClient(
+                    endpoint_id=endpoint_id or "s9txp6edtf2vg4",
+                    api_key=api_key,
+                )
+                
+                # Submit multi-video job
+                job_result = client.submit_multi_video_job(
+                    video_paths=valid_paths,
+                    iterations=int(iterations),
+                    mesh_quality=mesh_quality,
+                    output_format=output_format,
+                    depth_threshold=float(depth_threshold) if depth_threshold else 0.5,
+                    s3_bucket=s3_bucket,
+                    s3_region=s3_region,
+                )
+                
+                if job_result.get("status") == "error":
+                    return None, {}, f"Error: {job_result.get('error')}", None
+                
+                job_id = job_result.get("job_id")
+                print(f"[2DGS Multi] Job submitted: {job_id}")
+                
+                # Wait for completion
+                final_status = client.wait_for_completion(
+                    job_id=job_id,
+                    poll_interval=15,
+                    max_wait=1800,  # 30 minutes for multi-video
+                )
+                
+                if final_status.get("status") == "completed":
+                    mesh_url = final_status.get("mesh_url")
+                    quality_stats = final_status.get("quality_stats", {})
+                    
+                    # Download mesh
+                    output_path = None
+                    if mesh_url:
+                        timestamp = int(time.time())
+                        
+                        # Generate encoded filename if requested
+                        if encode_params:
+                            try:
+                                from scripts.experiment_logger import twodgs_param_filename
+                                # Extract base names from video paths (strip motion suffixes)
+                                motion_pattern = re.compile(r'_?(dolly_out|dolly_in|pan_left|pan_right|tilt_up|tilt_down|zoom_in|zoom_out|orbit_left|orbit_right|rotate_cw|rotate_ccw|static)$', re.IGNORECASE)
+                                input_basenames = []
+                                for vp in valid_paths:
+                                    stem = Path(vp).stem
+                                    # Remove motion suffix to get original image name
+                                    clean_name = motion_pattern.sub('', stem)
+                                    if clean_name and clean_name not in input_basenames:
+                                        input_basenames.append(clean_name)
+                                
+                                local_filename = twodgs_param_filename(
+                                    input_basenames=input_basenames,
+                                    ext=f".{output_format}"
+                                )
+                            except Exception as e:
+                                print(f"[2DGS] Warning: Could not encode params in filename: {e}")
+                                local_filename = f"{output_name}_{timestamp}.{output_format}"
+                        else:
+                            local_filename = f"{output_name}_{timestamp}.{output_format}"
+                        
+                        local_path = os.path.join(output_dir, local_filename)
+                        os.makedirs(output_dir, exist_ok=True)
+                        
+                        # Download from URL
+                        import requests
+                        response = requests.get(mesh_url, stream=True)
+                        if response.status_code == 200:
+                            with open(local_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+                            output_path = local_path
+                            print(f"[2DGS Multi] Downloaded mesh to {output_path}")
+                    
+                    stats = {
+                        "job_id": job_id,
+                        "videos_processed": len(valid_paths),
+                        "num_frames": final_status.get("num_frames"),
+                        "iterations": final_status.get("iterations"),
+                        "elapsed_seconds": final_status.get("elapsed_seconds"),
+                        **quality_stats
+                    }
+                    
+                    status = f"✅ Multi-video processing complete!\n"
+                    status += f"Videos: {len(valid_paths)}, "
+                    status += f"Frames: {stats.get('valid_frames', 'N/A')}/{stats.get('total_frames', 'N/A')}, "
+                    status += f"Time: {stats.get('elapsed_seconds', 'N/A')}s"
+                    
+                else:
+                    output_path = None
+                    stats = {"job_id": job_id, "error": final_status.get("error")}
+                    status = f"❌ Multi-video processing failed: {final_status.get('error', 'Unknown error')}"
+                    
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return None, {"error": str(e)}, f"Error: {str(e)}", None
         
         # Determine preview path
         preview_path = None
@@ -2506,10 +2914,13 @@ Min Component Ratio: 1% (default)
             twodgs_components["output_format"],
             twodgs_components["output_dir"],
             twodgs_components["output_name"],
+            twodgs_components["max_videos"],
+            twodgs_components["depth_threshold"],
             settings_2dgs_endpoint,
             settings_2dgs_key,
             gr.State("arkrunr"),  # S3 bucket
             gr.State("us-west-1"),  # S3 region
+            global_encode_params,
         ],
         outputs=[
             twodgs_components["output_file"],

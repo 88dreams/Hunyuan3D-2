@@ -1,6 +1,6 @@
 # ARKRUNR WORLDS - Project Structure
 
-**Last Updated:** January 15, 2026
+**Last Updated:** January 14, 2026
 
 This document describes the structure of the ARKRUNR WORLDS project, a multi-model 3D generation system built on top of Hunyuan3D-2.
 
@@ -28,22 +28,27 @@ Hunyuan3D-2-Fork/
 ## Core Application Files
 
 ### `app_sidebar.py`
-**Main entry point** - The primary Gradio application with sidebar navigation (~2,700 lines).
+**Main entry point** - The primary Gradio application with sidebar navigation (~3,150 lines).
 
 - **Purpose**: Unified UI for all 3D generation models
 - **Key Features**:
   - Sidebar navigation with INPUT, CREATE, TOOLS sections
-  - Image input with auto-scaling
-  - Model selection (SHARP, Gen3C, Lyra, Trellis, Hunyuan, **LTX-2**)
-  - Settings page for RunPod credentials
+  - Image input with auto-scaling and automatic output naming
+  - Model selection (SHARP, Gen3C, Lyra, Trellis, Hunyuan, **LTX-2**, **2DGS**)
+  - **LTX-2**: 4-video preview grid, multi-motion selection, Play All button
+  - **2DGS**: 4-video preview, sort/filter controls, video highlighting
+  - Settings page for API credentials (RunPod, LTX, AWS)
   - Help documentation
   - Update tracker for model versions
+  - Encode parameters in filename option
 - **Dependencies**: 
   - `handlers/*` for generation business logic
   - `help/*` for documentation strings
   - `generators/*` for model execution
-  - `ui/components/*` for UI elements
+  - `ui/tabs/*` for tab-specific UI components
+  - `ui/styles.py` for CSS and JavaScript
   - `runpod/runpod_client.py` for API calls
+  - `scripts/experiment_logger.py` for filename encoding
   - `utils/*` for system metrics and version tracking
 
 ### `gradio_app.py`
@@ -55,7 +60,7 @@ Legacy Gradio application (older version, kept for reference).
 
 Business logic layer between UI and generators. Extracted from `app_sidebar.py` for maintainability.
 
-### `handlers/generation_handlers.py` (~900 lines)
+### `handlers/generation_handlers.py` (~1,180 lines)
 
 | Function | Purpose |
 |----------|---------|
@@ -67,8 +72,9 @@ Business logic layer between UI and generators. Extracted from `app_sidebar.py` 
 | `handle_mesh_extraction()` | PLY to mesh conversion |
 | `handle_mesh_analyze()` | Mesh statistics analysis |
 | `handle_mesh_cleanup()` | Mesh decimation and cleanup |
+| `list_all_videos()` | List videos with sort/filter for 2DGS |
 
-**Note**: LTX-2 generation is handled directly in `app_sidebar.py` via `handle_ltx2_multi_generation()`.
+**Note**: LTX-2 and 2DGS multi-video are handled in `app_sidebar.py`.
 
 ---
 
@@ -101,14 +107,14 @@ def run_<model>_runpod(...)    # RunPod serverless execution
 
 ### Client Library
 
-#### `runpod/runpod_client.py` (~3,140 lines)
+#### `runpod/runpod_client.py` (~3,780 lines)
 **Primary client** for RunPod API interactions.
 
 - **Classes**:
   - `RunPodGEN3CClient` - Pod-based API client
   - `RunPodServerlessClient` - Serverless endpoint client
   - `UnifiedServerlessClient` - Multi-model serverless client
-  - `TwoDGSPipelineClient` - 2DGS pipeline client (video → mesh)
+  - `TwoDGSPipelineClient` - 2DGS multi-video pipeline client ✅
   - `LTXAPIClient` - Official LTX API client ✅
   - `LTX2ServerlessClient` - Legacy RunPod client (deprecated)
   - `SEVAServerlessClient` - SEVA client (blocked)
@@ -119,6 +125,10 @@ def run_<model>_runpod(...)    # RunPod serverless execution
   - Models: ltx-2-pro (best quality), ltx-2-fast
   - Up to 4K @ 50fps output
   - Camera motion via prompt descriptions
+
+- **2DGS Pipeline Client Features**:
+  - `submit_multi_video_job()` - Accept array of video URLs
+  - `get_status()` with quality_stats (depth coverage, frame counts)
 
 ### Docker Images
 
@@ -152,13 +162,21 @@ validate_ltx2()                # Environment validation
 | `handler_hunyuan.py` | Serverless handler |
 | `start_hunyuan.sh` | Startup script |
 
-#### `runpod/2dgs-pipeline/` - ViPE + 2DGS Pipeline
+#### `runpod/2dgs-pipeline/` - ViPE + 2DGS Pipeline (Multi-Video)
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Combined ViPE + 2DGS image |
-| `handler.py` | Serverless handler |
+| `handler.py` | Serverless handler (~970 lines) |
+| `multi_video_merge.py` | Pose alignment + frame merging ✅ |
 | `vipe_to_2dgs.py` | ViPE → COLMAP converter |
 | `init_points_from_depth.py` | Point cloud generator |
+| `README.md` | API documentation |
+
+**Multi-Video Features**:
+- Accept array of `video_urls` (up to 4)
+- Frame 0 alignment for consistent poses
+- `depth_threshold` parameter for quality filtering
+- Returns `quality_stats` in response
 
 #### `runpod/seva/` - SEVA (Blocked)
 | File | Purpose |
@@ -176,7 +194,7 @@ Standalone files kept as fallback if unified handler doesn't work.
 
 | File | Purpose |
 |------|---------|
-| `experiment_logger.py` | CSV logging for model parameters and results |
+| `experiment_logger.py` | CSV logging + parameter-encoded filenames ✅ |
 | `cleanup_mesh.py` | Mesh decimation and cleanup |
 | `convert_lyra_ply.py` | Convert Lyra's PyTorch PLY to standard PLY |
 | `blender_import_pointcloud.py` | Blender script for PLY visualization |
@@ -186,6 +204,17 @@ Standalone files kept as fallback if unified handler doesn't work.
 | `test_2dgs_pipeline.py` | Test script for 2DGS endpoint |
 | `test_vipe.py` | Test script for ViPE endpoint |
 | `test_mesh_rotation.py` | Test 180° X-axis rotation on mesh files |
+
+### `experiment_logger.py` - Parameter Encoding Functions
+
+| Function | Output Example |
+|----------|----------------|
+| `sharp_param_filename()` | `sharp_CBGB1_g7.5_s50.ply` |
+| `sharp_video_param_filename()` | `sharp_CBGB1_g7.5_s50_lo050_zf025.mp4` |
+| `gen3c_param_filename()` | `gen3c_CBGB1_f121_torb_md10_g10_s42.mp4` |
+| `ltx2_param_filename()` | `ltx2_CBGB1_mpro_d6_1080p_dollyout.mp4` |
+| `twodgs_param_filename()` | `2dgs_CBGB1_dolly_orbit.glb` |
+| `mesh_extract_param_filename()` | `CBGB1_processed.glb` |
 
 ---
 
@@ -209,39 +238,34 @@ Standalone files kept as fallback if unified handler doesn't work.
 ┌─────────────────────────────────────────────────────────────────┐
 │                        app_sidebar.py                           │
 │                     (Gradio UI - Local)                         │
+│   Features: 4-video preview, Play All, auto-naming, encoding    │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+                    │                          │
+                    ▼                          ▼
+┌───────────────────────────────┐   ┌─────────────────────────────┐
+│   runpod/runpod_client.py     │   │   LTX API (External)        │
+│  (RunPod API - GPU inference) │   │  https://api.ltx.video      │
+└───────────────────────────────┘   └─────────────────────────────┘
+                    │
+                    ▼ (HTTPS API)
 ┌─────────────────────────────────────────────────────────────────┐
-│                      generators/*.py                            │
-│              (Model-specific logic - Local)                     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   runpod/runpod_client.py                       │
-│                (API Client - Local → RunPod)                    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ (HTTPS API)
-┌─────────────────────────────────────────────────────────────────┐
-│                  RunPod Serverless Endpoint                     │
-│                   (GPU Cloud - Remote)                          │
+│                  RunPod Serverless Endpoints                    │
+│                    (GPU Cloud - Remote)                         │
 ├─────────────────────────────────────────────────────────────────┤
-│  handler_unified.py    →  Gen3C, SHARP, Lyra, TRELLIS, LTX-2   │
-│  handler_hunyuan.py    →  Hunyuan3D                             │
-│  handler.py (2dgs)     →  ViPE + 2DGS Pipeline                  │
+│  handler_unified.py  →  Gen3C, SHARP, Lyra, TRELLIS            │
+│  handler_hunyuan.py  →  Hunyuan3D                               │
+│  handler.py (2dgs)   →  ViPE + 2DGS (multi-video support)       │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        S3 Bucket                                │
-│              (Large file storage - arkrunr)                     │
+│                        S3 Bucket (arkrunr)                      │
 │                                                                 │
 │  MediaContent/inputs/ltx2/   - Input images                     │
-│  MediaContent/outputs/ltx2/  - Generated videos                 │
+│  MediaContent/outputs/ltx2/  - LTX-2 videos                     │
 │  MediaContent/outputs/gen3c/ - Gen3C videos                     │
 │  MediaContent/outputs/sharp/ - SHARP outputs                    │
+│  MediaContent/outputs/2dgs/  - 2DGS meshes                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -253,10 +277,10 @@ Standalone files kept as fallback if unified handler doesn't work.
 |-------|--------|-----------------|-------|
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2 | **v55g** | Unified handler |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 | Stable |
-| `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 | ✅ Working |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video→mesh) | **v2** | ✅ Multi-video |
 | `88dreams/seva-runpod` | SEVA (camera control video) | v1 | ⏸️ Blocked (HF access) |
 
-**Note**: LTX-2 now uses the official API (https://api.ltx.video) - no Docker image needed.
+**Note**: LTX-2 uses official API (https://api.ltx.video) - no Docker image needed.
 
 ### LTX-2 Integration History
 
@@ -272,9 +296,11 @@ Standalone files kept as fallback if unified handler doesn't work.
 
 | Endpoint Name | Image | Purpose |
 |---------------|-------|---------|
-| `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2, LTX-2) |
+| `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2) |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | 2dgs-pipeline:**v2** | Multi-video to mesh (ViPE + 2DGS) |
+
+**Note**: LTX-2 uses official Lightricks API - no RunPod endpoint.
 
 ---
 
@@ -381,4 +407,4 @@ User enters prompt in Gradio UI
 
 ---
 
-*Last Updated: January 15, 2026 (LTX-2 official API integration complete)*
+*Last Updated: January 14, 2026 (LTX-2 multi-preview, 2DGS multi-video, UI enhancements)*
