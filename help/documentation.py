@@ -102,6 +102,76 @@ Trajectory: clockwise or counterclockwise (for room tours)
 """
 
 
+LTX2_HELP = """
+## LTX-2 (Lightricks)
+
+**What it does:** LTX-2 generates high-quality videos from single images with precise camera control. Unlike Gen3C, LTX-2 uses a diffusion-based approach optimized for cinematic camera movements, making it ideal for creating videos suitable for 3D reconstruction pipelines.
+
+**Current Model:** 19b-dev-fp8 (8-bit quantized, optimized for 24GB GPUs)
+
+> **Note:** We currently have the fp8 (8-bit quantized) model installed. Additional model variants (full precision, fp4, distilled) can be downloaded later if higher quality or faster inference is needed.
+
+### Key Settings
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| **Camera Motions** | Camera movement patterns | dolly_out/in/left/right, jib_up, static | dolly_out |
+| **Prompt** | Text guidance for generation | text | cinematic |
+| **Frames** | Output video length (8n+1) | 49-121 | 97 |
+| **FPS** | Frames per second | 12-30 | 24 |
+| **Width/Height** | Video resolution (div by 32) | 512-1920 / 320-1056 | 768x512 |
+| **Guidance Scale** | Adherence to prompt | 1.0-15.0 | 7.5 |
+| **Steps** | Inference steps | 20-100 | 50 |
+
+### Camera Motion Types
+
+| Motion | Description | Best For |
+|--------|-------------|----------|
+| **dolly_out** | Camera moves backward | Revealing full object/scene |
+| **dolly_in** | Camera moves forward | Focusing on details |
+| **dolly_left** | Camera moves left | Side perspective |
+| **dolly_right** | Camera moves right | Side perspective |
+| **jib_up** | Camera moves up | Overhead reveal |
+| **static** | No camera movement | Texture/detail shots |
+
+### Multi-Motion Generation
+
+Select multiple camera motions to generate several videos at once. Each video will use the same input image and settings but with different camera movements. This is useful for:
+- Creating multiple views for 3D reconstruction
+- Testing which camera angle works best
+- Batch processing for 2DGS pipeline input
+
+### Model Variants (Future)
+
+| Variant | VRAM | Quality | Speed | Status |
+|---------|------|---------|-------|--------|
+| **19b-dev-fp8** | 24 GB | High | Fast | ✅ Installed |
+| 19b-dev | 32+ GB | Highest | Medium | Available to download |
+| 19b-dev-fp4 | 16 GB | Good | Fastest | Available to download |
+| 19b-distilled | 24 GB | Good | Fast | Available to download |
+
+### Architectural Interior Settings
+
+For architectural interiors with LTX-2:
+
+```
+Camera Motions: dolly_out (reveal room) + dolly_left + dolly_right
+Prompt: "Smooth camera movement, architectural interior, high quality, cinematic lighting"
+Frames: 97 (good balance)
+Resolution: 768x512 or 1024x576
+Guidance Scale: 7.5-9.0
+Steps: 50
+```
+
+**Tips for Architectural Interiors:**
+- Use multiple camera motions for better 3D reconstruction coverage
+- dolly_out is excellent for room reveals
+- Combine dolly_left and dolly_right for side-to-side coverage
+- Higher frame counts (97-121) give smoother videos
+- Use with 2DGS tab to convert videos to 3D meshes
+"""
+
+
 LYRA_HELP = """
 ## LYRA (NVIDIA)
 

@@ -8,6 +8,7 @@ loaded from external markdown files for easier maintenance.
 from help.documentation import (
     SHARP_HELP,
     GEN3C_HELP,
+    LTX2_HELP,
     LYRA_HELP,
     TRELLIS_HELP,
     HUNYUAN_HELP,
@@ -19,6 +20,7 @@ from help.documentation import (
 __all__ = [
     "SHARP_HELP",
     "GEN3C_HELP",
+    "LTX2_HELP",
     "LYRA_HELP",
     "TRELLIS_HELP",
     "HUNYUAN_HELP",
