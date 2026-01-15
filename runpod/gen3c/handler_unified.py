@@ -19,6 +19,7 @@ Usage:
 
 import os
 import sys
+import gc
 import base64
 import tempfile
 import subprocess
@@ -40,35 +41,32 @@ TRELLIS_DIR = os.environ.get("TRELLIS_DIR", "/workspace/TRELLIS2")
 SUGAR_DIR = os.environ.get("SUGAR_DIR", "/workspace/SuGaR")
 CHECKPOINT_DIR = os.environ.get("GEN3C_CHECKPOINT_DIR", "/workspace/checkpoints")
 
-# LTX-2 Configuration
-LTX2_MODEL_ID = os.environ.get("LTX2_MODEL_ID", "Lightricks/LTX-Video")
-LTX2_MODEL_VARIANTS = {
-    # High-quality full-precision
-    "19b-dev": "Lightricks/ltx-2-19b-dev",
-    # Recommended for 24 GB GPUs (default)
-    "19b-dev-fp8": "Lightricks/ltx-2-19b-dev-fp8",
-    # Memory-constrained
-    "19b-dev-fp4": "Lightricks/ltx-2-19b-dev-fp4",
-    # Fastest, lower quality
-    "19b-distilled": "Lightricks/ltx-2-19b-distilled",
-}
-LTX2_DEFAULT_VARIANT = os.environ.get("LTX2_DEFAULT_VARIANT", "19b-dev-fp8")
-LTX2_CHECKPOINT_DIR = os.environ.get("LTX2_CHECKPOINT_DIR", "/runpod-volume/checkpoints/ltx2")
+# LTX-2 Configuration (Native Lightricks Pipeline)
+# Checkpoints stored on network volume mounted at /workspace/checkpoints
+LTX2_CHECKPOINT_DIR = os.environ.get("LTX2_CHECKPOINT_DIR", "/workspace/checkpoints/ltx2")
 
-# LTX-2 Camera Control LoRAs
+# LTX-2 model checkpoints (stored directly, not in HuggingFace cache format)
+LTX2_MODEL_CHECKPOINT = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-19b-dev-fp8.safetensors")
+LTX2_SPATIAL_UPSCALER = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-spatial-upscaler-x2-1.0.safetensors")
+LTX2_TEMPORAL_UPSCALER = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-temporal-upscaler-x2-1.0.safetensors")
+LTX2_DISTILLED_LORA = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-19b-distilled-lora-384.safetensors")
+LTX2_GEMMA_DIR = os.path.join(LTX2_CHECKPOINT_DIR, "gemma-3-12b-it-qat-q4_0-unquantized")
+
+# LTX-2 Camera Control LoRAs (stored as safetensors files)
 LTX2_CAMERA_LORAS = {
-    "dolly_left": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Left",
-    "dolly_right": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Right",
-    "dolly_in": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-In",
-    "dolly_out": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Out",
-    "jib_up": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Jib-Up",
-    "static": "Lightricks/LTX-2-19b-LoRA-Camera-Control-Static",
+    "dolly_left": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors"),
+    "dolly_right": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors"),
+    "dolly_in": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors"),
+    "dolly_out": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors"),
+    "jib_up": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Jib-Up.safetensors"),
+    "jib_down": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Jib-Down.safetensors"),
+    "static": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Static.safetensors"),
 }
 LTX2_VALID_CAMERA_MOTIONS = list(LTX2_CAMERA_LORAS.keys()) + ["none"]
 SHARP_CHECKPOINT = os.environ.get("SHARP_CHECKPOINT", "/workspace/checkpoints/sharp/sharp_2572gikvuh.pt")
 TRELLIS_CHECKPOINT = os.environ.get("TRELLIS_CHECKPOINT", "/workspace/checkpoints/trellis")
-# Use network volume for persistent storage (survives worker restarts)
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/runpod-volume/outputs")
+# Use ephemeral storage for outputs (uploaded to S3, no need to persist)
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/tmp/outputs")
 
 # Maximum file size for base64 encoding (8MB) - larger files saved to volume only
 MAX_BASE64_SIZE = int(os.environ.get("MAX_BASE64_SIZE", 8 * 1024 * 1024))
@@ -411,7 +409,7 @@ _sharp_validated = False
 _ltx2_validated = False
 _ltx2_pipeline = None
 _ltx2_current_lora = None
-_ltx2_loaded_model_id: Optional[str] = None
+_ltx2_model_loaded = False
 
 
 def validate_gen3c():
@@ -1069,14 +1067,37 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         if model == "sugar":
             return handle_sugar(job, job_input, "", return_base64)
         
-        # All other models require image input
-        if "image_base64" not in job_input:
-            return {"status": "error", "message": "Missing required field: image_base64"}
+        # All other models require image input (either base64 or URL)
+        input_path = None
         
-        # Decode image to temp file
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(base64.b64decode(job_input["image_base64"]))
-            input_path = f.name
+        if "image_base64" in job_input:
+            # Decode base64 image to temp file
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(base64.b64decode(job_input["image_base64"]))
+                input_path = f.name
+        elif "image_url" in job_input:
+            # Download image from URL (S3 or HTTP)
+            image_url = job_input["image_url"]
+            logger.info(f"Downloading image from URL: {image_url}")
+            try:
+                import requests
+                response = requests.get(image_url, timeout=60)
+                response.raise_for_status()
+                
+                # Determine extension from URL or content-type
+                ext = ".png"
+                if ".jpg" in image_url.lower() or ".jpeg" in image_url.lower():
+                    ext = ".jpg"
+                
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                    f.write(response.content)
+                    input_path = f.name
+                logger.info(f"Image downloaded to: {input_path}")
+            except Exception as e:
+                logger.error(f"Failed to download image from URL: {e}")
+                return {"status": "error", "message": f"Failed to download image from URL: {e}"}
+        else:
+            return {"status": "error", "message": "Missing required field: image_base64 or image_url"}
         
         try:
             if model == "gen3c":
@@ -1735,110 +1756,118 @@ def handle_sugar(job: Dict, job_input: Dict, input_path: str, return_base64: boo
 # =============================================================================
 
 def validate_ltx2() -> bool:
-    """Check if LTX-2 environment is available (diffusers with LTX support)."""
+    """Check if LTX-2 DistilledPipeline environment is available."""
     global _ltx2_validated
     if _ltx2_validated:
         return True
-    
+
     try:
-        import diffusers
-        from packaging import version
-        
-        # LTX-2 requires diffusers >= 0.32.0
-        if version.parse(diffusers.__version__) < version.parse("0.32.0"):
-            logger.warning(f"diffusers {diffusers.__version__} too old, need >= 0.32.0")
-            return False
-        
-        # Check if LTXPipeline is available
-        from diffusers import LTXPipeline
-        
+        # Check for native LTX-2 packages with DistilledPipeline
+        from ltx_pipelines import DistilledPipeline
+
         _ltx2_validated = True
-        logger.info(f"LTX-2 validated: diffusers {diffusers.__version__}")
+        logger.info(f"LTX-2 validated: DistilledPipeline available")
         return True
-        
-    except ImportError as e:
-        logger.warning(f"LTX-2 not available: {e}")
+
+    except (ImportError, RuntimeError, Exception) as e:
+        logger.warning(f"LTX-2 not available (DistilledPipeline required): {e}")
         return False
 
 
-def load_ltx2_model(model_variant: Optional[str] = None):
-    """Load LTX-2 pipeline (lazy initialization, with model variant)."""
-    global _ltx2_pipeline, _ltx2_loaded_model_id
+def load_ltx2_model(camera_lora_path: Optional[str] = None):
+    """Load LTX-2 native pipeline (fresh each time - memory constraints)."""
+    global _ltx2_pipeline, _ltx2_model_loaded, _ltx2_current_lora
+    import gc
+    import torch
 
-    target_model_id = LTX2_MODEL_VARIANTS.get(model_variant or LTX2_DEFAULT_VARIANT, LTX2_MODEL_ID)
+    # LTX-2 needs ~50GB+ VRAM - aggressively clear ALL cached models first
+    logger.info("[LTX2] Clearing GPU memory before loading...")
+    
+    # Clear any cached LTX2 pipeline
+    if _ltx2_pipeline is not None:
+        del _ltx2_pipeline
+        _ltx2_pipeline = None
+        _ltx2_model_loaded = False
+        _ltx2_current_lora = None
+    
+    # Force garbage collection and cache clear
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    
+    # Log memory state before loading
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        logger.info(f"[LTX2] GPU memory before load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
-    # Re-use if already loaded and matches target
-    if _ltx2_pipeline is not None and _ltx2_loaded_model_id == target_model_id:
-        return _ltx2_pipeline
+    logger.info(f"Loading LTX-2 native pipeline...")
+    logger.info(f"[LTX2] Checkpoint dir: {LTX2_CHECKPOINT_DIR}")
+    logger.info(f"[LTX2] Model checkpoint: {LTX2_MODEL_CHECKPOINT}")
 
-    logger.info(f"Loading LTX-2 model (variant={model_variant or LTX2_DEFAULT_VARIANT}, id={target_model_id})...")
     import time
     start_time = time.time()
-    
+
     try:
         import torch
-        from diffusers import LTXPipeline
-        
-        _ltx2_pipeline = LTXPipeline.from_pretrained(
-            target_model_id,
-            torch_dtype=torch.bfloat16,
-            cache_dir=LTX2_CHECKPOINT_DIR
+
+        # Check if required files exist
+        if not os.path.exists(LTX2_MODEL_CHECKPOINT):
+            raise FileNotFoundError(
+                f"LTX-2 model checkpoint not found: {LTX2_MODEL_CHECKPOINT}\n"
+                f"Please download ltx-2-19b-dev-fp8.safetensors to {LTX2_CHECKPOINT_DIR}/"
+            )
+
+        # Log what files are available
+        if os.path.exists(LTX2_CHECKPOINT_DIR):
+            contents = os.listdir(LTX2_CHECKPOINT_DIR)
+            logger.info(f"[LTX2] Available files: {contents[:15]}{'...' if len(contents) > 15 else ''}")
+
+        # Load DistilledPipeline - more memory efficient with 8-step inference
+        from ltx_pipelines import DistilledPipeline
+
+        logger.info("[LTX2] Loading DistilledPipeline (8-step efficient inference)...")
+
+        # Prepare LoRA list (empty if no camera motion)
+        loras = []
+        if camera_lora_path and os.path.exists(camera_lora_path):
+            from ltx_core.loader import LoraPathStrengthAndSDOps, SDOps
+            # SDOps requires a name parameter - use the LoRA filename as name
+            lora_name = os.path.basename(camera_lora_path).replace(".safetensors", "")
+            loras = [LoraPathStrengthAndSDOps(path=camera_lora_path, strength=1.0, sd_ops=SDOps(name=lora_name))]
+            logger.info(f"[LTX2] Loading with camera LoRA: {camera_lora_path}")
+
+        # Determine Gemma path
+        gemma_path = LTX2_GEMMA_DIR if os.path.exists(LTX2_GEMMA_DIR) else "google/gemma-3-12b-it-qat-q4_0-unquantized"
+        logger.info(f"[LTX2] Gemma path: {gemma_path}")
+
+        # Check spatial upsampler exists (required for DistilledPipeline)
+        if not os.path.exists(LTX2_SPATIAL_UPSCALER):
+            raise FileNotFoundError(
+                f"Spatial upsampler not found: {LTX2_SPATIAL_UPSCALER}\n"
+                f"Please download ltx-2-spatial-upscaler-x2-1.0.safetensors to {LTX2_CHECKPOINT_DIR}/"
+            )
+        logger.info(f"[LTX2] Spatial upsampler: {LTX2_SPATIAL_UPSCALER}")
+
+        # Load DistilledPipeline with spatial upsampler
+        _ltx2_pipeline = DistilledPipeline(
+            checkpoint_path=LTX2_MODEL_CHECKPOINT,
+            gemma_root=gemma_path,
+            spatial_upsampler_path=LTX2_SPATIAL_UPSCALER,
+            loras=loras,
+            device=torch.device("cuda"),
+            fp8transformer=True,  # Use fp8 since we have the fp8 checkpoint
         )
-        _ltx2_pipeline = _ltx2_pipeline.to("cuda")
-        
-        # Enable memory optimizations
-        try:
-            _ltx2_pipeline.enable_model_cpu_offload()
-        except Exception as e:
-            logger.warning(f"Could not enable CPU offload: {e}")
-        
+
+        _ltx2_model_loaded = True
+        _ltx2_current_lora = camera_lora_path
         load_time = time.time() - start_time
-        _ltx2_loaded_model_id = target_model_id
-        logger.info(f"LTX-2 model loaded in {load_time:.1f}s")
-        
+        logger.info(f"LTX-2 native pipeline loaded in {load_time:.1f}s")
         return _ltx2_pipeline
-        
+
     except Exception as e:
         logger.error(f"Failed to load LTX-2 model: {e}")
         raise
-
-
-def load_ltx2_camera_lora(camera_motion: str):
-    """Load camera control LoRA if needed."""
-    global _ltx2_pipeline, _ltx2_current_lora
-    
-    if camera_motion == "none" or camera_motion not in LTX2_CAMERA_LORAS:
-        # Unload any existing LoRA
-        if _ltx2_current_lora is not None and _ltx2_pipeline is not None:
-            try:
-                _ltx2_pipeline.unload_lora_weights()
-                _ltx2_current_lora = None
-                logger.info("Unloaded camera LoRA")
-            except Exception as e:
-                logger.warning(f"Failed to unload LoRA: {e}")
-        return
-    
-    if camera_motion == _ltx2_current_lora:
-        logger.info(f"Camera LoRA '{camera_motion}' already loaded")
-        return
-    
-    try:
-        lora_id = LTX2_CAMERA_LORAS[camera_motion]
-        logger.info(f"Loading camera LoRA: {lora_id}")
-        
-        # Unload previous LoRA first
-        if _ltx2_current_lora is not None:
-            _ltx2_pipeline.unload_lora_weights()
-        
-        # Load new LoRA
-        _ltx2_pipeline.load_lora_weights(lora_id)
-        _ltx2_current_lora = camera_motion
-        
-        logger.info(f"Camera LoRA '{camera_motion}' loaded")
-        
-    except Exception as e:
-        logger.error(f"Failed to load camera LoRA: {e}")
-        _ltx2_current_lora = None
 
 
 def run_ltx2(
@@ -1847,10 +1876,9 @@ def run_ltx2(
     prompt: str = "",
     negative_prompt: str = "",
     camera_motion: str = "none",
-    model_variant: Optional[str] = None,
-    num_frames: int = 97,
-    width: int = 768,
-    height: int = 512,
+    num_frames: int = 49,
+    width: int = 512,
+    height: int = 384,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.5,
     fps: int = 24,
@@ -1880,60 +1908,93 @@ def run_ltx2(
     from PIL import Image
     import imageio
     import time
+    import torch
     
     start_time = time.time()
     
-    # Load model
-    pipe = load_ltx2_model(model_variant=model_variant)
+    # Determine camera LoRA path
+    camera_lora_path = None
+    if camera_motion != "none" and camera_motion in LTX2_CAMERA_LORAS:
+        lora_path = LTX2_CAMERA_LORAS[camera_motion]
+        if os.path.exists(lora_path):
+            camera_lora_path = lora_path
+            logger.info(f"[LTX2] Will use camera LoRA: {camera_motion}")
+        else:
+            logger.warning(f"[LTX2] Camera LoRA file not found: {lora_path}")
     
-    # Load camera LoRA if specified
-    load_ltx2_camera_lora(camera_motion)
+    # Load model (with LoRA if specified)
+    pipe = load_ltx2_model(camera_lora_path=camera_lora_path)
     
-    # Load and resize input image
-    image = Image.open(input_image_path).convert("RGB")
-    image = image.resize((width, height), Image.Resampling.LANCZOS)
-    
-    # Set up generator for reproducibility
-    generator = None
-    if seed is not None:
-        generator = torch.Generator("cuda").manual_seed(seed)
+    # Set seed
+    if seed is None:
+        seed = int(torch.randint(0, 2**32 - 1, (1,)).item())
     
     logger.info(f"LTX-2 generating: {num_frames} frames at {width}x{height}")
     logger.info(f"Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"Prompt: {prompt}")
-    logger.info(f"Camera motion: {camera_motion}")
+    logger.info(f"Camera motion: {camera_motion}, seed: {seed}")
     
-    # Generate video
+    # Generate video using DistilledPipeline (8-step efficient inference)
+    # images param: list of (image_path, frame_index, strength) tuples for conditioning
+    logger.info("[LTX2] Using DistilledPipeline (8-step inference)")
     try:
-        output = pipe(
+        # Image conditioning: (path, frame_index, strength)
+        # frame_index=0 means condition on first frame
+        images_conditioning = [(input_image_path, 0, 1.0)]
+        
+        # Call DistilledPipeline - returns (video_iterator, audio_tensor)
+        # Note: DistilledPipeline doesn't use negative_prompt, num_inference_steps, or guidance_scale
+        # It uses predefined 8 sigma steps for efficient inference
+        video_iterator, audio = pipe(
             prompt=prompt,
-            negative_prompt=negative_prompt if negative_prompt else None,
-            image=image,
-            num_frames=num_frames,
-            width=width,
+            seed=seed,
             height=height,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            generator=generator,
+            width=width,
+            num_frames=num_frames,
+            frame_rate=float(fps),
+            images=images_conditioning,
+            enhance_prompt=False,
         )
-        frames = output.frames[0]  # First video in batch
+        
+        # Collect frames from iterator
+        frames = list(video_iterator)
+        logger.info(f"[LTX2] Generated {len(frames)} frame tensors")
         
     except TypeError as e:
-        # Fallback if image parameter not supported (text-to-video only)
-        logger.warning(f"Image-to-video may not be supported, falling back to text-to-video: {e}")
-        output = pipe(
+        # Fallback if image conditioning not supported (text-to-video only)
+        logger.warning(f"Image conditioning may not be supported, trying text-to-video: {e}")
+        video_iterator, audio = pipe(
             prompt=prompt,
-            negative_prompt=negative_prompt if negative_prompt else None,
-            num_frames=num_frames,
-            width=width,
+            seed=seed,
             height=height,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            generator=generator,
+            width=width,
+            num_frames=num_frames,
+            frame_rate=float(fps),
+            images=[],  # No image conditioning
+            enhance_prompt=False,
         )
-        frames = output.frames[0]
+        frames = list(video_iterator)
     
     gen_time = time.time() - start_time
-    logger.info(f"Video generated in {gen_time:.1f}s ({len(frames)} frames)")
+    logger.info(f"Video generated in {gen_time:.1f}s ({len(frames)} frame tensors)")
+    
+    # Convert torch tensors to numpy arrays for saving
+    import numpy as np
+    frames_np = []
+    for i, frame in enumerate(frames):
+        if isinstance(frame, torch.Tensor):
+            # Convert from [C, H, W] or [H, W, C] to [H, W, C] uint8
+            if frame.dim() == 3:
+                if frame.shape[0] in [1, 3, 4]:  # [C, H, W]
+                    frame = frame.permute(1, 2, 0)
+                # Normalize to 0-255
+                if frame.dtype in [torch.float16, torch.float32, torch.bfloat16]:
+                    frame = (frame.clamp(0, 1) * 255).to(torch.uint8)
+                frame = frame.cpu().numpy()
+            frames_np.append(frame)
+        else:
+            frames_np.append(np.array(frame))
+    
+    logger.info(f"Converted {len(frames_np)} frames to numpy")
     
     # Save video
     output_dir = os.path.join(OUTPUT_DIR, "ltx2")
@@ -1941,7 +2002,17 @@ def run_ltx2(
     video_path = os.path.join(output_dir, f"{output_name}.mp4")
     
     logger.info(f"Saving video to: {video_path}")
-    imageio.mimwrite(video_path, frames, fps=fps, codec='libx264', quality=8)
+    imageio.mimwrite(video_path, frames_np, fps=fps, codec='libx264', quality=8)
+    
+    # Clear memory after generation (LTX-2 uses ~60GB)
+    global _ltx2_pipeline, _ltx2_model_loaded
+    logger.info("[LTX2] Clearing pipeline after generation to free VRAM...")
+    del pipe
+    _ltx2_pipeline = None
+    _ltx2_model_loaded = False
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
     
     return {
         "video_path": video_path,
@@ -1958,16 +2029,18 @@ def run_ltx2(
 def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool) -> Dict:
     """Handle LTX-2 video generation job."""
     if not validate_ltx2():
-        return {"status": "error", "message": "LTX-2 environment not available (need diffusers >= 0.32.0)"}
+        return {"status": "error", "message": "LTX-2 environment not available (need ltx-pipelines or diffusers)"}
     
     output_name = job_input.get("output_name", f"ltx2_{job.get('id', 'output')}")
     prompt = job_input.get("prompt", "")
     negative_prompt = job_input.get("negative_prompt", "")
     camera_motion = job_input.get("camera_motion", "none")
-    model_variant = job_input.get("model_variant", LTX2_DEFAULT_VARIANT)
-    num_frames = int(job_input.get("num_frames", 97))
-    width = int(job_input.get("width", 768))
-    height = int(job_input.get("height", 512))
+    # Note: LTX-2 19B + Gemma 12B requires ~60GB+ VRAM
+    # Default to 49 frames at 512x384 for A100 80GB compatibility
+    # Use higher values only with sufficient VRAM (e.g., H100, multi-GPU)
+    num_frames = int(job_input.get("num_frames", 49))
+    width = int(job_input.get("width", 512))
+    height = int(job_input.get("height", 384))
     num_inference_steps = int(job_input.get("num_inference_steps", 50))
     guidance_scale = float(job_input.get("guidance_scale", 7.5))
     fps = int(job_input.get("fps", 24))
@@ -1978,11 +2051,6 @@ def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool
         return {
             "status": "error",
             "message": f"Invalid camera_motion '{camera_motion}'. Valid: {LTX2_VALID_CAMERA_MOTIONS}"
-        }
-    if model_variant not in LTX2_MODEL_VARIANTS and model_variant != LTX2_DEFAULT_VARIANT:
-        return {
-            "status": "error",
-            "message": f"Invalid model_variant '{model_variant}'. Valid: {list(LTX2_MODEL_VARIANTS.keys())}"
         }
     
     # Validate dimensions (must be divisible by 32)
@@ -2008,7 +2076,6 @@ def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool
             prompt=prompt,
             negative_prompt=negative_prompt,
             camera_motion=camera_motion,
-            model_variant=model_variant,
             num_frames=num_frames,
             width=width,
             height=height,
@@ -2075,7 +2142,7 @@ if __name__ == "__main__":
     logger.info(f"Lyra Directory: {LYRA_DIR}")
     logger.info(f"TRELLIS Directory: {TRELLIS_DIR}")
     logger.info(f"SuGaR Directory: {SUGAR_DIR}")
-    logger.info(f"LTX-2 Model: {LTX2_MODEL_ID}")
+    logger.info(f"LTX-2 Checkpoint Dir: {LTX2_CHECKPOINT_DIR}")
     logger.info(f"Checkpoint Directory: {CHECKPOINT_DIR}")
     
     # Validate environments at startup

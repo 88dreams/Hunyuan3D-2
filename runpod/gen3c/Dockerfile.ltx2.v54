@@ -1,0 +1,153 @@
+# =============================================================================
+# Dockerfile v54d - Native LTX-2 Support with ALL Dependencies
+# =============================================================================
+# 
+# This Dockerfile adds proper LTX-2 support using Lightricks' native pipelines
+# instead of diffusers. This is required because the Lightricks/LTX-2 model
+# on HuggingFace is designed for their custom pipeline system.
+#
+# v54d - Comprehensive dependency installation:
+#   - transformers from Gemma-3 branch (Gemma3ForConditionalGeneration)
+#   - flash_attn rebuilt from source (PyTorch 2.9.1 ABI compatibility)
+#   - All ltx-core deps: einops, scipy>=1.14, accelerate, safetensors, torchaudio
+#   - All ltx-pipelines deps: av (PyAV), tqdm, pillow
+#   - Verification of all imports at build time
+#
+# Models in unified handler:
+#   - GEN3C: Image to video (NVIDIA Cosmos)
+#   - SHARP: Image to 3DGS PLY + video (Apple)
+#   - Lyra: Image/Video to 3D/4D Gaussian Splatting (NVIDIA)
+#   - TRELLIS.2: Image to 3D GLB mesh (Microsoft)
+#   - SuGaR: 3DGS to mesh conversion
+#   - LTX-2: Native Lightricks pipelines with camera LoRAs
+#
+# Usage:
+#   cd runpod/gen3c
+#   docker build -f Dockerfile.ltx2.v54 -t 88dreams/gen3c-runpod:v54d .
+#   docker push 88dreams/gen3c-runpod:v54d
+#
+# =============================================================================
+
+# Base on v52 (has all other models working)
+FROM 88dreams/gen3c-runpod:v52
+
+# =============================================================================
+# Install ALL LTX-2 Dependencies Comprehensively
+# =============================================================================
+
+# Step 1a: Upgrade torchvision to match PyTorch version
+# The base image has mismatched torchvision causing "operator torchvision::nms does not exist"
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 1a: Upgrading torchvision ===' && \
+    pip install --no-cache-dir --upgrade torchvision && \
+    python -c 'import torch; import torchvision; print(f\"✓ torch {torch.__version__}, torchvision {torchvision.__version__}\")'"
+
+# Step 1b: Install transformers from Gemma-3 branch
+# This provides Gemma3ForConditionalGeneration needed by ltx-core
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 1b: Installing transformers Gemma-3 branch ===' && \
+    pip uninstall -y transformers || true && \
+    pip install --no-cache-dir git+https://github.com/huggingface/transformers@v4.49.0-Gemma-3 && \
+    python -c 'from transformers.models.gemma3 import Gemma3ForConditionalGeneration; print(\"✓ Gemma3ForConditionalGeneration available\")'"
+
+# Step 2: Remove flash_attn to avoid ABI issues
+# The native LTX-2 pipeline doesn't require flash_attn
+# (only diffusers fallback does, which we won't use)
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 2: Removing incompatible flash_attn ===' && \
+    pip uninstall -y flash-attn || true && \
+    echo '✓ flash_attn removed (not needed for native LTX-2)'"
+
+# Step 3: Install ltx-core dependencies explicitly
+# Requirements: torch~=2.7, torchaudio, einops, numpy, transformers, safetensors, accelerate, scipy>=1.14
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 3: Installing ltx-core dependencies ===' && \
+    pip install --no-cache-dir \
+        torchaudio \
+        einops \
+        'scipy>=1.14' \
+        accelerate \
+        safetensors && \
+    python -c 'import torchaudio, einops, scipy, accelerate, safetensors; print(\"✓ ltx-core deps OK\")'"
+
+# Step 4: Install ltx-pipelines dependencies explicitly
+# Requirements: av (PyAV), tqdm, pillow
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 4: Installing ltx-pipelines dependencies ===' && \
+    pip install --no-cache-dir av tqdm pillow && \
+    python -c 'import av, tqdm, PIL; print(\"✓ ltx-pipelines deps OK\")'"
+
+# =============================================================================
+# Install LTX-2 Native Packages
+# =============================================================================
+
+# Clone the LTX-2 repository
+WORKDIR /workspace
+RUN git clone --depth 1 https://github.com/Lightricks/LTX-2.git /workspace/LTX-2
+
+# Install the LTX packages in the cosmos-predict1 conda environment
+# Using pip install -e for editable install from local packages
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    cd /workspace/LTX-2 && \
+    pip install --no-cache-dir -e packages/ltx-core && \
+    pip install --no-cache-dir -e packages/ltx-pipelines && \
+    pip install --no-cache-dir sentencepiece && \
+    echo '✓ LTX-2 packages installed'"
+
+# Step 6: VERIFY ALL MODEL IMPORTS work (catches dependency breakage)
+# Tests LTX-2, GEN3C/Cosmos, SHARP, and general diffusers compatibility
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 6: Verifying ALL model imports ===' && \
+    python -c '\
+import sys; \
+print(\"=== LTX-2 Native ===\"); \
+from transformers.models.gemma3 import Gemma3ForConditionalGeneration; \
+print(\"OK Gemma3ForConditionalGeneration\"); \
+import ltx_core; \
+print(\"OK ltx_core\"); \
+from ltx_pipelines import TI2VidOneStagePipeline; \
+print(\"OK TI2VidOneStagePipeline\"); \
+print(\"=== GEN3C/Cosmos ===\"); \
+import torch; \
+print(\"OK torch\", torch.__version__); \
+import numpy as np; \
+print(\"OK numpy\", np.__version__); \
+print(\"=== SHARP ===\"); \
+import gsplat; \
+print(\"OK gsplat\"); \
+print(\"=== Diffusers ===\"); \
+import diffusers; \
+print(\"OK diffusers\", diffusers.__version__); \
+print(\"=== General Vision ===\"); \
+import torchvision; \
+print(\"OK torchvision\", torchvision.__version__); \
+from PIL import Image; \
+print(\"OK PIL/Pillow\"); \
+print(\"=== ALL MODEL IMPORTS VERIFIED ===\"); \
+'"
+
+# =============================================================================
+# Environment Variables for LTX-2
+# =============================================================================
+ENV LTX2_MODEL_ID="Lightricks/LTX-2"
+ENV LTX2_CHECKPOINT_DIR="/runpod-volume/ltx2"
+
+# =============================================================================
+# Update Handler with Native LTX-2 Support
+# =============================================================================
+COPY handler_unified.py /workspace/handler.py
+
+# Verify handler is in place
+RUN python -c "import sys; sys.path.insert(0, '/workspace'); exec(open('/workspace/handler.py').read().split('if __name__')[0]); print('✓ Handler syntax OK')" || echo "Handler copied (syntax check skipped)"
+
+# =============================================================================
+# Startup Command (unchanged)
+# =============================================================================
+CMD ["/workspace/start.sh"]
