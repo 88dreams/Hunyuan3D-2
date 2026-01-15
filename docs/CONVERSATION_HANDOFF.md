@@ -18,7 +18,7 @@ This document summarizes the work completed and provides context for new convers
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
 | **2DGS Pipeline** | ViPE + 2DGS | Video → Mesh (GLB) | ✅ Working (v20) |
-| **LTX-2** | Lightricks | Video (camera LoRAs) | 🔧 Partial (see below) |
+| **LTX-2** | Lightricks | Video (official API) | ✅ Working |
 | **SEVA** | Stability AI | Video (camera control) | ⏸️ Blocked (HF access) |
 
 ### Architecture
@@ -31,90 +31,60 @@ This document summarizes the work completed and provides context for new convers
 
 ## Current Work In Progress
 
-### LTX-2 Integration (January 15, 2026) ⭐ ACTIVE
+### LTX-2 Integration (January 15, 2026) ✅ COMPLETE
 
-**Goal**: High-quality video generation from images with camera control LoRAs.
+**Goal**: High-quality video generation from images with camera control.
 
-**Use Case**: Generate camera movement videos (dolly, jib) that can be fed into the 2DGS pipeline for 3D reconstruction.
+**Use Case**: Generate camera movement videos (dolly, orbit, jib) that can be fed into the 2DGS pipeline for 3D reconstruction.
 
-#### Status Summary
+#### Final Solution: Official LTX API ✅
 
-| Approach | Branch | Status | Issue |
-|----------|--------|--------|-------|
-| Native Pipeline (`ltx-pipelines`) | `ltx-native` | ❌ OOM | 19B model + Gemma 12B exceeds 140GB VRAM |
-| Diffusers Pipeline | `ltx-diffuser` | ⚠️ Partial | Camera LoRAs incompatible (2B vs 19B) |
-| API Integration | `ltx-API` | 🔧 In Progress | Current focus |
+After exploring multiple approaches, we implemented the **official Lightricks API** at `https://api.ltx.video`.
 
-#### Detailed History
+| Approach | Status | Notes |
+|----------|--------|-------|
+| Native Pipeline (`ltx-native`) | ❌ Abandoned | OOM - 19B model exceeds 140GB VRAM |
+| Diffusers Pipeline (`ltx-diffuser`) | ❌ Abandoned | Camera LoRAs incompatible (2B vs 19B) |
+| **Official LTX API** | ✅ **IMPLEMENTED** | Direct API calls, no local GPU needed |
 
-**Native Pipeline Attempt (`ltx-native` branch):**
-- Used Lightricks' `ltx-pipelines` package with `TI2VidOneStagePipeline` and `DistilledPipeline`
-- Required `gemma-3-12b-it-qat-q4_0-unquantized` text encoder (~23GB)
-- Used FP8 transformer (`ltx-2-19b-dev-fp8.safetensors`, ~26GB)
-- **Problem**: FP8 weights are upcasted to BF16 during inference, causing VRAM explosion
-- **Result**: OOM even on H200 (140GB VRAM)
-- Camera LoRAs worked correctly when model fit in memory
+#### LTX API Features
 
-**Diffusers Pipeline (`ltx-diffuser` branch):**
-- Switched to HuggingFace `diffusers` library with `LTXImageToVideoPipeline`
-- Key feature: `enable_model_cpu_offload()` for memory efficiency
-- **Discovery**: `Lightricks/LTX-Video` on HuggingFace is a **2B parameter** model
-- Camera LoRAs from Lightricks are trained for the **19B parameter** model
-- **Result**: Video generation works, but camera LoRAs are incompatible (size mismatch)
-- Docker image: `88dreams/gen3c-runpod:v55g`
+- **Models**: `ltx-2-pro` (best quality), `ltx-2-fast` (quick generation)
+- **Resolutions**: 1080p, 1440p, 4K
+- **Durations**: 6, 8, 10 seconds
+- **FPS**: 25 or 50
+- **Camera Control**: Via prompt description (not LoRAs)
+- **Audio**: Optional AI-generated audio
 
-**API Integration (`ltx-API` branch) - CURRENT:**
-- Exploring Lightricks official API or alternative video APIs
-- Avoids local model hosting memory issues
-- **Next steps**: Define API integration approach
+#### Camera Motion via Prompt
 
-#### Git Branches
+Camera motion is controlled through the prompt text:
+- "Camera slowly pulls back from the subject" → dolly out
+- "Camera orbits around the subject" → orbit
+- "Camera rises vertically" → jib up
 
-```
-main
-├── ltx-native     # Native pipeline (OOM issues) - pushed
-├── ltx-diffuser   # Diffusers pipeline (no LoRAs) - pushed  
-└── ltx-API        # API integration - CURRENT
-```
-
-#### Key Technical Learnings
-
-1. **Model Size Mismatch**: HuggingFace `Lightricks/LTX-Video` (2B) ≠ `LTX-2` (19B)
-2. **FP8 Upcasting**: Native pipeline upcasts FP8 to BF16 during inference (~38GB for transformer alone)
-3. **Memory Requirements**: Full 19B pipeline needs >150GB VRAM (transformer + Gemma + activations)
-4. **Diffusers CPU Offload**: Works well but limited to 2B model currently
+Preset prompts are available in the UI dropdown.
 
 #### Files Modified
 
 | File | Changes |
 |------|---------|
-| `runpod/gen3c/handler_unified.py` | Added LTX-2 handlers, runtime path detection, graceful LoRA error handling |
-| `runpod/gen3c/start_unified.sh` | Added LTX-2 symlink creation, HuggingFace cache setup |
-| `runpod/runpod_client.py` | Added `LTX2ServerlessClient`, fixed `video_s3_url` extraction |
-| `generators/ltx2.py` | Generator module for Gradio integration |
-| `app_sidebar.py` | LTX-2 UI tab with camera motion selection |
+| `runpod/runpod_client.py` | Added `LTXAPIClient` class for official API |
+| `generators/ltx2.py` | New `run_ltx2_api()` function, kept legacy RunPod support |
+| `app_sidebar.py` | New LTX-2 UI with model/resolution/duration selectors, LTX API key in Settings |
 
-#### Storage Layout (RunPod Network Volume)
+#### API Configuration
 
-```
-/runpod-volume/
-├── ltx2/                    # LTX-2 files (NOT under checkpoints/)
-│   └── loras/               # Camera control LoRAs
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Jib-Up.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Jib-Down.safetensors
-│       └── LTX-2-19b-LoRA-Camera-Control-Static.safetensors
-├── huggingface/             # HuggingFace cache (diffusers downloads here)
-├── Gen3C-Cosmos-7B/         # Gen3C model
-├── sharp/                   # SHARP checkpoint
-├── trellis/                 # TRELLIS checkpoint
-└── lyra/                    # Lyra checkpoint
-```
+1. Get API key at https://ltx.video
+2. Add to Settings → External APIs → LTX-2
 
-**Note**: Native pipeline checkpoints (gemma, fp8 model) can be deleted - not used by diffusers.
+No RunPod endpoint needed - API calls go directly to Lightricks.
+
+#### Key Technical Learnings (Historical)
+
+1. **Model Size Mismatch**: HuggingFace `Lightricks/LTX-Video` (2B) ≠ `LTX-2` (19B)
+2. **FP8 Upcasting**: Native pipeline upcasts FP8 to BF16 during inference
+3. **API is Best**: Official API avoids all local hosting complexity
 
 ---
 
@@ -210,34 +180,26 @@ docker push 88dreams/2dgs-pipeline:vXX
 
 ## Key Files
 
-### LTX-2 Integration
+### LTX-2 Integration (API-based)
 
 | File | Purpose |
 |------|---------|
-| `runpod/gen3c/handler_unified.py` | LTX-2 handlers with runtime path detection |
-| `runpod/gen3c/start_unified.sh` | Symlink creation for /runpod-volume/ltx2 |
-| `runpod/gen3c/Dockerfile.ltx2.diffusers` | Diffusers-based Docker build |
-| `runpod/runpod_client.py` | `LTX2ServerlessClient` with S3 download |
-| `generators/ltx2.py` | Generator module |
-| `app_sidebar.py` | UI tab for LTX-2 |
+| `runpod/runpod_client.py` | `LTXAPIClient` class for official API |
+| `generators/ltx2.py` | Generator module with `run_ltx2_api()` |
+| `app_sidebar.py` | UI tab with model/resolution/duration selectors |
 
-### Handler Key Functions (LTX-2)
+### LTX API Client Functions
 
 ```python
-# Runtime path detection (runs when job arrives, not at module load)
-def get_ltx2_checkpoint_dir() -> str
+# Main client class
+class LTXAPIClient:
+    def generate_video(image_path, prompt, model, resolution, duration, fps, ...) -> LTX2Result
+    def text_to_video(prompt, model, resolution, duration, fps, ...) -> LTX2Result
 
-# Camera LoRA path lookup
-def get_ltx2_camera_lora_path(motion: str) -> Optional[str]
-
-# Pipeline loading with CPU offload
-def load_ltx2_model(camera_lora_path: Optional[str] = None)
-
-# Video generation
-def run_ltx2(input_image_path, output_name, prompt, ...) -> Dict
-
-# Job handler
-def handle_ltx2(job, job_input, input_path, return_base64) -> Dict
+# Generator functions
+def run_ltx2_api(image_path, prompt, model, resolution, ...) -> LTX2Result
+def generate_video_for_3d(image_path, camera_motion, ...) -> LTX2Result
+def text_to_video(prompt, ...) -> LTX2Result
 ```
 
 ---
@@ -269,10 +231,10 @@ export RUNPOD_API_KEY="your_key"
 
 ## Known Issues / Next Steps
 
-### 1. LTX-2 Camera LoRAs 🔧 IN PROGRESS
-- **Issue**: Diffusers 2B model incompatible with 19B camera LoRAs
-- **Workaround**: Video generates without camera control (prompt-driven only)
-- **Next**: Explore API integration on `ltx-API` branch
+### 1. LTX-2 ✅ COMPLETE
+- **Solution**: Using official Lightricks API at https://api.ltx.video
+- **Camera Control**: Via prompt descriptions (built-in presets in UI)
+- **Quality**: Up to 4K @ 50fps with Pro model
 
 ### 2. SEVA Integration ⏸️ BLOCKED
 - **Issue**: HuggingFace model access required
@@ -286,21 +248,21 @@ export RUNPOD_API_KEY="your_key"
 
 ## Debugging Tips
 
-### LTX-2 Issues
+### LTX-2 API Issues
 
-1. **LoRA not found**: Check `/runpod-volume/ltx2/loras/` exists (not `/runpod-volume/checkpoints/ltx2/`)
-2. **OOM with native pipeline**: Use diffusers branch instead
-3. **LoRA size mismatch**: Expected - diffusers uses 2B model, LoRAs need 19B
-4. **HuggingFace download fails**: Check HF_HOME points to network volume
+1. **API key not found**: Configure in Settings → External APIs → LTX-2
+2. **401 Unauthorized**: Check API key is valid at https://ltx.video
+3. **Timeout**: API may take 30-120s for video generation
+4. **S3 upload fails**: Check AWS credentials in `.env`, or disable "Use S3" option to use base64
 
 ### Logs to Check
 
 ```bash
-# In handler logs, look for:
-[LTX2] Checkpoint dir: /workspace/checkpoints/ltx2  # Should be this, NOT /runpod-volume/checkpoints/ltx2
-[LTX2] Looking for camera LoRA at: ...
-[LTX2] Camera LoRA incompatible with this model version  # Expected with diffusers
-[LTX2] Continuing without camera control
+# In app logs, look for:
+[LTX-API] Starting video generation
+[LTX-API] Model: ltx-2-pro, Resolution: 1920x1080, Duration: 6s
+[LTX-API] Response status: 200
+[LTX-API] Video saved: X.XX MB
 ```
 
 ---
@@ -310,8 +272,9 @@ export RUNPOD_API_KEY="your_key"
 - **RunPod Console**: https://www.runpod.io/console
 - **Docker Hub**: https://hub.docker.com/u/88dreams
 - **S3 Bucket**: arkrunr (us-west-1)
-- **Git Branch**: `ltx-API` (current), `ltx-diffuser`, `ltx-native`
+- **LTX API**: https://docs.ltx.video/welcome
+- **Git Branch**: `main` (LTX API integrated)
 
 ---
 
-*Last Updated: January 15, 2026 (LTX-2 diffusers pipeline complete, moving to API integration)*
+*Last Updated: January 15, 2026 (LTX-2 official API integration complete)*

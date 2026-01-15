@@ -2603,6 +2603,518 @@ class LTX2Result:
             return f"LTX2Result(success=False, error='{self.error}')"
 
 
+# =============================================================================
+# LTX API CLIENT (Official Lightricks API - https://api.ltx.video)
+# =============================================================================
+
+class LTXAPIClient:
+    """
+    Client for the official Lightricks LTX-2 API.
+    
+    Uses the official API at https://api.ltx.video for high-quality video generation.
+    This is simpler than the RunPod approach - returns video directly in response.
+    
+    API Documentation: https://docs.ltx.video/welcome
+    
+    Models:
+        - ltx-2-fast: Faster generation, good quality
+        - ltx-2-pro: Best quality, slower
+    
+    Resolutions:
+        - 1920x1080 (1080p)
+        - 2560x1440 (1440p)  
+        - 3840x2160 (4K)
+    
+    Durations: 6, 8, 10 seconds (more options for fast model at 1080p/25fps)
+    FPS: 25 or 50
+    """
+    
+    API_BASE = "https://api.ltx.video/v1"
+    
+    # Available models
+    MODELS = ["ltx-2-fast", "ltx-2-pro"]
+    
+    # Available resolutions (width x height)
+    RESOLUTIONS = {
+        "1080p": "1920x1080",
+        "1440p": "2560x1440",
+        "4K": "3840x2160"
+    }
+    
+    # Available durations (seconds)
+    DURATIONS = [6, 8, 10]  # Pro model and most fast configs
+    DURATIONS_EXTENDED = [6, 8, 10, 12, 14, 16, 18, 20]  # Fast model at 1080p/25fps
+    
+    # Available FPS options
+    FPS_OPTIONS = [25, 50]
+    
+    def __init__(self, api_key: str, timeout: int = 300):
+        """
+        Initialize the LTX API client.
+        
+        Args:
+            api_key: Your LTX API key (from https://ltx.video)
+            timeout: Request timeout in seconds (default 300 for video generation)
+        """
+        self.api_key = api_key
+        self.timeout = timeout
+    
+    def _headers(self) -> Dict[str, str]:
+        """Get request headers with authorization."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def _image_to_data_uri(self, image_path: str) -> Optional[str]:
+        """
+        Convert image file to base64 data URI.
+        
+        Args:
+            image_path: Path to image file (PNG, JPEG, WEBP)
+            
+        Returns:
+            Data URI string or None on error
+        """
+        import base64
+        import mimetypes
+        
+        try:
+            # Determine MIME type
+            mime_type, _ = mimetypes.guess_type(image_path)
+            if mime_type not in ["image/png", "image/jpeg", "image/webp"]:
+                # Default to PNG for unknown types
+                mime_type = "image/png"
+            
+            # Read and encode file
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+            
+            # Check size limit (7MB for image-to-video)
+            if len(image_data) > 7 * 1024 * 1024:
+                print(f"[LTX-API] Warning: Image exceeds 7MB limit, may fail")
+            
+            encoded = base64.b64encode(image_data).decode("utf-8")
+            data_uri = f"data:{mime_type};base64,{encoded}"
+            
+            return data_uri
+            
+        except Exception as e:
+            print(f"[LTX-API] Error encoding image: {e}")
+            return None
+    
+    def _upload_image_to_s3(
+        self,
+        image_path: str,
+        bucket: str = "arkrunr",
+        region: str = "us-west-1"
+    ) -> Optional[str]:
+        """
+        Upload image to S3 and return public HTTPS URL.
+        
+        This is an alternative to base64 encoding for larger images.
+        
+        Args:
+            image_path: Path to local image file
+            bucket: S3 bucket name
+            region: AWS region
+            
+        Returns:
+            HTTPS URL or None on error
+        """
+        import os
+        import boto3
+        from datetime import datetime
+        
+        try:
+            access_key = os.getenv("AWS_ACCESS_KEY_ID")
+            secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+            
+            if not access_key or not secret_key:
+                print("[LTX-API] AWS credentials not found, using base64 encoding instead")
+                return None
+            
+            # Generate unique S3 key
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.basename(image_path)
+            s3_key = f"MediaContent/inputs/ltx-api/{timestamp}_{filename}"
+            
+            s3_client = boto3.client(
+                's3',
+                region_name=region,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key
+            )
+            
+            # Upload with public read ACL
+            s3_client.upload_file(
+                image_path, 
+                bucket, 
+                s3_key,
+                ExtraArgs={'ACL': 'public-read'}
+            )
+            
+            url = f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
+            print(f"[LTX-API] Uploaded image to: {url}")
+            return url
+            
+        except Exception as e:
+            print(f"[LTX-API] S3 upload failed: {e}, using base64 encoding")
+            return None
+    
+    def generate_video(
+        self,
+        image_path: str,
+        prompt: str,
+        output_dir: str = "./outputs/ltx-api",
+        output_name: str = "ltx_video",
+        model: str = "ltx-2-pro",
+        resolution: str = "1080p",
+        duration: int = 6,
+        fps: int = 25,
+        generate_audio: bool = False,
+        use_s3: bool = True,
+        progress_callback: Optional[Callable] = None
+    ) -> LTX2Result:
+        """
+        Generate video from image using the LTX API.
+        
+        Args:
+            image_path: Path to input image (PNG, JPEG, WEBP)
+            prompt: Text description guiding animation (up to 5000 chars)
+            output_dir: Directory to save output video
+            output_name: Name for output file (without extension)
+            model: "ltx-2-fast" or "ltx-2-pro"
+            resolution: "1080p", "1440p", or "4K"
+            duration: Video duration in seconds (6, 8, 10, etc.)
+            fps: Frame rate (25 or 50)
+            generate_audio: Whether to generate AI audio (default False for 3D use)
+            use_s3: Upload image to S3 (True) or use base64 (False)
+            progress_callback: Optional callback(status_msg, elapsed_seconds)
+            
+        Returns:
+            LTX2Result with video path and metadata
+        """
+        import os
+        import time
+        
+        start_time = time.time()
+        logs = []
+        
+        def log(msg: str):
+            logs.append(msg)
+            print(msg)
+            if progress_callback:
+                progress_callback(msg, time.time() - start_time)
+        
+        # Validate inputs
+        if not os.path.exists(image_path):
+            return LTX2Result(
+                success=False,
+                error=f"Input image not found: {image_path}",
+                logs="\n".join(logs)
+            )
+        
+        if model not in self.MODELS:
+            return LTX2Result(
+                success=False,
+                error=f"Invalid model '{model}'. Choose from: {self.MODELS}",
+                logs="\n".join(logs)
+            )
+        
+        if resolution not in self.RESOLUTIONS:
+            return LTX2Result(
+                success=False,
+                error=f"Invalid resolution '{resolution}'. Choose from: {list(self.RESOLUTIONS.keys())}",
+                logs="\n".join(logs)
+            )
+        
+        if fps not in self.FPS_OPTIONS:
+            log(f"[LTX-API] Warning: fps={fps} not standard, using 25")
+            fps = 25
+        
+        # Get resolution string
+        resolution_str = self.RESOLUTIONS[resolution]
+        
+        log(f"[LTX-API] Starting video generation")
+        log(f"[LTX-API] Model: {model}, Resolution: {resolution_str}, Duration: {duration}s, FPS: {fps}")
+        log(f"[LTX-API] Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"[LTX-API] Prompt: {prompt}")
+        
+        # Prepare image URI
+        image_uri = None
+        if use_s3:
+            log("[LTX-API] Uploading image to S3...")
+            image_uri = self._upload_image_to_s3(image_path)
+        
+        if not image_uri:
+            log("[LTX-API] Using base64 encoding for image...")
+            image_uri = self._image_to_data_uri(image_path)
+        
+        if not image_uri:
+            return LTX2Result(
+                success=False,
+                error="Failed to prepare image (both S3 upload and base64 encoding failed)",
+                logs="\n".join(logs)
+            )
+        
+        # Build request payload
+        payload = {
+            "image_uri": image_uri,
+            "prompt": prompt[:5000],  # API limit
+            "model": model,
+            "duration": duration,
+            "resolution": resolution_str,
+            "fps": fps,
+            "generate_audio": generate_audio
+        }
+        
+        log(f"[LTX-API] Sending request to {self.API_BASE}/image-to-video...")
+        
+        try:
+            response = requests.post(
+                f"{self.API_BASE}/image-to-video",
+                headers=self._headers(),
+                json=payload,
+                timeout=self.timeout,
+                stream=True  # Stream response for large video files
+            )
+            
+            log(f"[LTX-API] Response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                # Try to get error details
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", error_data.get("message", response.text))
+                except:
+                    error_msg = response.text[:500]
+                
+                return LTX2Result(
+                    success=False,
+                    error=f"API error {response.status_code}: {error_msg}",
+                    duration_seconds=time.time() - start_time,
+                    logs="\n".join(logs)
+                )
+            
+            # Check content type
+            content_type = response.headers.get("Content-Type", "")
+            if "video/mp4" not in content_type:
+                log(f"[LTX-API] Warning: Unexpected content type: {content_type}")
+            
+            # Get request ID for tracking
+            request_id = response.headers.get("x-request-id", "unknown")
+            log(f"[LTX-API] Request ID: {request_id}")
+            
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Save video
+            output_path = os.path.join(output_dir, f"{output_name}.mp4")
+            log(f"[LTX-API] Saving video to: {output_path}")
+            
+            # Stream write for potentially large files
+            total_bytes = 0
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        total_bytes += len(chunk)
+            
+            log(f"[LTX-API] Video saved: {total_bytes / 1024 / 1024:.2f} MB")
+            
+            # Parse resolution for result
+            width, height = map(int, resolution_str.split("x"))
+            num_frames = duration * fps
+            
+            elapsed = time.time() - start_time
+            log(f"[LTX-API] Generation complete in {elapsed:.1f}s")
+            
+            return LTX2Result(
+                success=True,
+                video_path=output_path,
+                num_frames=num_frames,
+                duration=float(duration),
+                fps=fps,
+                width=width,
+                height=height,
+                duration_seconds=elapsed,
+                logs="\n".join(logs)
+            )
+            
+        except requests.Timeout:
+            return LTX2Result(
+                success=False,
+                error=f"Request timed out after {self.timeout} seconds",
+                duration_seconds=time.time() - start_time,
+                logs="\n".join(logs)
+            )
+        except requests.RequestException as e:
+            return LTX2Result(
+                success=False,
+                error=f"Request failed: {str(e)}",
+                duration_seconds=time.time() - start_time,
+                logs="\n".join(logs)
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return LTX2Result(
+                success=False,
+                error=f"Unexpected error: {str(e)}",
+                duration_seconds=time.time() - start_time,
+                logs="\n".join(logs)
+            )
+    
+    def text_to_video(
+        self,
+        prompt: str,
+        output_dir: str = "./outputs/ltx-api",
+        output_name: str = "ltx_text_video",
+        model: str = "ltx-2-pro",
+        resolution: str = "1080p",
+        duration: int = 6,
+        fps: int = 25,
+        generate_audio: bool = False,
+        progress_callback: Optional[Callable] = None
+    ) -> LTX2Result:
+        """
+        Generate video from text prompt only (no input image).
+        
+        Args:
+            prompt: Text description of desired video
+            output_dir: Directory to save output video
+            output_name: Name for output file (without extension)
+            model: "ltx-2-fast" or "ltx-2-pro"
+            resolution: "1080p", "1440p", or "4K"
+            duration: Video duration in seconds
+            fps: Frame rate (25 or 50)
+            generate_audio: Whether to generate AI audio
+            progress_callback: Optional callback(status_msg, elapsed_seconds)
+            
+        Returns:
+            LTX2Result with video path and metadata
+        """
+        import os
+        import time
+        
+        start_time = time.time()
+        logs = []
+        
+        def log(msg: str):
+            logs.append(msg)
+            print(msg)
+            if progress_callback:
+                progress_callback(msg, time.time() - start_time)
+        
+        # Validate model
+        if model not in self.MODELS:
+            return LTX2Result(
+                success=False,
+                error=f"Invalid model '{model}'. Choose from: {self.MODELS}",
+                logs="\n".join(logs)
+            )
+        
+        if resolution not in self.RESOLUTIONS:
+            return LTX2Result(
+                success=False,
+                error=f"Invalid resolution '{resolution}'. Choose from: {list(self.RESOLUTIONS.keys())}",
+                logs="\n".join(logs)
+            )
+        
+        resolution_str = self.RESOLUTIONS[resolution]
+        
+        log(f"[LTX-API] Starting text-to-video generation")
+        log(f"[LTX-API] Model: {model}, Resolution: {resolution_str}, Duration: {duration}s")
+        log(f"[LTX-API] Prompt: {prompt[:100]}...")
+        
+        payload = {
+            "prompt": prompt[:5000],
+            "model": model,
+            "duration": duration,
+            "resolution": resolution_str,
+            "fps": fps,
+            "generate_audio": generate_audio
+        }
+        
+        log(f"[LTX-API] Sending request to {self.API_BASE}/text-to-video...")
+        
+        try:
+            response = requests.post(
+                f"{self.API_BASE}/text-to-video",
+                headers=self._headers(),
+                json=payload,
+                timeout=self.timeout,
+                stream=True
+            )
+            
+            log(f"[LTX-API] Response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", error_data.get("message", response.text))
+                except:
+                    error_msg = response.text[:500]
+                
+                return LTX2Result(
+                    success=False,
+                    error=f"API error {response.status_code}: {error_msg}",
+                    duration_seconds=time.time() - start_time,
+                    logs="\n".join(logs)
+                )
+            
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, f"{output_name}.mp4")
+            
+            total_bytes = 0
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        total_bytes += len(chunk)
+            
+            log(f"[LTX-API] Video saved: {total_bytes / 1024 / 1024:.2f} MB ({output_path})")
+            
+            width, height = map(int, resolution_str.split("x"))
+            num_frames = duration * fps
+            
+            elapsed = time.time() - start_time
+            log(f"[LTX-API] Generation complete in {elapsed:.1f}s")
+            
+            return LTX2Result(
+                success=True,
+                video_path=output_path,
+                num_frames=num_frames,
+                duration=float(duration),
+                fps=fps,
+                width=width,
+                height=height,
+                duration_seconds=elapsed,
+                logs="\n".join(logs)
+            )
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return LTX2Result(
+                success=False,
+                error=f"Error: {str(e)}",
+                duration_seconds=time.time() - start_time,
+                logs="\n".join(logs)
+            )
+
+
+# Singleton for LTX API client
+_ltx_api_client: Optional[LTXAPIClient] = None
+
+def get_ltx_api_client(api_key: str = "") -> LTXAPIClient:
+    """Get or create LTX API client singleton."""
+    global _ltx_api_client
+    if _ltx_api_client is None or (api_key and api_key != _ltx_api_client.api_key):
+        _ltx_api_client = LTXAPIClient(api_key=api_key)
+    return _ltx_api_client
+
+
 class LTX2ServerlessClient:
     """
     Client for the LTX-2 serverless endpoint.

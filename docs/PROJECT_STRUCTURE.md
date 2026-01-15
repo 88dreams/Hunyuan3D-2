@@ -85,7 +85,7 @@ Model-specific Python modules that handle local and RunPod execution.
 | `hunyuan.py` | Hunyuan3D (Tencent) | Image to 3D mesh (GLB) |
 | `sugar.py` | SuGaR | 3DGS to mesh conversion (Poisson reconstruction) |
 | `vipe_integration.py` | ViPE (NVIDIA) | Video pose estimation integration |
-| `ltx2.py` | LTX-2 (Lightricks) | Video generation with camera LoRAs ⭐ |
+| `ltx2.py` | LTX-2 (Lightricks) | Video generation via official API ✅ |
 | `seva.py` | SEVA (Stability AI) | Novel view synthesis (blocked - HF access) |
 
 ### Common Pattern
@@ -109,14 +109,16 @@ def run_<model>_runpod(...)    # RunPod serverless execution
   - `RunPodServerlessClient` - Serverless endpoint client
   - `UnifiedServerlessClient` - Multi-model serverless client
   - `TwoDGSPipelineClient` - 2DGS pipeline client (video → mesh)
-  - `LTX2ServerlessClient` - LTX-2 video generation client ⭐
+  - `LTXAPIClient` - Official LTX API client ✅
+  - `LTX2ServerlessClient` - Legacy RunPod client (deprecated)
   - `SEVAServerlessClient` - SEVA client (blocked)
 
-- **LTX-2 Client Features**:
-  - S3 upload for input images
-  - Job submission with camera motion selection
-  - S3 download of generated videos
-  - Extracts `video_s3_url` from handler response
+- **LTX API Client Features**:
+  - Direct API calls to https://api.ltx.video
+  - Image-to-video and text-to-video generation
+  - Models: ltx-2-pro (best quality), ltx-2-fast
+  - Up to 4K @ 50fps output
+  - Camera motion via prompt descriptions
 
 ### Docker Images
 
@@ -249,20 +251,20 @@ Standalone files kept as fallback if unified handler doesn't work.
 
 | Image | Models | Current Version | Notes |
 |-------|--------|-----------------|-------|
-| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2, LTX-2 | **v55g** | LTX-2 without camera LoRAs |
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2 | **v55g** | Unified handler |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 | Stable |
 | `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 | ✅ Working |
 | `88dreams/seva-runpod` | SEVA (camera control video) | v1 | ⏸️ Blocked (HF access) |
 
-### LTX-2 Docker Version History
+**Note**: LTX-2 now uses the official API (https://api.ltx.video) - no Docker image needed.
 
-| Version | Status | Key Change |
-|---------|--------|------------|
-| v55 | ❌ | Initial diffusers, wrong HF cache path |
-| v55a-c | ❌ | Path detection issues |
-| v55d-e | ❌ | Module load vs runtime timing |
-| v55f | ⚠️ | Runtime path detection works |
-| **v55g** | ✅ | Graceful LoRA error handling |
+### LTX-2 Integration History
+
+| Approach | Status | Notes |
+|----------|--------|-------|
+| RunPod Native (v55-v55g) | ❌ Deprecated | OOM issues with 19B model |
+| RunPod Diffusers | ❌ Deprecated | 2B model incompatible with 19B LoRAs |
+| **Official LTX API** | ✅ Current | Direct API calls, no local GPU needed |
 
 ---
 
@@ -280,10 +282,9 @@ Standalone files kept as fallback if unified handler doesn't work.
 
 | Branch | Purpose | Status |
 |--------|---------|--------|
-| `main` | Production code | Stable |
-| `ltx-native` | Native LTX-2 pipeline | ❌ OOM issues |
-| `ltx-diffuser` | Diffusers LTX-2 pipeline | ⚠️ No camera LoRAs |
-| `ltx-API` | API integration | 🔧 Current work |
+| `main` | Production code (includes LTX API) | ✅ Stable |
+| `ltx-native` | Native LTX-2 pipeline (archived) | ❌ OOM issues |
+| `ltx-diffuser` | Diffusers LTX-2 pipeline (archived) | ❌ No camera LoRAs |
 | `2dgs` | 2DGS pipeline development | ✅ Merged to main |
 
 ---
@@ -352,13 +353,13 @@ Or configure in UI Settings page.
 
 ## Key File Relationships
 
-### UI → Handlers → Generators → RunPod
+### UI → Handlers → Generators → APIs
 ```
 app_sidebar.py (UI + LTX-2 handler)
     └── handlers/generation_handlers.py (other models)
             └── generators/ltx2.py (LTX-2 logic)
-                    └── runpod/runpod_client.py (LTX2ServerlessClient)
-                            └── RunPod API → handler_unified.py
+                    └── runpod/runpod_client.py (LTXAPIClient)
+                            └── LTX API (https://api.ltx.video)
 ```
 
 ### Docker Build Chain
@@ -368,17 +369,16 @@ Dockerfile.unified (base image)
             └── 88dreams/gen3c-runpod:v55g (Docker Hub)
 ```
 
-### LTX-2 Path Resolution
+### LTX-2 API Flow
 ```
-Startup Script (start_unified.sh)
-    └── Creates symlink: /workspace/checkpoints/ltx2 → /runpod-volume/ltx2
-        
-Handler (handler_unified.py)
-    └── get_ltx2_checkpoint_dir() runs at job time
-            └── Finds /workspace/checkpoints/ltx2/loras
-                    └── Uses symlinked path
+User enters prompt in Gradio UI
+    └── app_sidebar.py handler
+            └── generators/ltx2.py run_ltx2_api()
+                    └── LTXAPIClient.generate_video()
+                            └── POST https://api.ltx.video/v1/image-to-video
+                                    └── Returns MP4 video directly
 ```
 
 ---
 
-*Last Updated: January 15, 2026 (LTX-2 development, API branch started)*
+*Last Updated: January 15, 2026 (LTX-2 official API integration complete)*

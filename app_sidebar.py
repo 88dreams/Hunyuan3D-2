@@ -89,6 +89,7 @@ from handlers import (
 from help import (
     SHARP_HELP,
     GEN3C_HELP,
+    LTX2_HELP,
     LYRA_HELP,
     TRELLIS_HELP,
     HUNYUAN_HELP,
@@ -175,6 +176,8 @@ DEFAULT_MESH_ENDPOINT = _runpod_config.get("mesh_extraction_endpoint_id", DEFAUL
 DEFAULT_MESH_API_KEY = _runpod_config.get("mesh_extraction_api_key", DEFAULT_GEN3C_API_KEY)
 DEFAULT_2DGS_ENDPOINT = _runpod_config.get("2dgs_endpoint_id", "s9txp6edtf2vg4")
 DEFAULT_2DGS_API_KEY = _runpod_config.get("2dgs_api_key", DEFAULT_GEN3C_API_KEY)
+# LTX API (Official Lightricks API - not RunPod)
+DEFAULT_LTX_API_KEY = _runpod_config.get("ltx_api_key", "")
 
 
 # =============================================================================
@@ -527,87 +530,80 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                     gr.HTML("""
                         <div class="page-header">
                             <h1>LTX-2</h1>
-                            <p>Lightricks' high-quality video generation with camera control. Creates videos optimized for 3D reconstruction.</p>
+                            <p>Lightricks' official API for high-quality video generation. Up to 4K @ 50fps with AI audio.</p>
                         </div>
                     """)
                     
                     with gr.Row():
                         with gr.Column(scale=1):
                             with gr.Group():
-                                gr.Markdown("### Model & Camera")
-                                ltx2_model_variant = gr.Dropdown(
-                                    choices=["19b-dev-fp8", "19b-dev", "19b-dev-fp4", "19b-distilled"],
-                                    value="19b-dev-fp8",
-                                    label="Model Variant",
-                                    info="fp8: 24GB GPU (default), dev: highest quality (32GB+)"
+                                gr.Markdown("### Model & Quality")
+                                ltx2_model = gr.Radio(
+                                    choices=["ltx-2-pro", "ltx-2-fast"],
+                                    value="ltx-2-pro",
+                                    label="Model",
+                                    info="Pro: Best quality | Fast: Quicker generation"
                                 )
-                                
-                                gr.Markdown("**Camera Motions** (select one or more)")
-                                ltx2_camera_motions = gr.CheckboxGroup(
-                                    choices=["dolly_out", "dolly_in", "dolly_left", "dolly_right", "jib_up", "static"],
-                                    value=["dolly_out"],
-                                    label="Camera Motions",
-                                    info="Select multiple for multi-view generation"
-                                )
+                                with gr.Row():
+                                    ltx2_resolution = gr.Dropdown(
+                                        choices=["1080p", "1440p", "4K"],
+                                        value="1080p",
+                                        label="Resolution"
+                                    )
+                                    ltx2_duration = gr.Dropdown(
+                                        choices=["6", "8", "10"],
+                                        value="6",
+                                        label="Duration (sec)"
+                                    )
+                                    ltx2_fps = gr.Dropdown(
+                                        choices=["25", "50"],
+                                        value="25",
+                                        label="FPS"
+                                    )
                             
                             with gr.Group():
                                 gr.Markdown("### Prompt")
+                                gr.Markdown("*Include camera motion in your prompt for control*", elem_classes=["model-note"])
+                                ltx2_camera_preset = gr.Dropdown(
+                                    choices=[
+                                        "Custom prompt",
+                                        "Dolly out - reveal full scene",
+                                        "Dolly in - focus on details",
+                                        "Dolly left - side reveal",
+                                        "Dolly right - alternative angle",
+                                        "Orbit - circular motion",
+                                        "Jib up - rising shot",
+                                        "Static - no movement"
+                                    ],
+                                    value="Dolly out - reveal full scene",
+                                    label="Camera Motion Preset",
+                                    info="Adds camera motion to your prompt"
+                                )
                                 ltx2_prompt = gr.Textbox(
-                                    value="Smooth camera movement revealing object details, high quality, cinematic",
+                                    value="Camera slowly pulls back from the subject, revealing the full scene. Smooth continuous motion, sharp focus, clear lighting, detailed textures.",
                                     label="Prompt",
-                                    lines=2,
-                                )
-                                ltx2_negative_prompt = gr.Textbox(
-                                    value="blurry, low quality, distorted, artifacts",
-                                    label="Negative Prompt",
-                                    lines=1,
+                                    lines=3,
+                                    info="Describe the video you want (up to 5000 chars)"
                                 )
                             
-                            with gr.Group():
-                                gr.Markdown("### Video Settings")
-                                with gr.Row():
-                                    ltx2_num_frames = gr.Dropdown(
-                                        choices=["49", "65", "81", "97", "113", "121"],
-                                        value="97",
-                                        label="Frames",
-                                        info="Must be 8n+1"
-                                    )
-                                    ltx2_fps = gr.Slider(
-                                        minimum=12, maximum=30, value=24, step=1,
-                                        label="FPS"
-                                    )
-                                with gr.Row():
-                                    ltx2_width = gr.Dropdown(
-                                        choices=["512", "640", "768", "896", "1024", "1280", "1920"],
-                                        value="768",
-                                        label="Width"
-                                    )
-                                    ltx2_height = gr.Dropdown(
-                                        choices=["320", "384", "448", "512", "576", "704", "1056"],
-                                        value="512",
-                                        label="Height",
-                                        info="704=720p, 1056=1080p (div by 32)"
-                                    )
-                            
-                            with gr.Accordion("Advanced", open=False):
-                                with gr.Row():
-                                    ltx2_guidance = gr.Slider(
-                                        minimum=1.0, maximum=15.0, value=7.5, step=0.5,
-                                        label="Guidance Scale"
-                                    )
-                                    ltx2_steps = gr.Slider(
-                                        minimum=8, maximum=75, value=50, step=1,
-                                        label="Inference Steps",
-                                        info="8 for distilled, 50 for others"
-                                    )
-                                ltx2_seed = gr.Number(value=None, label="Seed", precision=0)
+                            with gr.Accordion("Options", open=False):
+                                ltx2_generate_audio = gr.Checkbox(
+                                    value=False,
+                                    label="Generate AI Audio",
+                                    info="Add AI-generated audio matching the scene"
+                                )
+                                ltx2_use_s3 = gr.Checkbox(
+                                    value=True,
+                                    label="Use S3 for image upload",
+                                    info="Faster for larger images; disable to use base64"
+                                )
                             
                             with gr.Group():
                                 gr.Markdown("### Output")
-                                ltx2_output_name = gr.Textbox(value="ltx2_video", label="Video Name (base)")
+                                ltx2_output_name = gr.Textbox(value="ltx2_video", label="Video Name")
                                 ltx2_output_dir = gr.Textbox(value="/srv/searidge_share/outputs/ltx2", label="Output Directory")
                             
-                            ltx2_generate_btn = gr.Button("Generate Videos", variant="primary", size="lg")
+                            ltx2_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
                             ltx2_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                             ltx2_generated_videos = gr.State(value=[])  # Track generated video paths
                             
@@ -627,11 +623,16 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             ltx2_last_video_path = gr.State(value=None)
                             
                             gr.Markdown("""
-                            **Camera Motions**:
-                            - `dolly_out` - Best for 3D (reveals full object)
-                            - `dolly_in/left/right` - Alternative angles
-                            - `jib_up` - Vertical movement
-                            - `static` - No movement
+                            **Camera Motion Tips** (include in prompt):
+                            - `dolly out` - Best for 3D (reveals full object)
+                            - `dolly in/left/right` - Alternative angles
+                            - `orbit` - 360° rotation around subject
+                            - `jib up/down` - Vertical movement
+                            - Include `smooth continuous motion` for best 3D results
+                            
+                            **Models**:
+                            - `ltx-2-pro` - Best quality, use for final output
+                            - `ltx-2-fast` - Quick previews
                             """)
                 
                 # PAGE: LYRA
@@ -993,6 +994,18 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 settings_2dgs_test = gr.Button("Test", size="sm")
                                 settings_2dgs_save = gr.Button("Save", size="sm", variant="primary")
                                 settings_2dgs_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
+                    
+                    gr.Markdown("### External APIs")
+                    gr.Markdown("Third-party API credentials (not RunPod).")
+                    
+                    with gr.Row(elem_classes=["settings-row"]):
+                        with gr.Column(scale=1, min_width=200):
+                            with gr.Group(elem_classes=["settings-card"]):
+                                gr.Markdown("**LTX-2 (Lightricks API)**")
+                                gr.Markdown("*Get API key at [ltx.video](https://ltx.video)*", elem_classes=["model-note"])
+                                settings_ltx_api_key = gr.Textbox(value=DEFAULT_LTX_API_KEY, label="API Key", type="password")
+                                settings_ltx_save = gr.Button("Save", size="sm", variant="primary")
+                                settings_ltx_status = gr.Textbox(value="", interactive=False, max_lines=1, show_label=False)
                 
                 # PAGE: UPDATE
                 with gr.TabItem("Update", id="update"):
@@ -1110,63 +1123,7 @@ docker build -t <image> .
                         </div>
                     """)
                     
-                    # SHARP Documentation
-                    with gr.Accordion("SHARP - Single-Image 3D Gaussian Splatting", open=False):
-                        gr.Markdown("""
-## SHARP (Apple)
-
-**What it does:** SHARP generates 3D Gaussian Splatting (3DGS) representations from a single image in under 1 second. The output is a PLY file containing Gaussian splats that can be rendered in real-time using 3DGS viewers. SHARP also supports optional video rendering to visualize the 3D reconstruction with camera movement.
-
-**Key features:**
-- Fastest single-image to 3DGS (sub-second inference)
-- Metric scale output (real-world units)
-- Optional video trajectory rendering (CUDA GPU required)
-
-### Output Format
-
-SHARP outputs standard 3DGS PLY files compatible with various Gaussian Splatting viewers:
-- Contains: positions, spherical harmonics (colors), scales, rotations, opacities
-- Coordinate system: OpenCV (x right, y down, z forward)
-- Color space: sRGB (converted from internal linearRGB for compatibility)
-
-### Video Rendering Options
-
-| Setting | Description | Range | Default |
-|---------|-------------|-------|---------|
-| **Trajectory Type** | Camera movement pattern | rotate_forward, rotate, swipe, shake | rotate_forward |
-| **Frames** | Number of video frames | 30-180 | 60 |
-| **Repeats** | Trajectory loop count | 1-4 | 1 |
-| **Lateral Offset** | Max horizontal/vertical movement | 0.02-0.20 | 0.08 |
-| **Zoom/Forward** | Max forward camera movement | 0.05-0.40 | 0.15 |
-| **Look-At Mode** | Camera focus behavior | point, ahead | point |
-
-### Trajectory Types Explained
-
-| Type | Description | Best For |
-|------|-------------|----------|
-| **rotate_forward** | Circular rotation + forward zoom | Most scenes (default) |
-| **rotate** | Pure circular rotation | Objects, centered subjects |
-| **swipe** | Left-to-right horizontal pan | Wide scenes, panoramas |
-| **shake** | Horizontal then vertical shake | Dynamic preview |
-
-### Architectural Interior Settings
-
-```
-Trajectory: rotate_forward (shows depth well)
-Frames: 90-120 (smooth, longer preview)
-Lateral Offset: 0.06-0.10 (moderate movement)
-Zoom/Forward: 0.10-0.20 (subtle zoom effect)
-Look-At: point (keeps focus on room center)
-```
-
-**Tips for Architectural Interiors:**
-- SHARP excels at capturing room geometry and furniture
-- Use high-resolution input images for best detail
-- Video rendering requires CUDA GPU (use RunPod)
-- The 3DGS output can be converted to mesh using the MESH tab
-                        """)
-                    
-                    # Gen3C Documentation
+                    # Gen3C Documentation (VIDEO - 1)
                     with gr.Accordion("GEN3C - Image-to-Video with Camera Control", open=False):
                         gr.Markdown("""
 ## GEN3C (NVIDIA)
@@ -1209,12 +1166,15 @@ Trajectory: clockwise or counterclockwise (for room tours)
 - Output is VIDEO (mp4), not 3D model - use 2DGS or Lyra for 3D output
                         """)
                     
-                    # 2DGS Documentation
-                    with gr.Accordion("2DGS - Video to Mesh Pipeline", open=False):
-                        from help.documentation import TWODGS_HELP
-                        gr.Markdown(TWODGS_HELP)
+                    # LTX-2 Documentation (VIDEO - 2)
+                    with gr.Accordion("LTX-2 - Image-to-Video with Camera Control", open=False):
+                        gr.Markdown(LTX2_HELP)
                     
-                    # Lyra Documentation
+                    # SHARP Documentation (SPLAT - 3)
+                    with gr.Accordion("SHARP - Single-Image 3D Gaussian Splatting", open=False):
+                        gr.Markdown(SHARP_HELP)
+                    
+                    # Lyra Documentation (SPLAT - 4)
                     with gr.Accordion("LYRA - Image/Video to 3DGS/4DGS", open=False):
                         gr.Markdown("""
 ## LYRA (NVIDIA)
@@ -1254,43 +1214,7 @@ Mode: 3DGS for still images
 - May require longer processing for very detailed scenes
                         """)
                     
-                    # TRELLIS Documentation
-                    with gr.Accordion("TRELLIS.2 - Structured 3D Generation", open=False):
-                        gr.Markdown("""
-## TRELLIS.2 (Microsoft)
-
-**What it does:** TRELLIS.2 generates structured 3D assets using a two-stage latent diffusion approach with O-Voxel representation. It produces clean, well-organized meshes with consistent topology and PBR materials, making outputs ideal for further editing in 3D software and game engines.
-
-### Key Settings
-
-| Setting | Description | Range | Default |
-|---------|-------------|-------|---------|
-| **Resolution** | Voxel resolution for generation | 512, 1024 | 1024 |
-| **Guidance Scale** | Controls generation fidelity | 1.0-15.0 | 7.5 |
-| **Seed** | Random seed for reproducibility | 0-999999 | Random |
-| **Output Format** | GLB (with PBR), OBJ, or PLY | GLB/OBJ/PLY | GLB |
-
-### Architectural Interior Settings
-
-For architectural interiors with TRELLIS.2:
-
-```
-Resolution: 1024 (maximize detail)
-Guidance Scale: 8.0-10.0
-Output Format: GLB (preserves PBR materials)
-```
-
-**Tips for Architectural Interiors:**
-- Produces cleaner meshes than diffusion-only methods
-- Excellent for furniture and architectural elements
-- Good topology makes outputs suitable for game engines
-- Works well with: chairs, tables, cabinets, fixtures
-- PBR materials include Base Color, Roughness, Metallic, Opacity
-- Less suited for entire room reconstructions
-- Best for individual objects within interiors
-                        """)
-                    
-                    # Hunyuan3D Documentation
+                    # Hunyuan3D Documentation (MESH - 5)
                     with gr.Accordion("HUNYUAN3D - Text/Image to 3D", open=False):
                         gr.Markdown("""
 ## HUNYUAN3D 2.1 (Tencent)
@@ -1443,7 +1367,16 @@ CPU Offload: OFF unless necessary
 - Use RunPod Serverless to avoid local VRAM limitations
                         """)
                     
-                    # MESH Extraction Documentation
+                    # TRELLIS Documentation (MESH - 6)
+                    with gr.Accordion("TRELLIS.2 - Structured 3D Generation", open=False):
+                        gr.Markdown(TRELLIS_HELP)
+                    
+                    # 2DGS Documentation (CONVERT - 7)
+                    with gr.Accordion("2DGS - Video to Mesh Pipeline", open=False):
+                        from help.documentation import TWODGS_HELP
+                        gr.Markdown(TWODGS_HELP)
+                    
+                    # MESH Extraction Documentation (CONVERT - 8)
                     with gr.Accordion("MESH - 3DGS to Mesh Conversion", open=False):
                         gr.Markdown("""
 ## MESH Extraction
@@ -1969,42 +1902,65 @@ Min Component Ratio: 1% (default)
     )
 
     # =========================================================================
-    # LTX-2 EVENT HANDLERS
+    # LTX-2 EVENT HANDLERS (Official Lightricks API)
     # =========================================================================
     
-    def handle_ltx2_multi_generation(
+    # Camera preset to prompt mapping
+    LTX2_CAMERA_PRESETS = {
+        "Custom prompt": "",
+        "Dolly out - reveal full scene": "Camera slowly pulls back from the subject, revealing the full scene.",
+        "Dolly in - focus on details": "Camera pushes forward toward the subject, focusing on intricate details.",
+        "Dolly left - side reveal": "Camera moves laterally to the left, revealing the side of the subject.",
+        "Dolly right - alternative angle": "Camera moves laterally to the right, showing another angle.",
+        "Orbit - circular motion": "Camera orbits around the subject in a smooth circular motion.",
+        "Jib up - rising shot": "Camera rises vertically, showing the subject from above.",
+        "Static - no movement": "Camera remains stationary, subject may animate in place."
+    }
+    
+    def update_ltx2_prompt_from_preset(preset, current_prompt):
+        """Update prompt based on camera preset selection."""
+        if preset == "Custom prompt":
+            return current_prompt  # Keep existing prompt
+        base_motion = LTX2_CAMERA_PRESETS.get(preset, "")
+        return f"{base_motion} Smooth continuous motion, sharp focus, clear lighting, detailed textures."
+    
+    ltx2_camera_preset.change(
+        fn=update_ltx2_prompt_from_preset,
+        inputs=[ltx2_camera_preset, ltx2_prompt],
+        outputs=[ltx2_prompt]
+    )
+
+    def handle_ltx2_api_generation(
         input_img, img_scale,
-        endpoint_id, api_key,
-        model_variant, camera_motions,
-        prompt, negative_prompt,
-        num_frames, fps, width, height,
-        guidance, steps, seed,
+        ltx_api_key,
+        model, resolution, duration, fps,
+        camera_preset, prompt,
+        generate_audio, use_s3,
         output_name, output_dir,
         log_params, encode_params
     ):
-        """Handle LTX-2 video generation for multiple camera motions."""
+        """Handle LTX-2 video generation via official Lightricks API."""
         import os
-        from generators.ltx2 import run_ltx2_runpod
-        
+        from generators.ltx2 import run_ltx2_api
+
         logs = []
-        generated_videos = []
         last_video_path = None
-        
+
         # Validate inputs
         if input_img is None:
             return None, "Error: No input image", "❌ No input image", []
-        
-        if not endpoint_id or not api_key:
-            return None, "Error: RunPod credentials required (configure in Settings)", "❌ Missing credentials", []
-        
-        if not camera_motions:
-            return None, "Error: Select at least one camera motion", "❌ No motion selected", []
-        
+
+        if not ltx_api_key:
+            return None, "Error: LTX API key required (configure in Settings → External APIs)", "❌ Missing LTX API key", []
+
+        if not prompt:
+            return None, "Error: Prompt is required", "❌ No prompt", []
+
         # Save input image temporarily
         import tempfile
         import shutil
         from PIL import Image
-        
+
         temp_dir = tempfile.mkdtemp()
         try:
             # Handle Gradio image input
@@ -2016,66 +1972,52 @@ Min Component Ratio: 1% (default)
                     input_img.save(input_path)
                 else:
                     Image.fromarray(input_img).save(input_path)
-            
+
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
+
+            logs.append(f"[LTX-2 API] Starting video generation...")
+            logs.append(f"[LTX-2 API] Model: {model}")
+            logs.append(f"[LTX-2 API] Resolution: {resolution}, Duration: {duration}s, FPS: {fps}")
+            logs.append(f"[LTX-2 API] Prompt: {prompt[:80]}...")
+
+            result = run_ltx2_api(
+                image_path=input_path,
+                output_dir=output_dir,
+                output_name=output_name,
+                prompt=prompt,
+                model=model,
+                resolution=resolution,
+                duration=int(duration),
+                fps=int(fps),
+                generate_audio=generate_audio,
+                api_key=ltx_api_key,
+                use_s3=use_s3,
+            )
+
+            if result.logs:
+                logs.append(result.logs)
             
-            total = len(camera_motions)
-            logs.append(f"[LTX-2] Generating {total} video(s)...")
-            logs.append(f"[LTX-2] Model: {model_variant}")
-            logs.append(f"[LTX-2] Size: {width}x{height}, {num_frames} frames @ {fps}fps")
-            
-            for idx, motion in enumerate(camera_motions, 1):
-                # Create unique name for each motion
-                video_name = f"{output_name}_{motion}"
-                
-                logs.append(f"\n[LTX-2] ({idx}/{total}) Generating {motion}...")
-                
-                result = run_ltx2_runpod(
-                    image_path=input_path,
-                    output_dir=output_dir,
-                    output_name=video_name,
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    camera_motion=motion,
-                    model_variant=model_variant,
-                    num_frames=int(num_frames),
-                    width=int(width),
-                    height=int(height),
-                    num_inference_steps=int(steps),
-                    guidance_scale=float(guidance),
-                    fps=int(fps),
-                    seed=int(seed) if seed else None,
-                    api_key=api_key,
-                    endpoint_id=endpoint_id,
-                )
-                
-                if result.logs:
-                    logs.append(result.logs)
-                
-                if result.success:
-                    logs.append(f"[LTX-2] ✅ {motion}: {result.video_path}")
-                    generated_videos.append(result.video_path)
-                    last_video_path = result.video_path
-                else:
-                    logs.append(f"[LTX-2] ❌ {motion} failed: {result.error}")
-            
-            if generated_videos:
-                status = f"✅ Generated {len(generated_videos)}/{total} videos"
+            if result.success:
+                logs.append(f"[LTX-2 API] ✅ Video saved: {result.video_path}")
+                last_video_path = result.video_path
+                status = f"✅ Generated in {result.duration_seconds:.1f}s"
+                return last_video_path, "\n".join(logs), status, [last_video_path]
             else:
-                status = "❌ All generations failed"
-            
-            return last_video_path, "\n".join(logs), status, generated_videos
+                logs.append(f"[LTX-2 API] ❌ Failed: {result.error}")
+                return None, "\n".join(logs), f"❌ {result.error}", []
                 
         except Exception as e:
-            logs.append(f"[LTX-2] ❌ Exception: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            logs.append(f"[LTX-2 API] ❌ Exception: {str(e)}")
             return None, "\n".join(logs), f"❌ {str(e)}", []
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
     
     def ltx2_generate_with_output(*args):
         """Wrapper that returns output paths for display."""
-        result = handle_ltx2_multi_generation(*args)
+        result = handle_ltx2_api_generation(*args)
         last_video, logs, progress, video_list = result
         # Return: display, video viewer (last), logs, progress, last path for 2DGS, video list
         return last_video, last_video, logs, progress, last_video, video_list
@@ -2084,11 +2026,10 @@ Min Component Ratio: 1% (default)
         fn=ltx2_generate_with_output,
         inputs=[
             input_image, image_scale,
-            settings_gen3c_endpoint, settings_gen3c_key,  # Uses unified endpoint
-            ltx2_model_variant, ltx2_camera_motions,
-            ltx2_prompt, ltx2_negative_prompt,
-            ltx2_num_frames, ltx2_fps, ltx2_width, ltx2_height,
-            ltx2_guidance, ltx2_steps, ltx2_seed,
+            settings_ltx_api_key,  # LTX API key (not RunPod)
+            ltx2_model, ltx2_resolution, ltx2_duration, ltx2_fps,
+            ltx2_camera_preset, ltx2_prompt,
+            ltx2_generate_audio, ltx2_use_s3,
             ltx2_output_name, ltx2_output_dir,
             global_log_params, global_encode_params,
         ],
@@ -2614,6 +2555,22 @@ Min Component Ratio: 1% (default)
         outputs=[settings_2dgs_status],
     )
     
+    # LTX API key save handler
+    def save_ltx_api_key(api_key: str) -> str:
+        """Save LTX API key to config file."""
+        config = _load_runpod_config()
+        config["ltx_api_key"] = api_key.strip() if api_key else ""
+        _save_runpod_config(config)
+        if api_key:
+            return "✅ LTX API key saved"
+        return "⚠️ No API key provided"
+    
+    settings_ltx_save.click(
+        fn=save_ltx_api_key,
+        inputs=[settings_ltx_api_key],
+        outputs=[settings_ltx_status],
+    )
+
     # =========================================================================
     # UPDATE PAGE HANDLERS
     # =========================================================================
