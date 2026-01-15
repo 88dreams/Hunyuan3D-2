@@ -562,28 +562,27 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                     )
                             
                             with gr.Group():
-                                gr.Markdown("### Prompt")
-                                gr.Markdown("*Include camera motion in your prompt for control*", elem_classes=["model-note"])
-                                ltx2_camera_preset = gr.Dropdown(
+                                gr.Markdown("### Camera Motions")
+                                gr.Markdown("*Select multiple for multi-view 3D reconstruction*", elem_classes=["model-note"])
+                                ltx2_camera_motions = gr.CheckboxGroup(
                                     choices=[
-                                        "Custom prompt",
-                                        "Dolly out - reveal full scene",
-                                        "Dolly in - focus on details",
-                                        "Dolly left - side reveal",
-                                        "Dolly right - alternative angle",
-                                        "Orbit - circular motion",
-                                        "Jib up - rising shot",
-                                        "Static - no movement"
+                                        "dolly_out",
+                                        "dolly_in",
+                                        "dolly_left",
+                                        "dolly_right",
+                                        "orbit",
+                                        "jib_up",
+                                        "static"
                                     ],
-                                    value="Dolly out - reveal full scene",
-                                    label="Camera Motion Preset",
-                                    info="Adds camera motion to your prompt"
+                                    value=["dolly_out"],
+                                    label="Camera Motions",
+                                    info="Each generates a separate video"
                                 )
-                                ltx2_prompt = gr.Textbox(
-                                    value="Camera slowly pulls back from the subject, revealing the full scene. Smooth continuous motion, sharp focus, clear lighting, detailed textures.",
-                                    label="Prompt",
-                                    lines=3,
-                                    info="Describe the video you want (up to 5000 chars)"
+                                ltx2_custom_prompt = gr.Textbox(
+                                    value="",
+                                    label="Custom Prompt Addition (optional)",
+                                    lines=2,
+                                    info="Added to camera motion prompt, e.g. 'detailed textures, cinematic lighting'"
                                 )
                             
                             with gr.Accordion("Options", open=False):
@@ -603,7 +602,7 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 ltx2_output_name = gr.Textbox(value="ltx2_video", label="Video Name")
                                 ltx2_output_dir = gr.Textbox(value="/srv/searidge_share/outputs/ltx2", label="Output Directory")
                             
-                            ltx2_generate_btn = gr.Button("Generate Video", variant="primary", size="lg")
+                            ltx2_generate_btn = gr.Button("Generate Videos", variant="primary", size="lg")
                             ltx2_progress = gr.Textbox(value="Ready", label="Status", interactive=False)
                             ltx2_generated_videos = gr.State(value=[])  # Track generated video paths
                             
@@ -623,16 +622,18 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             ltx2_last_video_path = gr.State(value=None)
                             
                             gr.Markdown("""
-                            **Camera Motion Tips** (include in prompt):
-                            - `dolly out` - Best for 3D (reveals full object)
-                            - `dolly in/left/right` - Alternative angles
-                            - `orbit` - 360° rotation around subject
-                            - `jib up/down` - Vertical movement
-                            - Include `smooth continuous motion` for best 3D results
+                            **Camera Motions for 3D**:
+                            - `dolly_out` - Best for 3D (reveals full object)
+                            - `dolly_left/right` - Side views for multi-angle
+                            - `orbit` - 360° rotation (excellent for 3D)
+                            - `jib_up` - Top-down perspective
                             
-                            **Models**:
-                            - `ltx-2-pro` - Best quality, use for final output
-                            - `ltx-2-fast` - Quick previews
+                            **Workflow**:
+                            1. Select multiple camera motions
+                            2. Generate all videos
+                            3. Send best one to 2DGS Pipeline
+                            
+                            **Tip**: Use `dolly_out` + `dolly_left` + `dolly_right` for good coverage.
                             """)
                 
                 # PAGE: LYRA
@@ -1905,45 +1906,33 @@ Min Component Ratio: 1% (default)
     # LTX-2 EVENT HANDLERS (Official Lightricks API)
     # =========================================================================
     
-    # Camera preset to prompt mapping
-    LTX2_CAMERA_PRESETS = {
-        "Custom prompt": "",
-        "Dolly out - reveal full scene": "Camera slowly pulls back from the subject, revealing the full scene.",
-        "Dolly in - focus on details": "Camera pushes forward toward the subject, focusing on intricate details.",
-        "Dolly left - side reveal": "Camera moves laterally to the left, revealing the side of the subject.",
-        "Dolly right - alternative angle": "Camera moves laterally to the right, showing another angle.",
-        "Orbit - circular motion": "Camera orbits around the subject in a smooth circular motion.",
-        "Jib up - rising shot": "Camera rises vertically, showing the subject from above.",
-        "Static - no movement": "Camera remains stationary, subject may animate in place."
+    # Camera motion to prompt mapping
+    LTX2_CAMERA_MOTION_PROMPTS = {
+        "dolly_out": "Camera slowly pulls back from the subject, revealing the full scene.",
+        "dolly_in": "Camera pushes forward toward the subject, focusing on intricate details.",
+        "dolly_left": "Camera moves laterally to the left, revealing the side of the subject.",
+        "dolly_right": "Camera moves laterally to the right, showing another angle.",
+        "orbit": "Camera orbits around the subject in a smooth circular motion, revealing all sides.",
+        "jib_up": "Camera rises vertically, showing the subject from above.",
+        "jib_down": "Camera lowers, revealing the subject from a lower angle.",
+        "static": "Camera remains stationary, subject may animate in place."
     }
-    
-    def update_ltx2_prompt_from_preset(preset, current_prompt):
-        """Update prompt based on camera preset selection."""
-        if preset == "Custom prompt":
-            return current_prompt  # Keep existing prompt
-        base_motion = LTX2_CAMERA_PRESETS.get(preset, "")
-        return f"{base_motion} Smooth continuous motion, sharp focus, clear lighting, detailed textures."
-    
-    ltx2_camera_preset.change(
-        fn=update_ltx2_prompt_from_preset,
-        inputs=[ltx2_camera_preset, ltx2_prompt],
-        outputs=[ltx2_prompt]
-    )
 
-    def handle_ltx2_api_generation(
+    def handle_ltx2_multi_generation(
         input_img, img_scale,
         ltx_api_key,
         model, resolution, duration, fps,
-        camera_preset, prompt,
+        camera_motions, custom_prompt,
         generate_audio, use_s3,
         output_name, output_dir,
         log_params, encode_params
     ):
-        """Handle LTX-2 video generation via official Lightricks API."""
+        """Handle LTX-2 video generation for multiple camera motions via official API."""
         import os
         from generators.ltx2 import run_ltx2_api
 
         logs = []
+        generated_videos = []
         last_video_path = None
 
         # Validate inputs
@@ -1953,8 +1942,8 @@ Min Component Ratio: 1% (default)
         if not ltx_api_key:
             return None, "Error: LTX API key required (configure in Settings → External APIs)", "❌ Missing LTX API key", []
 
-        if not prompt:
-            return None, "Error: Prompt is required", "❌ No prompt", []
+        if not camera_motions:
+            return None, "Error: Select at least one camera motion", "❌ No motion selected", []
 
         # Save input image temporarily
         import tempfile
@@ -1976,36 +1965,53 @@ Min Component Ratio: 1% (default)
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
 
-            logs.append(f"[LTX-2 API] Starting video generation...")
-            logs.append(f"[LTX-2 API] Model: {model}")
-            logs.append(f"[LTX-2 API] Resolution: {resolution}, Duration: {duration}s, FPS: {fps}")
-            logs.append(f"[LTX-2 API] Prompt: {prompt[:80]}...")
+            total = len(camera_motions)
+            logs.append(f"[LTX-2 API] Generating {total} video(s)...")
+            logs.append(f"[LTX-2 API] Model: {model}, Resolution: {resolution}, Duration: {duration}s")
 
-            result = run_ltx2_api(
-                image_path=input_path,
-                output_dir=output_dir,
-                output_name=output_name,
-                prompt=prompt,
-                model=model,
-                resolution=resolution,
-                duration=int(duration),
-                fps=int(fps),
-                generate_audio=generate_audio,
-                api_key=ltx_api_key,
-                use_s3=use_s3,
-            )
+            for idx, motion in enumerate(camera_motions, 1):
+                # Build prompt for this camera motion
+                base_prompt = LTX2_CAMERA_MOTION_PROMPTS.get(motion, "Smooth camera movement.")
+                full_prompt = f"{base_prompt} Smooth continuous motion, sharp focus, clear lighting, detailed textures."
+                if custom_prompt:
+                    full_prompt = f"{full_prompt} {custom_prompt}"
+                
+                # Create unique name for each motion
+                video_name = f"{output_name}_{motion}"
 
-            if result.logs:
-                logs.append(result.logs)
+                logs.append(f"\n[LTX-2 API] ({idx}/{total}) Generating {motion}...")
+                logs.append(f"[LTX-2 API] Prompt: {base_prompt[:60]}...")
+
+                result = run_ltx2_api(
+                    image_path=input_path,
+                    output_dir=output_dir,
+                    output_name=video_name,
+                    prompt=full_prompt,
+                    model=model,
+                    resolution=resolution,
+                    duration=int(duration),
+                    fps=int(fps),
+                    generate_audio=generate_audio,
+                    api_key=ltx_api_key,
+                    use_s3=use_s3,
+                )
+
+                if result.logs:
+                    logs.append(result.logs)
+                
+                if result.success:
+                    logs.append(f"[LTX-2 API] ✅ {motion}: {result.video_path}")
+                    generated_videos.append(result.video_path)
+                    last_video_path = result.video_path
+                else:
+                    logs.append(f"[LTX-2 API] ❌ {motion} failed: {result.error}")
             
-            if result.success:
-                logs.append(f"[LTX-2 API] ✅ Video saved: {result.video_path}")
-                last_video_path = result.video_path
-                status = f"✅ Generated in {result.duration_seconds:.1f}s"
-                return last_video_path, "\n".join(logs), status, [last_video_path]
+            if generated_videos:
+                status = f"✅ Generated {len(generated_videos)}/{total} videos"
             else:
-                logs.append(f"[LTX-2 API] ❌ Failed: {result.error}")
-                return None, "\n".join(logs), f"❌ {result.error}", []
+                status = "❌ All generations failed"
+            
+            return last_video_path, "\n".join(logs), status, generated_videos
                 
         except Exception as e:
             import traceback
@@ -2017,7 +2023,7 @@ Min Component Ratio: 1% (default)
     
     def ltx2_generate_with_output(*args):
         """Wrapper that returns output paths for display."""
-        result = handle_ltx2_api_generation(*args)
+        result = handle_ltx2_multi_generation(*args)
         last_video, logs, progress, video_list = result
         # Return: display, video viewer (last), logs, progress, last path for 2DGS, video list
         return last_video, last_video, logs, progress, last_video, video_list
@@ -2028,7 +2034,7 @@ Min Component Ratio: 1% (default)
             input_image, image_scale,
             settings_ltx_api_key,  # LTX API key (not RunPod)
             ltx2_model, ltx2_resolution, ltx2_duration, ltx2_fps,
-            ltx2_camera_preset, ltx2_prompt,
+            ltx2_camera_motions, ltx2_custom_prompt,
             ltx2_generate_audio, ltx2_use_s3,
             ltx2_output_name, ltx2_output_dir,
             global_log_params, global_encode_params,
