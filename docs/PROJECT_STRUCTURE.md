@@ -1,6 +1,6 @@
 # ARKRUNR WORLDS - Project Structure
 
-**Last Updated:** January 12, 2026
+**Last Updated:** January 15, 2026
 
 This document describes the structure of the ARKRUNR WORLDS project, a multi-model 3D generation system built on top of Hunyuan3D-2.
 
@@ -28,13 +28,13 @@ Hunyuan3D-2-Fork/
 ## Core Application Files
 
 ### `app_sidebar.py`
-**Main entry point** - The primary Gradio application with sidebar navigation (~2,380 lines).
+**Main entry point** - The primary Gradio application with sidebar navigation (~2,700 lines).
 
 - **Purpose**: Unified UI for all 3D generation models
 - **Key Features**:
   - Sidebar navigation with INPUT, CREATE, TOOLS sections
   - Image input with auto-scaling
-  - Model selection (SHARP, Gen3C, Lyra, Trellis, Hunyuan)
+  - Model selection (SHARP, Gen3C, Lyra, Trellis, Hunyuan, **LTX-2**)
   - Settings page for RunPod credentials
   - Help documentation
   - Update tracker for model versions
@@ -55,7 +55,7 @@ Legacy Gradio application (older version, kept for reference).
 
 Business logic layer between UI and generators. Extracted from `app_sidebar.py` for maintainability.
 
-### `handlers/generation_handlers.py` (~886 lines)
+### `handlers/generation_handlers.py` (~900 lines)
 
 | Function | Purpose |
 |----------|---------|
@@ -68,31 +68,7 @@ Business logic layer between UI and generators. Extracted from `app_sidebar.py` 
 | `handle_mesh_analyze()` | Mesh statistics analysis |
 | `handle_mesh_cleanup()` | Mesh decimation and cleanup |
 
-**Responsibilities**:
-- Image scaling and preprocessing
-- Parameter validation and encoding
-- Calling appropriate generator (local or RunPod)
-- Experiment logging to CSV
-- Cleanup of temporary files
-
----
-
-## Help Documentation (`help/`)
-
-Help text and documentation strings for the UI. Extracted from `app_sidebar.py` for easier maintenance.
-
-### `help/documentation.py` (~514 lines)
-
-| Constant | Content |
-|----------|---------|
-| `SHARP_HELP` | SHARP model documentation and settings |
-| `GEN3C_HELP` | Gen3C video generation documentation |
-| `LYRA_HELP` | Lyra 3DGS/4DGS documentation |
-| `TRELLIS_HELP` | TRELLIS.2 documentation |
-| `HUNYUAN_HELP` | Hunyuan3D documentation with memory options |
-| `MESH_HELP` | Mesh extraction documentation |
-| `MESH_CLEANUP_HELP` | Mesh cleanup detailed documentation |
-| `GENERAL_TIPS_HELP` | Workflow recommendations and tips |
+**Note**: LTX-2 generation is handled directly in `app_sidebar.py` via `handle_ltx2_multi_generation()`.
 
 ---
 
@@ -109,8 +85,8 @@ Model-specific Python modules that handle local and RunPod execution.
 | `hunyuan.py` | Hunyuan3D (Tencent) | Image to 3D mesh (GLB) |
 | `sugar.py` | SuGaR | 3DGS to mesh conversion (Poisson reconstruction) |
 | `vipe_integration.py` | ViPE (NVIDIA) | Video pose estimation integration |
-| `ltx2.py` | LTX-2 (Lightricks) | High-quality video with camera LoRAs (4K) ⭐ |
-| `seva.py` | SEVA (Stability AI) | Novel view synthesis with camera control |
+| `ltx2.py` | LTX-2 (Lightricks) | Video generation with camera LoRAs ⭐ |
+| `seva.py` | SEVA (Stability AI) | Novel view synthesis (blocked - HF access) |
 
 ### Common Pattern
 Each generator module typically contains:
@@ -119,75 +95,53 @@ def run_<model>_local(...)     # Local execution (if supported)
 def run_<model>_runpod(...)    # RunPod serverless execution
 ```
 
-### Dependencies
-- All generators import from `runpod/runpod_client.py`
-- Some use `scripts/experiment_logger.py` for CSV logging
-
----
-
-## UI Components (`ui/`)
-
-### `ui/components/`
-
-| File | Purpose |
-|------|---------|
-| `sidebar.py` | Sidebar navigation component |
-| `credentials_manager.py` | RunPod/AWS credential management |
-
-### `ui/tabs/`
-
-Individual tab implementations (legacy, mostly integrated into `app_sidebar.py`):
-
-| File | Tab |
-|------|-----|
-| `sharp_tab.py` | SHARP generation tab |
-| `gen3c_tab.py` | Gen3C video generation tab |
-| `lyra_tab.py` | Lyra 3DGS tab |
-| `trellis_tab.py` | TRELLIS.2 tab |
-| `hunyuan_tab.py` | Hunyuan3D tab |
-| `mesh_extraction_tab.py` | Mesh cleanup/extraction tab |
-| `create_tab.py` | 2DGS Pipeline tab (video → mesh) |
-| `placeholder_tabs.py` | Placeholder tabs for future features |
-
-### `ui/styles.py`
-CSS styles and color palette for the Gradio UI.
-
 ---
 
 ## RunPod Infrastructure (`runpod/`)
 
 ### Client Library
 
-#### `runpod/runpod_client.py`
-**Primary client** for RunPod API interactions (~2,090 lines).
+#### `runpod/runpod_client.py` (~3,140 lines)
+**Primary client** for RunPod API interactions.
 
 - **Classes**:
   - `RunPodGEN3CClient` - Pod-based API client
   - `RunPodServerlessClient` - Serverless endpoint client
-  - `UnifiedServerlessClient` - Multi-model serverless client (recommended)
+  - `UnifiedServerlessClient` - Multi-model serverless client
   - `TwoDGSPipelineClient` - 2DGS pipeline client (video → mesh)
-- **Key Methods**:
-  - `submit_*_job()` - Submit jobs for each model
-  - `generate_*_sync()` - Synchronous job execution with polling
-  - `wait_for_completion()` - Poll for job completion
-- **Features**:
-  - S3 upload/download for large files
-  - Base64 encoding for small files
-  - Automatic timeout handling
-  - 180° X-axis mesh rotation correction for 2DGS outputs
+  - `LTX2ServerlessClient` - LTX-2 video generation client ⭐
+  - `SEVAServerlessClient` - SEVA client (blocked)
+
+- **LTX-2 Client Features**:
+  - S3 upload for input images
+  - Job submission with camera motion selection
+  - S3 download of generated videos
+  - Extracts `video_s3_url` from handler response
 
 ### Docker Images
 
 #### `runpod/gen3c/` - Unified Multi-Model Image
+
 | File | Purpose |
 |------|---------|
-| `Dockerfile.unified` | Main Docker image (Gen3C, Lyra, SHARP, TRELLIS.2, SuGaR) |
-| `Dockerfile.patch` | Incremental patch Dockerfile for quick updates |
-| `handler_unified.py` | Serverless handler for all models |
+| `Dockerfile.unified` | Main Docker image (base) |
+| `Dockerfile.patch` | Incremental patch Dockerfile |
+| `Dockerfile.ltx2.diffusers` | LTX-2 diffusers build ⭐ |
+| `handler_unified.py` | Serverless handler (~2,200 lines) |
 | `start_unified.sh` | Container startup script |
 | `lyra_inference.py` | Lyra-specific inference logic |
 | `sugar_inference.py` | SuGaR mesh extraction logic |
-| `server_unified.py` | Pod-mode API server |
+| `trellis_inference.py` | TRELLIS inference logic |
+
+**Handler Key Functions (LTX-2)**:
+```python
+get_ltx2_checkpoint_dir()      # Runtime path detection
+get_ltx2_camera_lora_path()    # LoRA path lookup
+load_ltx2_model()              # Pipeline with CPU offload
+run_ltx2()                     # Video generation
+handle_ltx2()                  # Job handler
+validate_ltx2()                # Environment validation
+```
 
 #### `runpod/hunyuan/` - Hunyuan3D Image
 | File | Purpose |
@@ -196,77 +150,23 @@ CSS styles and color palette for the Gradio UI.
 | `handler_hunyuan.py` | Serverless handler |
 | `start_hunyuan.sh` | Startup script |
 
-#### `runpod/trellis/` - TRELLIS.2 Image
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | Trellis-specific image |
-| `handler_trellis.py` | Serverless handler |
-| `trellis_inference.py` | Inference logic |
-
-#### `runpod/2dgs-pipeline/` - ViPE + 2DGS Pipeline (NEW)
-Combined serverless endpoint for video-to-mesh reconstruction:
+#### `runpod/2dgs-pipeline/` - ViPE + 2DGS Pipeline
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Combined ViPE + 2DGS image |
-| `handler.py` | Serverless handler orchestrating full pipeline |
-| `vipe_to_2dgs.py` | Converter: ViPE output → COLMAP format |
-| `init_points_from_depth.py` | Generate initial point cloud from depth maps |
-| `README.md` | Deployment and usage instructions |
+| `handler.py` | Serverless handler |
+| `vipe_to_2dgs.py` | ViPE → COLMAP converter |
+| `init_points_from_depth.py` | Point cloud generator |
 
-**Pipeline Flow:**
-1. ViPE extracts camera poses, depth, intrinsics from video
-2. Converter transforms to COLMAP format for 2DGS
-3. Point cloud generated from depth maps
-4. 2DGS training produces Gaussian splats
-5. Mesh extraction via marching cubes
-
-#### `runpod/ltx2/` - LTX-2 Video Generation ⭐ NEW
-High-quality video generation with camera control LoRAs:
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | LTX-2 Docker image |
-| `handler_ltx2.py` | Serverless handler with camera LoRAs |
-| `start_ltx2.sh` | Startup script |
-| `README.md` | Deployment instructions |
-
-**Capabilities:**
-- Single image → video with camera movement (4K @ 50fps)
-- Camera LoRAs: dolly_left/right/in/out, jib_up, static
-- Open weights (no HuggingFace approval needed)
-- Fast inference with distilled model (8 steps)
-- Commercial-friendly license
-
-#### `runpod/seva/` - Stable Virtual Camera
-Novel view synthesis with precise camera control:
+#### `runpod/seva/` - SEVA (Blocked)
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | SEVA Docker image |
 | `handler_seva.py` | Serverless handler |
 | `start_seva.sh` | Startup script |
-| `README.md` | Deployment instructions |
 
-**Capabilities:**
-- Single image → video with camera movement
-- 14+ preset trajectories (orbit, pan, tilt, spiral, etc.)
-- Custom camera trajectories via C2W matrices
-- Up to 1,000 frames with 3D consistency
-
-⚠️ **Note:** Blocked on HuggingFace model access approval
-
-#### `runpod/vipe/` - Standalone ViPE (Reference)
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | ViPE-only image |
-| `handler_vipe.py` | Serverless handler |
-| `setup_vipe.sh` | Setup script |
-
-#### `runpod/2dgs/` - Standalone 2DGS (Reference)
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | 2DGS-only image |
-| `handler_2dgs.py` | Serverless handler |
-| `vipe_to_2dgs.py` | Converter script |
-| `init_points_from_depth.py` | Point cloud generator |
+#### `runpod/ltx2/` - Standalone LTX-2 (Reference)
+Standalone files kept as fallback if unified handler doesn't work.
 
 ---
 
@@ -281,29 +181,9 @@ Novel view synthesis with precise camera control:
 | `benchmark_models.py` | Performance benchmarking |
 | `init_points_from_depth.py` | Generate point cloud from ViPE depth maps |
 | `vipe_to_2dgs.py` | Convert ViPE output to 2DGS COLMAP format |
-| `test_2dgs_pipeline.py` | Test script for 2dgs-pipeline endpoint |
+| `test_2dgs_pipeline.py` | Test script for 2DGS endpoint |
 | `test_vipe.py` | Test script for ViPE endpoint |
 | `test_mesh_rotation.py` | Test 180° X-axis rotation on mesh files |
-
----
-
-## Utilities (`utils/`)
-
-| File | Purpose |
-|------|---------|
-| `system_metrics.py` | CPU/GPU/Memory monitoring |
-| `version_tracker.py` | Track upstream and deployed model versions |
-| `image_utils.py` | Image processing utilities |
-
----
-
-## Configuration (`config/`)
-
-| File | Purpose |
-|------|---------|
-| `paths.py` | Path configuration |
-| `multi_system.yaml` | Multi-system configuration |
-| `monitoring/` | Grafana/Prometheus configs |
 
 ---
 
@@ -312,12 +192,12 @@ Novel view synthesis with precise camera control:
 | File | Purpose |
 |------|---------|
 | `PROJECT_STRUCTURE.md` | This file - project structure overview |
-| `SERVERLESS_DEPLOYMENT_MORNING.md` | Stage-pipeline deployment guide |
-| `VIPE_SETUP_GUIDE.md` | ViPE installation and usage |
-| `SV3D_SETUP_GUIDE.md` | SV3D setup instructions |
-| `INTERIOR_RECONSTRUCTION_APPROACHES.md` | Research on interior 3D reconstruction |
-| `S3_UPLOAD_ACCESS.md` | S3 configuration for large files |
 | `CONVERSATION_HANDOFF.md` | Session handoff documentation |
+| `STABLE_VIRTUAL_CAMERA_PLAN.md` | SEVA integration plan |
+| `VIPE_SETUP_GUIDE.md` | ViPE installation and usage |
+| `2DGS_PLAN.md` | 2DGS pipeline architecture |
+| `NERF_VS_GAUSSIAN_SPLATTING_RESEARCH.md` | Research notes |
+| `GAUSSIAN_SPLAT_TO_MESH_GUIDE.md` | Mesh extraction guide |
 
 ---
 
@@ -346,49 +226,98 @@ Novel view synthesis with precise camera control:
 │                  RunPod Serverless Endpoint                     │
 │                   (GPU Cloud - Remote)                          │
 ├─────────────────────────────────────────────────────────────────┤
-│  handler_unified.py / handler_hunyuan.py / handler_trellis.py   │
-│  handler.py (2dgs-pipeline)                                    │
-│                    (Serverless Handlers)                        │
+│  handler_unified.py    →  Gen3C, SHARP, Lyra, TRELLIS, LTX-2   │
+│  handler_hunyuan.py    →  Hunyuan3D                             │
+│  handler.py (2dgs)     →  ViPE + 2DGS Pipeline                  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        S3 Bucket                                │
 │              (Large file storage - arkrunr)                     │
+│                                                                 │
+│  MediaContent/inputs/ltx2/   - Input images                     │
+│  MediaContent/outputs/ltx2/  - Generated videos                 │
+│  MediaContent/outputs/gen3c/ - Gen3C videos                     │
+│  MediaContent/outputs/sharp/ - SHARP outputs                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Key File Relationships
+## Docker Images on Docker Hub
 
-### UI → Handlers → Generators → RunPod
+| Image | Models | Current Version | Notes |
+|-------|--------|-----------------|-------|
+| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2, LTX-2 | **v55g** | LTX-2 without camera LoRAs |
+| `88dreams/hunyuan-runpod` | Hunyuan3D | v10 | Stable |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 | ✅ Working |
+| `88dreams/seva-runpod` | SEVA (camera control video) | v1 | ⏸️ Blocked (HF access) |
+
+### LTX-2 Docker Version History
+
+| Version | Status | Key Change |
+|---------|--------|------------|
+| v55 | ❌ | Initial diffusers, wrong HF cache path |
+| v55a-c | ❌ | Path detection issues |
+| v55d-e | ❌ | Module load vs runtime timing |
+| v55f | ⚠️ | Runtime path detection works |
+| **v55g** | ✅ | Graceful LoRA error handling |
+
+---
+
+## RunPod Serverless Endpoints
+
+| Endpoint Name | Image | Purpose |
+|---------------|-------|---------|
+| `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2, LTX-2) |
+| `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
+| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) |
+
+---
+
+## Git Branches
+
+| Branch | Purpose | Status |
+|--------|---------|--------|
+| `main` | Production code | Stable |
+| `ltx-native` | Native LTX-2 pipeline | ❌ OOM issues |
+| `ltx-diffuser` | Diffusers LTX-2 pipeline | ⚠️ No camera LoRAs |
+| `ltx-API` | API integration | 🔧 Current work |
+| `2dgs` | 2DGS pipeline development | ✅ Merged to main |
+
+---
+
+## Storage Layout
+
+### RunPod Network Volume (`/runpod-volume/`)
+
 ```
-app_sidebar.py (UI components + event bindings)
-    └── handlers/generation_handlers.py (business logic)
-            └── generators/sharp.py (model-specific logic)
-                    └── runpod/runpod_client.py (UnifiedServerlessClient)
-                            └── RunPod API → handler_unified.py
+/runpod-volume/
+├── ltx2/                           # LTX-2 (NOT under checkpoints!)
+│   └── loras/                      # Camera control LoRAs (19B model)
+│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors
+│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors
+│       └── ...
+├── huggingface/                    # HuggingFace cache
+│   └── hub/                        # Downloaded models
+├── Gen3C-Cosmos-7B/                # Gen3C model
+├── sharp/                          # SHARP checkpoint
+├── trellis/                        # TRELLIS checkpoint
+└── lyra/                           # Lyra checkpoint
 ```
 
-### Docker Build Chain
-```
-Dockerfile.unified (base image)
-    └── Dockerfile.patch (incremental updates)
-            └── 88dreams/gen3c-runpod:v50 (Docker Hub)
-```
+**Important**: LTX-2 files are at `/runpod-volume/ltx2/`, NOT `/runpod-volume/checkpoints/ltx2/`
 
-### 2DGS Pipeline Build
-```
-runpod/2dgs-pipeline/Dockerfile
-    └── 88dreams/2dgs-pipeline:v15 (Docker Hub)
-```
+### Local Output Directory
 
-### Configuration Flow
 ```
-.env (AWS credentials - not in repo)
-    └── runpod/runpod_client.py (reads for S3)
-    └── handler_unified.py (reads for S3 upload)
+/srv/searidge_share/outputs/
+├── gen3c/      # Gen3C video outputs
+├── ltx2/       # LTX-2 video outputs
+├── sharp/      # SHARP PLY outputs
+├── mesh_2dgs/  # 2DGS mesh outputs
+└── logs/       # Experiment CSV logs
 ```
 
 ---
@@ -399,24 +328,57 @@ runpod/2dgs-pipeline/Dockerfile
 # Start the Gradio UI
 python app_sidebar.py
 
-# Access at http://localhost:7860
+# Access at http://localhost:5684
 ```
 
-## Docker Images on Docker Hub
+---
 
-| Image | Models | Current Version |
-|-------|--------|-----------------|
-| `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, **TRELLIS.2**, **LTX-2** ⭐ | v51 → **v52** |
-| `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/2dgs-pipeline` | ViPE + 2DGS (video→mesh) | v20 ✅ |
-| `88dreams/seva-runpod` | SEVA (camera control video) | v1 (blocked - HF access) |
-| ~~`88dreams/trellis-runpod`~~ | ~~TRELLIS.2~~ | **DEPRECATED** - Use unified |
+## Environment Setup
 
-## RunPod Serverless Endpoints
+### AWS Credentials (`.env` file - not in repo)
+```
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+```
 
-| Endpoint Name | Image | Purpose |
-|---------------|-------|---------|
-| `gen3c-serverless` | gen3c-runpod:**v52** | Multi-model (Gen3C, Lyra, SHARP, **TRELLIS.2**, **LTX-2**) ⭐ |
-| `hunyuan-serverless` | hunyuan-runpod | Hunyuan3D mesh generation |
-| `2dgs-serverless` | 2dgs-pipeline:v20 | Video to mesh (ViPE + 2DGS) ✅ |
-| `seva-serverless` | seva-runpod:v1 | Novel view video - blocked (HF access) |
+### RunPod API Key
+```bash
+export RUNPOD_API_KEY="your_key"
+```
+
+Or configure in UI Settings page.
+
+---
+
+## Key File Relationships
+
+### UI → Handlers → Generators → RunPod
+```
+app_sidebar.py (UI + LTX-2 handler)
+    └── handlers/generation_handlers.py (other models)
+            └── generators/ltx2.py (LTX-2 logic)
+                    └── runpod/runpod_client.py (LTX2ServerlessClient)
+                            └── RunPod API → handler_unified.py
+```
+
+### Docker Build Chain
+```
+Dockerfile.unified (base image)
+    └── Dockerfile.ltx2.diffusers (LTX-2 additions)
+            └── 88dreams/gen3c-runpod:v55g (Docker Hub)
+```
+
+### LTX-2 Path Resolution
+```
+Startup Script (start_unified.sh)
+    └── Creates symlink: /workspace/checkpoints/ltx2 → /runpod-volume/ltx2
+        
+Handler (handler_unified.py)
+    └── get_ltx2_checkpoint_dir() runs at job time
+            └── Finds /workspace/checkpoints/ltx2/loras
+                    └── Uses symlinked path
+```
+
+---
+
+*Last Updated: January 15, 2026 (LTX-2 development, API branch started)*
