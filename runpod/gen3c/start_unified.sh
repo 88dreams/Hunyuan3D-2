@@ -1,6 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Unified 3D Generation Container Startup Script for RunPod
+# Version: v55e - Fixed LTX2 path to /runpod-volume/ltx2
 # =============================================================================
 # Environment: Python 3.10 + NumPy 1.26.4 + PyTorch 2.6.0 (NVIDIA Stack)
 # Supports: GEN3C, Lyra, TRELLIS.2, SHARP
@@ -184,12 +185,6 @@ fi
 echo ""
 echo "Setting up checkpoint symlinks..."
 
-# Handle nested checkpoint directory
-if [ ! -d "/workspace/checkpoints/Gen3C-Cosmos-7B" ] && [ -d "/workspace/checkpoints/checkpoints/Gen3C-Cosmos-7B" ]; then
-    ln -sf /workspace/checkpoints/checkpoints/Gen3C-Cosmos-7B /workspace/checkpoints/Gen3C-Cosmos-7B
-    echo "  ✓ Gen3C-Cosmos-7B symlink created"
-fi
-
 # Tokenizer symlink
 if [ -d "/workspace/checkpoints/Gen3C-Cosmos-7B/Cosmos-Tokenize1-CV8x8x8-720p" ]; then
     if [ ! -e "/workspace/checkpoints/Cosmos-Tokenize1-CV8x8x8-720p" ]; then
@@ -236,6 +231,33 @@ elif [ -d "/workspace/volume/checkpoints/trellis" ]; then
     rm -rf /workspace/checkpoints/trellis 2>/dev/null
     ln -sf /workspace/volume/checkpoints/trellis /workspace/checkpoints/trellis
     echo "  ✓ TRELLIS checkpoint linked from workspace volume"
+fi
+
+# LTX-2 checkpoint symlink
+# Network volume has ltx2/ directly (not under checkpoints/)
+if [ -d "/runpod-volume/ltx2" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/ltx2 2>/dev/null
+    ln -sf /runpod-volume/ltx2 /workspace/checkpoints/ltx2
+    echo "  ✓ LTX-2 checkpoint linked from network volume (/runpod-volume/ltx2)"
+elif [ -d "/runpod-volume/checkpoints/ltx2" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/ltx2 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/ltx2 /workspace/checkpoints/ltx2
+    echo "  ✓ LTX-2 checkpoint linked from network volume (/runpod-volume/checkpoints/ltx2)"
+elif [ -d "/workspace/volume/ltx2" ]; then
+    mkdir -p /workspace/checkpoints
+    rm -rf /workspace/checkpoints/ltx2 2>/dev/null
+    ln -sf /workspace/volume/ltx2 /workspace/checkpoints/ltx2
+    echo "  ✓ LTX-2 checkpoint linked from workspace volume"
+fi
+
+# HuggingFace cache symlink (ensure downloads go to persistent storage)
+if [ -d "/runpod-volume" ]; then
+    mkdir -p /runpod-volume/checkpoints/huggingface
+    rm -rf /workspace/checkpoints/huggingface 2>/dev/null
+    ln -sf /runpod-volume/checkpoints/huggingface /workspace/checkpoints/huggingface
+    echo "  ✓ HuggingFace cache linked to network volume"
 fi
 
 # Lyra checkpoint symlinks

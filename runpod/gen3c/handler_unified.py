@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Unified 3D Generation RunPod Serverless Handler
+Version: v55g - Graceful handling of incompatible camera LoRAs
 
 This handler supports multiple models:
 - GEN3C: Image to video generation (NVIDIA Cosmos)
@@ -28,6 +29,31 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
 
+# =============================================================================
+# HUGGINGFACE CACHE CONFIGURATION - MUST BE SET BEFORE ANY HF IMPORTS!
+# Serverless containers have limited local disk (~25GB), so we must use
+# the persistent network volume for model downloads.
+# The startup script sets HF_HOME=/workspace/checkpoints/huggingface
+# We only override if that's not already set or the path doesn't exist.
+# =============================================================================
+_hf_cache_set = False
+# Priority order: 1) /workspace/checkpoints/huggingface (startup script default)
+#                 2) /runpod-volume/checkpoints/huggingface (network volume)
+for _hf_cache_path in ["/workspace/checkpoints/huggingface", "/runpod-volume/checkpoints/huggingface"]:
+    _parent = os.path.dirname(_hf_cache_path)
+    if os.path.exists(_parent) and os.access(_parent, os.W_OK):
+        os.makedirs(_hf_cache_path, exist_ok=True)
+        os.environ["HF_HOME"] = _hf_cache_path
+        os.environ["HF_HUB_CACHE"] = os.path.join(_hf_cache_path, "hub")
+        os.environ["TRANSFORMERS_CACHE"] = os.path.join(_hf_cache_path, "hub")
+        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(_hf_cache_path, "hub")
+        os.environ["DIFFUSERS_CACHE"] = os.path.join(_hf_cache_path, "hub")
+        _hf_cache_set = True
+        print(f"[STARTUP] HuggingFace cache set to: {_hf_cache_path}")
+        break
+if not _hf_cache_set:
+    print("[STARTUP] WARNING: Could not set HuggingFace cache to persistent storage!")
+
 import runpod
 
 # =============================================================================
@@ -41,28 +67,55 @@ TRELLIS_DIR = os.environ.get("TRELLIS_DIR", "/workspace/TRELLIS2")
 SUGAR_DIR = os.environ.get("SUGAR_DIR", "/workspace/SuGaR")
 CHECKPOINT_DIR = os.environ.get("GEN3C_CHECKPOINT_DIR", "/workspace/checkpoints")
 
-# LTX-2 Configuration (Native Lightricks Pipeline)
-# Checkpoints stored on network volume mounted at /workspace/checkpoints
-LTX2_CHECKPOINT_DIR = os.environ.get("LTX2_CHECKPOINT_DIR", "/workspace/checkpoints/ltx2")
+# LTX-2 Configuration
+# Path detection moved to runtime function get_ltx2_checkpoint_dir() because
+# module load happens before startup script creates symlinks
+LTX2_CHECKPOINT_DIR = None  # Will be set at runtime
 
-# LTX-2 model checkpoints (stored directly, not in HuggingFace cache format)
-LTX2_MODEL_CHECKPOINT = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-19b-dev-fp8.safetensors")
-LTX2_SPATIAL_UPSCALER = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-spatial-upscaler-x2-1.0.safetensors")
-LTX2_TEMPORAL_UPSCALER = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-temporal-upscaler-x2-1.0.safetensors")
-LTX2_DISTILLED_LORA = os.path.join(LTX2_CHECKPOINT_DIR, "ltx-2-19b-distilled-lora-384.safetensors")
-LTX2_GEMMA_DIR = os.path.join(LTX2_CHECKPOINT_DIR, "gemma-3-12b-it-qat-q4_0-unquantized")
+def get_ltx2_checkpoint_dir():
+    """Get LTX2 checkpoint directory, detecting at runtime after symlinks are created."""
+    global LTX2_CHECKPOINT_DIR
+    if LTX2_CHECKPOINT_DIR is not None:
+        return LTX2_CHECKPOINT_DIR
+    
+    # Check environment variable first
+    env_dir = os.environ.get("LTX2_CHECKPOINT_DIR")
+    if env_dir and os.path.exists(os.path.join(env_dir, "loras")):
+        LTX2_CHECKPOINT_DIR = env_dir
+        return LTX2_CHECKPOINT_DIR
+    
+    # Priority order - check for loras subdirectory to confirm valid path
+    for path in [
+        "/workspace/checkpoints/ltx2",  # Symlink created by startup script
+        "/runpod-volume/ltx2",           # Direct network volume (no checkpoints/ prefix)
+        "/runpod-volume/checkpoints/ltx2",  # Alternative layout
+    ]:
+        if os.path.exists(os.path.join(path, "loras")):
+            LTX2_CHECKPOINT_DIR = path
+            return LTX2_CHECKPOINT_DIR
+    
+    # Fallback - might not have loras yet
+    LTX2_CHECKPOINT_DIR = "/workspace/checkpoints/ltx2"
+    return LTX2_CHECKPOINT_DIR
 
-# LTX-2 Camera Control LoRAs (stored as safetensors files)
-LTX2_CAMERA_LORAS = {
-    "dolly_left": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors"),
-    "dolly_right": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors"),
-    "dolly_in": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors"),
-    "dolly_out": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors"),
-    "jib_up": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Jib-Up.safetensors"),
-    "jib_down": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Jib-Down.safetensors"),
-    "static": os.path.join(LTX2_CHECKPOINT_DIR, "loras", "LTX-2-19b-LoRA-Camera-Control-Static.safetensors"),
+# LTX-2 Camera LoRA names (paths built at runtime using get_ltx2_checkpoint_dir())
+LTX2_CAMERA_LORA_NAMES = {
+    "dolly_left": "LTX-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors",
+    "dolly_right": "LTX-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors",
+    "dolly_in": "LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors",
+    "dolly_out": "LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors",
+    "jib_up": "LTX-2-19b-LoRA-Camera-Control-Jib-Up.safetensors",
+    "jib_down": "LTX-2-19b-LoRA-Camera-Control-Jib-Down.safetensors",
+    "static": "LTX-2-19b-LoRA-Camera-Control-Static.safetensors",
 }
-LTX2_VALID_CAMERA_MOTIONS = list(LTX2_CAMERA_LORAS.keys()) + ["none"]
+LTX2_VALID_CAMERA_MOTIONS = list(LTX2_CAMERA_LORA_NAMES.keys()) + ["none"]
+
+def get_ltx2_camera_lora_path(motion: str) -> Optional[str]:
+    """Get the full path to a camera LoRA file."""
+    if motion not in LTX2_CAMERA_LORA_NAMES:
+        return None
+    checkpoint_dir = get_ltx2_checkpoint_dir()
+    return os.path.join(checkpoint_dir, "loras", LTX2_CAMERA_LORA_NAMES[motion])
 SHARP_CHECKPOINT = os.environ.get("SHARP_CHECKPOINT", "/workspace/checkpoints/sharp/sharp_2572gikvuh.pt")
 TRELLIS_CHECKPOINT = os.environ.get("TRELLIS_CHECKPOINT", "/workspace/checkpoints/trellis")
 # Use ephemeral storage for outputs (uploaded to S3, no need to persist)
@@ -1781,6 +1834,10 @@ def load_ltx2_model(camera_lora_path: Optional[str] = None):
     import gc
     import torch
 
+    # HF_HOME is set at module load time (top of file) to ensure it's configured
+    # before any HuggingFace imports. Log the current setting for debugging.
+    logger.info(f"[LTX2] HF_HOME: {os.environ.get('HF_HOME', 'NOT SET')}")
+
     # Check if we can reuse existing pipeline (same LoRA)
     if _ltx2_pipeline is not None and _ltx2_model_loaded:
         if camera_lora_path == _ltx2_current_lora:
@@ -1795,6 +1852,8 @@ def load_ltx2_model(camera_lora_path: Optional[str] = None):
         torch.cuda.empty_cache()
 
     logger.info(f"Loading LTX-2 diffusers pipeline with CPU offloading...")
+    logger.info(f"[LTX2] Checkpoint dir: {get_ltx2_checkpoint_dir()}")
+    logger.info(f"[LTX2] LoRA path requested: {camera_lora_path}")
 
     import time
     start_time = time.time()
@@ -1816,15 +1875,24 @@ def load_ltx2_model(camera_lora_path: Optional[str] = None):
         _ltx2_pipeline.enable_model_cpu_offload()
         
         # Load camera LoRA if specified
+        # NOTE: Camera LoRAs from Lightricks are trained for the 19B model (4096 hidden dim)
+        # The diffusers LTX-Video model may be a smaller version (2048 hidden dim)
+        # If incompatible, we skip the LoRA and generate without camera control
         if camera_lora_path and os.path.exists(camera_lora_path):
             lora_name = os.path.basename(camera_lora_path).replace(".safetensors", "")
             logger.info(f"[LTX2] Loading camera LoRA: {lora_name}")
-            _ltx2_pipeline.load_lora_weights(
-                camera_lora_path,
-                adapter_name=lora_name
-            )
-            _ltx2_pipeline.set_adapters([lora_name])
-            logger.info(f"[LTX2] Camera LoRA loaded and activated: {lora_name}")
+            try:
+                _ltx2_pipeline.load_lora_weights(
+                    camera_lora_path,
+                    adapter_name=lora_name
+                )
+                _ltx2_pipeline.set_adapters([lora_name])
+                logger.info(f"[LTX2] Camera LoRA loaded and activated: {lora_name}")
+            except Exception as lora_error:
+                logger.warning(f"[LTX2] Camera LoRA incompatible with this model version: {lora_error}")
+                logger.warning("[LTX2] The diffusers LTX-Video model may be smaller than the 19B model the LoRAs were trained for")
+                logger.warning("[LTX2] Continuing without camera control - video will still generate")
+                camera_lora_path = None  # Clear so we don't try to use it
 
         _ltx2_model_loaded = True
         _ltx2_current_lora = camera_lora_path
@@ -1879,11 +1947,12 @@ def run_ltx2(
     
     start_time = time.time()
     
-    # Determine camera LoRA path
+    # Determine camera LoRA path (using runtime path detection)
     camera_lora_path = None
-    if camera_motion != "none" and camera_motion in LTX2_CAMERA_LORAS:
-        lora_path = LTX2_CAMERA_LORAS[camera_motion]
-        if os.path.exists(lora_path):
+    if camera_motion != "none" and camera_motion in LTX2_CAMERA_LORA_NAMES:
+        lora_path = get_ltx2_camera_lora_path(camera_motion)
+        logger.info(f"[LTX2] Looking for camera LoRA at: {lora_path}")
+        if lora_path and os.path.exists(lora_path):
             camera_lora_path = lora_path
             logger.info(f"[LTX2] Will use camera LoRA: {camera_motion}")
         else:
@@ -2102,7 +2171,7 @@ if __name__ == "__main__":
     logger.info(f"Lyra Directory: {LYRA_DIR}")
     logger.info(f"TRELLIS Directory: {TRELLIS_DIR}")
     logger.info(f"SuGaR Directory: {SUGAR_DIR}")
-    logger.info(f"LTX-2 Checkpoint Dir: {LTX2_CHECKPOINT_DIR}")
+    logger.info(f"LTX-2 Checkpoint Dir: {get_ltx2_checkpoint_dir()}")
     logger.info(f"Checkpoint Directory: {CHECKPOINT_DIR}")
     
     # Validate environments at startup

@@ -2263,9 +2263,6 @@ class SEVAServerlessClient:
             import boto3
             from urllib.parse import urlparse
             import os
-            from dotenv import load_dotenv
-            
-            load_dotenv()
             
             # Parse URL
             parsed = urlparse(s3_url)
@@ -2667,17 +2664,8 @@ class LTX2ServerlessClient:
         try:
             import boto3
             import os
-            from pathlib import Path
-            from dotenv import load_dotenv
             
-            # Load credentials
-            load_dotenv()
-            
-            # Also try loading from the 3d_studio config
-            config_path = Path.home() / ".config" / "3d_studio" / "aws_credentials.env"
-            if config_path.exists():
-                load_dotenv(config_path)
-            
+            # Credentials should already be in environment (loaded at app startup)
             access_key = os.getenv("AWS_ACCESS_KEY_ID")
             secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
             
@@ -2724,9 +2712,6 @@ class LTX2ServerlessClient:
             import boto3
             from urllib.parse import urlparse
             import os
-            from dotenv import load_dotenv
-            
-            load_dotenv()
             
             # Parse URL
             parsed = urlparse(s3_url)
@@ -2832,6 +2817,7 @@ class LTX2ServerlessClient:
         
         # Build job input
         job_input = {
+            "model": "ltx2",  # Required for routing in unified handler
             "image_url": image_url,
             "prompt": prompt,
             "negative_prompt": negative_prompt,
@@ -3045,12 +3031,15 @@ class LTX2ServerlessClient:
         
         # Extract output
         output = result.get("output", {})
-        video_url = output.get("video_url")
+        # Handler returns video_s3_url (consistent with other models)
+        video_url = output.get("video_s3_url") or output.get("video_url")
         
         if not video_url:
+            # Log what we got for debugging
+            logs.append(f"[DEBUG] Output keys: {list(output.keys())}")
             return LTX2Result(
                 success=False,
-                error="No video URL in response",
+                error="No video URL in response (expected video_s3_url or video_url)",
                 duration_seconds=elapsed,
                 logs="\n".join(logs)
             )
