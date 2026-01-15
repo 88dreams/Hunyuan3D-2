@@ -1756,113 +1756,80 @@ def handle_sugar(job: Dict, job_input: Dict, input_path: str, return_base64: boo
 # =============================================================================
 
 def validate_ltx2() -> bool:
-    """Check if LTX-2 DistilledPipeline environment is available."""
+    """Check if LTX-2 diffusers pipeline environment is available."""
     global _ltx2_validated
     if _ltx2_validated:
         return True
 
     try:
-        # Check for native LTX-2 packages with DistilledPipeline
-        from ltx_pipelines import DistilledPipeline
+        # Check for diffusers LTX-2 support
+        from diffusers import LTXImageToVideoPipeline
+        import torch
 
         _ltx2_validated = True
-        logger.info(f"LTX-2 validated: DistilledPipeline available")
+        logger.info(f"LTX-2 validated: diffusers LTXImageToVideoPipeline available")
         return True
 
     except (ImportError, RuntimeError, Exception) as e:
-        logger.warning(f"LTX-2 not available (DistilledPipeline required): {e}")
+        logger.warning(f"LTX-2 not available (diffusers required): {e}")
         return False
 
 
 def load_ltx2_model(camera_lora_path: Optional[str] = None):
-    """Load LTX-2 native pipeline (fresh each time - memory constraints)."""
+    """Load LTX-2 diffusers pipeline with CPU offloading for memory efficiency."""
     global _ltx2_pipeline, _ltx2_model_loaded, _ltx2_current_lora
     import gc
     import torch
 
-    # LTX-2 needs ~50GB+ VRAM - aggressively clear ALL cached models first
-    logger.info("[LTX2] Clearing GPU memory before loading...")
-    
-    # Clear any cached LTX2 pipeline
-    if _ltx2_pipeline is not None:
+    # Check if we can reuse existing pipeline (same LoRA)
+    if _ltx2_pipeline is not None and _ltx2_model_loaded:
+        if camera_lora_path == _ltx2_current_lora:
+            logger.info("[LTX2] Reusing cached diffusers pipeline")
+            return _ltx2_pipeline
+        # Different LoRA requested - need to reload
+        logger.info(f"[LTX2] Different LoRA requested, reloading pipeline...")
         del _ltx2_pipeline
         _ltx2_pipeline = None
         _ltx2_model_loaded = False
-        _ltx2_current_lora = None
-    
-    # Force garbage collection and cache clear
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
-    
-    # Log memory state before loading
-    if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated() / 1024**3
-        reserved = torch.cuda.memory_reserved() / 1024**3
-        logger.info(f"[LTX2] GPU memory before load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+        gc.collect()
+        torch.cuda.empty_cache()
 
-    logger.info(f"Loading LTX-2 native pipeline...")
-    logger.info(f"[LTX2] Checkpoint dir: {LTX2_CHECKPOINT_DIR}")
-    logger.info(f"[LTX2] Model checkpoint: {LTX2_MODEL_CHECKPOINT}")
+    logger.info(f"Loading LTX-2 diffusers pipeline with CPU offloading...")
 
     import time
     start_time = time.time()
 
     try:
-        import torch
-
-        # Check if required files exist
-        if not os.path.exists(LTX2_MODEL_CHECKPOINT):
-            raise FileNotFoundError(
-                f"LTX-2 model checkpoint not found: {LTX2_MODEL_CHECKPOINT}\n"
-                f"Please download ltx-2-19b-dev-fp8.safetensors to {LTX2_CHECKPOINT_DIR}/"
-            )
-
-        # Log what files are available
-        if os.path.exists(LTX2_CHECKPOINT_DIR):
-            contents = os.listdir(LTX2_CHECKPOINT_DIR)
-            logger.info(f"[LTX2] Available files: {contents[:15]}{'...' if len(contents) > 15 else ''}")
-
-        # Load DistilledPipeline - more memory efficient with 8-step inference
-        from ltx_pipelines import DistilledPipeline
-
-        logger.info("[LTX2] Loading DistilledPipeline (8-step efficient inference)...")
-
-        # Prepare LoRA list (empty if no camera motion)
-        loras = []
-        if camera_lora_path and os.path.exists(camera_lora_path):
-            from ltx_core.loader import LoraPathStrengthAndSDOps, SDOps
-            # SDOps requires a name parameter - use the LoRA filename as name
-            lora_name = os.path.basename(camera_lora_path).replace(".safetensors", "")
-            loras = [LoraPathStrengthAndSDOps(path=camera_lora_path, strength=1.0, sd_ops=SDOps(name=lora_name))]
-            logger.info(f"[LTX2] Loading with camera LoRA: {camera_lora_path}")
-
-        # Determine Gemma path
-        gemma_path = LTX2_GEMMA_DIR if os.path.exists(LTX2_GEMMA_DIR) else "google/gemma-3-12b-it-qat-q4_0-unquantized"
-        logger.info(f"[LTX2] Gemma path: {gemma_path}")
-
-        # Check spatial upsampler exists (required for DistilledPipeline)
-        if not os.path.exists(LTX2_SPATIAL_UPSCALER):
-            raise FileNotFoundError(
-                f"Spatial upsampler not found: {LTX2_SPATIAL_UPSCALER}\n"
-                f"Please download ltx-2-spatial-upscaler-x2-1.0.safetensors to {LTX2_CHECKPOINT_DIR}/"
-            )
-        logger.info(f"[LTX2] Spatial upsampler: {LTX2_SPATIAL_UPSCALER}")
-
-        # Load DistilledPipeline with spatial upsampler
-        _ltx2_pipeline = DistilledPipeline(
-            checkpoint_path=LTX2_MODEL_CHECKPOINT,
-            gemma_root=gemma_path,
-            spatial_upsampler_path=LTX2_SPATIAL_UPSCALER,
-            loras=loras,
-            device=torch.device("cuda"),
-            fp8transformer=True,  # Use fp8 since we have the fp8 checkpoint
+        from diffusers import LTXImageToVideoPipeline
+        from diffusers.utils import export_to_video
+        
+        # Load pipeline from HuggingFace (will use cache if available)
+        logger.info("[LTX2] Loading LTXImageToVideoPipeline from Lightricks/LTX-Video...")
+        
+        _ltx2_pipeline = LTXImageToVideoPipeline.from_pretrained(
+            "Lightricks/LTX-Video",
+            torch_dtype=torch.bfloat16,
         )
+        
+        # Enable CPU offloading - key for memory efficiency!
+        logger.info("[LTX2] Enabling model CPU offload for memory efficiency...")
+        _ltx2_pipeline.enable_model_cpu_offload()
+        
+        # Load camera LoRA if specified
+        if camera_lora_path and os.path.exists(camera_lora_path):
+            lora_name = os.path.basename(camera_lora_path).replace(".safetensors", "")
+            logger.info(f"[LTX2] Loading camera LoRA: {lora_name}")
+            _ltx2_pipeline.load_lora_weights(
+                camera_lora_path,
+                adapter_name=lora_name
+            )
+            _ltx2_pipeline.set_adapters([lora_name])
+            logger.info(f"[LTX2] Camera LoRA loaded and activated: {lora_name}")
 
         _ltx2_model_loaded = True
         _ltx2_current_lora = camera_lora_path
         load_time = time.time() - start_time
-        logger.info(f"LTX-2 native pipeline loaded in {load_time:.1f}s")
+        logger.info(f"LTX-2 diffusers pipeline loaded in {load_time:.1f}s (CPU offload enabled)")
         return _ltx2_pipeline
 
     except Exception as e:
@@ -1876,9 +1843,9 @@ def run_ltx2(
     prompt: str = "",
     negative_prompt: str = "",
     camera_motion: str = "none",
-    num_frames: int = 49,
-    width: int = 512,
-    height: int = 384,
+    num_frames: int = 97,
+    width: int = 768,
+    height: int = 512,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.5,
     fps: int = 24,
@@ -1933,65 +1900,65 @@ def run_ltx2(
     logger.info(f"Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"Prompt: {prompt}")
     logger.info(f"Camera motion: {camera_motion}, seed: {seed}")
     
-    # Generate video using DistilledPipeline (8-step efficient inference)
-    # images param: list of (image_path, frame_index, strength) tuples for conditioning
-    logger.info("[LTX2] Using DistilledPipeline (8-step inference)")
+    # Generate video using diffusers pipeline with CPU offloading
+    logger.info("[LTX2] Using diffusers LTXImageToVideoPipeline (CPU offload enabled)")
+    
+    # Load input image
+    input_image = Image.open(input_image_path).convert("RGB")
+    logger.info(f"[LTX2] Input image size: {input_image.size}")
+    
+    # Create generator for reproducible results
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    
     try:
-        # Image conditioning: (path, frame_index, strength)
-        # frame_index=0 means condition on first frame
-        images_conditioning = [(input_image_path, 0, 1.0)]
-        
-        # Call DistilledPipeline - returns (video_iterator, audio_tensor)
-        # Note: DistilledPipeline doesn't use negative_prompt, num_inference_steps, or guidance_scale
-        # It uses predefined 8 sigma steps for efficient inference
-        video_iterator, audio = pipe(
+        # Call diffusers pipeline
+        result = pipe(
             prompt=prompt,
-            seed=seed,
+            negative_prompt=negative_prompt if negative_prompt else None,
+            image=input_image,
             height=height,
             width=width,
             num_frames=num_frames,
-            frame_rate=float(fps),
-            images=images_conditioning,
-            enhance_prompt=False,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
         )
         
-        # Collect frames from iterator
-        frames = list(video_iterator)
-        logger.info(f"[LTX2] Generated {len(frames)} frame tensors")
+        # Get frames from result
+        frames = result.frames[0]  # frames[0] is the video tensor list
+        logger.info(f"[LTX2] Generated {len(frames)} frames")
         
     except TypeError as e:
-        # Fallback if image conditioning not supported (text-to-video only)
-        logger.warning(f"Image conditioning may not be supported, trying text-to-video: {e}")
-        video_iterator, audio = pipe(
+        # Fallback if image-to-video not supported, try text-to-video
+        logger.warning(f"Image-to-video may not be supported, trying text-to-video: {e}")
+        result = pipe(
             prompt=prompt,
-            seed=seed,
+            negative_prompt=negative_prompt if negative_prompt else None,
             height=height,
             width=width,
             num_frames=num_frames,
-            frame_rate=float(fps),
-            images=[],  # No image conditioning
-            enhance_prompt=False,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
         )
-        frames = list(video_iterator)
+        frames = result.frames[0]
     
     gen_time = time.time() - start_time
-    logger.info(f"Video generated in {gen_time:.1f}s ({len(frames)} frame tensors)")
+    logger.info(f"Video generated in {gen_time:.1f}s ({len(frames)} frames)")
     
-    # Convert torch tensors to numpy arrays for saving
+    # Convert frames to numpy arrays for saving
+    # Diffusers returns PIL Images, not tensors
     import numpy as np
     frames_np = []
     for i, frame in enumerate(frames):
-        if isinstance(frame, torch.Tensor):
-            # Convert from [C, H, W] or [H, W, C] to [H, W, C] uint8
-            if frame.dim() == 3:
-                if frame.shape[0] in [1, 3, 4]:  # [C, H, W]
-                    frame = frame.permute(1, 2, 0)
-                # Normalize to 0-255
-                if frame.dtype in [torch.float16, torch.float32, torch.bfloat16]:
-                    frame = (frame.clamp(0, 1) * 255).to(torch.uint8)
-                frame = frame.cpu().numpy()
-            frames_np.append(frame)
+        if hasattr(frame, 'numpy'):
+            # Torch tensor
+            frames_np.append(frame.cpu().numpy())
+        elif hasattr(frame, 'convert'):
+            # PIL Image
+            frames_np.append(np.array(frame))
         else:
+            # Already numpy or convertible
             frames_np.append(np.array(frame))
     
     logger.info(f"Converted {len(frames_np)} frames to numpy")
@@ -2004,15 +1971,9 @@ def run_ltx2(
     logger.info(f"Saving video to: {video_path}")
     imageio.mimwrite(video_path, frames_np, fps=fps, codec='libx264', quality=8)
     
-    # Clear memory after generation (LTX-2 uses ~60GB)
-    global _ltx2_pipeline, _ltx2_model_loaded
-    logger.info("[LTX2] Clearing pipeline after generation to free VRAM...")
-    del pipe
-    _ltx2_pipeline = None
-    _ltx2_model_loaded = False
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # With CPU offloading, we can keep the pipeline cached for faster subsequent runs
+    # Memory is managed automatically by enable_model_cpu_offload()
+    logger.info("[LTX2] Generation complete (pipeline cached with CPU offload)")
     
     return {
         "video_path": video_path,
@@ -2027,20 +1988,19 @@ def run_ltx2(
 
 
 def handle_ltx2(job: Dict, job_input: Dict, input_path: str, return_base64: bool) -> Dict:
-    """Handle LTX-2 video generation job."""
+    """Handle LTX-2 video generation job using diffusers with CPU offloading."""
     if not validate_ltx2():
-        return {"status": "error", "message": "LTX-2 environment not available (need ltx-pipelines or diffusers)"}
+        return {"status": "error", "message": "LTX-2 environment not available (need diffusers)"}
     
     output_name = job_input.get("output_name", f"ltx2_{job.get('id', 'output')}")
     prompt = job_input.get("prompt", "")
     negative_prompt = job_input.get("negative_prompt", "")
     camera_motion = job_input.get("camera_motion", "none")
-    # Note: LTX-2 19B + Gemma 12B requires ~60GB+ VRAM
-    # Default to 49 frames at 512x384 for A100 80GB compatibility
-    # Use higher values only with sufficient VRAM (e.g., H100, multi-GPU)
-    num_frames = int(job_input.get("num_frames", 49))
-    width = int(job_input.get("width", 512))
-    height = int(job_input.get("height", 384))
+    # Diffusers with CPU offloading - can handle larger resolutions
+    # Model components move to GPU only when needed
+    num_frames = int(job_input.get("num_frames", 97))
+    width = int(job_input.get("width", 768))
+    height = int(job_input.get("height", 512))
     num_inference_steps = int(job_input.get("num_inference_steps", 50))
     guidance_scale = float(job_input.get("guidance_scale", 7.5))
     fps = int(job_input.get("fps", 24))

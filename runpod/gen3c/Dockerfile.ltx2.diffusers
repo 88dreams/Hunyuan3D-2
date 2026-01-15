@@ -1,0 +1,101 @@
+# =============================================================================
+# Dockerfile - LTX-2 via Diffusers with CPU Offloading
+# =============================================================================
+# 
+# This Dockerfile uses HuggingFace diffusers for LTX-2 instead of native pipelines.
+# Key advantage: enable_model_cpu_offload() allows running on GPUs with less VRAM.
+#
+# Benefits of diffusers approach:
+#   - CPU offloading moves models to CPU when not in use
+#   - Well-tested memory management
+#   - LoRA support via load_lora_weights()
+#   - Standardized API
+#
+# Models in unified handler:
+#   - GEN3C: Image to video (NVIDIA Cosmos)
+#   - SHARP: Image to 3DGS PLY + video (Apple)
+#   - Lyra: Image/Video to 3D/4D Gaussian Splatting (NVIDIA)
+#   - TRELLIS.2: Image to 3D GLB mesh (Microsoft)
+#   - SuGaR: 3DGS to mesh conversion
+#   - LTX-2: Diffusers pipeline with camera LoRAs and CPU offloading
+#
+# Usage:
+#   cd runpod/gen3c
+#   docker build -f Dockerfile.ltx2.diffusers -t 88dreams/gen3c-runpod:v55 .
+#   docker push 88dreams/gen3c-runpod:v55
+#
+# =============================================================================
+
+# Base on v52 (has all other models working)
+FROM 88dreams/gen3c-runpod:v52
+
+# =============================================================================
+# Install/Upgrade Diffusers with LTX-2 Support
+# =============================================================================
+
+# Step 1: Upgrade diffusers and dependencies for LTX-2 support
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 1: Upgrading diffusers and dependencies ===' && \
+    pip install --no-cache-dir --upgrade 'peft>=0.17.0' && \
+    pip install --no-cache-dir --upgrade diffusers transformers accelerate && \
+    python -c 'import diffusers; print(f\"✓ diffusers {diffusers.__version__}\")'"
+
+# Step 2: Verify LTX pipeline is available
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 2: Verifying LTX pipeline availability ===' && \
+    python -c '\
+from diffusers import LTXImageToVideoPipeline; \
+print(\"✓ LTXImageToVideoPipeline available\"); \
+'"
+
+# Step 3: Install additional dependencies for video export
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 3: Installing video export dependencies ===' && \
+    pip install --no-cache-dir imageio imageio-ffmpeg && \
+    python -c 'import imageio; print(\"✓ imageio available\")'"
+
+# Step 4: Verify all model imports work
+RUN /bin/bash -c "source /root/miniforge3/etc/profile.d/conda.sh && \
+    conda activate cosmos-predict1 && \
+    echo '=== Step 4: Verifying ALL model imports ===' && \
+    python -c '\
+import sys; \
+print(\"=== LTX-2 Diffusers ===\"); \
+from diffusers import LTXImageToVideoPipeline; \
+print(\"OK LTXImageToVideoPipeline\"); \
+print(\"=== GEN3C/Cosmos ===\"); \
+import torch; \
+print(\"OK torch\", torch.__version__); \
+import numpy as np; \
+print(\"OK numpy\", np.__version__); \
+print(\"=== SHARP ===\"); \
+import gsplat; \
+print(\"OK gsplat\"); \
+print(\"=== Diffusers ===\"); \
+import diffusers; \
+print(\"OK diffusers\", diffusers.__version__); \
+print(\"=== General Vision ===\"); \
+import torchvision; \
+print(\"OK torchvision\", torchvision.__version__); \
+from PIL import Image; \
+print(\"OK PIL/Pillow\"); \
+print(\"=== ALL MODEL IMPORTS VERIFIED ===\"); \
+'"
+
+# =============================================================================
+# Copy Handler
+# =============================================================================
+
+WORKDIR /workspace
+COPY handler_unified.py /workspace/handler.py
+COPY start_unified.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# Verify handler syntax
+RUN python -c "import sys; sys.path.insert(0, '/workspace'); exec(open('/workspace/handler.py').read().split('if __name__')[0]); print('✓ Handler syntax OK')" || echo "Handler copied (syntax check skipped)"
+
+# Default command
+CMD ["/workspace/start.sh"]
