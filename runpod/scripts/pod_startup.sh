@@ -17,19 +17,13 @@ echo "=========================================="
 # Step 1: Fix checkpoint symlink (if needed)
 # -----------------------------------------------------------------------------
 echo ""
-echo "[1/5] Checking checkpoint symlink..."
+echo "[1/5] Checking checkpoints..."
 
-if [ -L "/workspace/checkpoints/Gen3C-Cosmos-7B" ]; then
-    echo "  ✓ Symlink already exists"
-elif [ -d "/workspace/checkpoints/checkpoints/Gen3C-Cosmos-7B" ]; then
-    ln -s /workspace/checkpoints/checkpoints/Gen3C-Cosmos-7B /workspace/checkpoints/Gen3C-Cosmos-7B
-    echo "  ✓ Created checkpoint symlink"
-elif [ -d "/workspace/checkpoints/Gen3C-Cosmos-7B" ]; then
-    echo "  ✓ Checkpoints in correct location"
+if [ -d "/workspace/checkpoints/Gen3C-Cosmos-7B" ]; then
+    echo "  ✓ Gen3C checkpoints found"
 else
-    echo "  ✗ ERROR: Checkpoints not found!"
-    echo "    Expected at: /workspace/checkpoints/checkpoints/Gen3C-Cosmos-7B"
-    echo "    or: /workspace/checkpoints/Gen3C-Cosmos-7B"
+    echo "  ✗ ERROR: Gen3C checkpoints not found!"
+    echo "    Expected at: /workspace/checkpoints/Gen3C-Cosmos-7B"
     exit 1
 fi
 
