@@ -1796,6 +1796,8 @@ class TwoDGSPipelineClient:
         s3_bucket: str = "arkrunr",
         s3_region: str = "us-west-1",
         s3_prefix: str = "MediaContent/2dgs-pipeline/inputs/",
+        save_vipe_checkpoint: bool = True,
+        resume_from_checkpoint: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None
     ) -> Dict[str, Any]:
         """
@@ -1814,6 +1816,8 @@ class TwoDGSPipelineClient:
             s3_bucket: S3 bucket for input/output
             s3_region: S3 region
             s3_prefix: S3 key prefix for video uploads
+            save_vipe_checkpoint: If True, save ViPE outputs to S3 for resume capability
+            resume_from_checkpoint: S3 URI of checkpoint to resume from (skips ViPE)
             progress_callback: Optional callback(status_msg, elapsed_seconds)
             
         Returns:
@@ -1884,6 +1888,7 @@ class TwoDGSPipelineClient:
                 "mesh_quality": mesh_quality,
                 "output_format": output_format,
                 "depth_threshold": depth_threshold,
+                "save_vipe_checkpoint": save_vipe_checkpoint,
                 "output_s3": {
                     "bucket": s3_bucket,
                     "region": s3_region,
@@ -1891,6 +1896,11 @@ class TwoDGSPipelineClient:
                 }
             }
         }
+        
+        # Add resume checkpoint if provided
+        if resume_from_checkpoint:
+            payload["input"]["resume_from_checkpoint"] = resume_from_checkpoint
+            log(f"[2DGS Multi] Resuming from checkpoint: {resume_from_checkpoint}")
         
         log(f"[2DGS Multi] Submitting job with {len(video_urls)} videos...")
         

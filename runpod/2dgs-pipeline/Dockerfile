@@ -111,6 +111,22 @@ RUN mkdir -p /root/.cache/torch/hub/geocalib && \
     ls -la /root/.cache/torch/hub/geocalib/ && \
     echo "✓ GeoCalib weights downloaded (110MB)"
 
+# Pre-download SAM checkpoint (ViPE TrackAnything downloads at runtime)
+RUN mkdir -p /root/.cache/torch/hub/sam && \
+    curl -L "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" \
+         -o /root/.cache/torch/hub/sam/sam_vit_b_01ec64.pth && \
+    ls -lh /root/.cache/torch/hub/sam/ && \
+    echo "✓ SAM vit_b checkpoint downloaded (~375MB)"
+
+# Pre-download AOT checkpoint (R50-DeAOTL for TrackAnything)
+# Original Google Drive ID: 1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ (rate-limited)
+# Hosted on our S3 bucket for reliable downloads
+RUN mkdir -p /root/.cache/torch/hub/aot && \
+    curl -L "https://arkrunr.s3.us-west-1.amazonaws.com/checkpoints/aot/R50_DeAOTL_PRE_YTB_DAV.pth" \
+         -o /root/.cache/torch/hub/aot/R50_DeAOTL_PRE_YTB_DAV.pth && \
+    ls -lh /root/.cache/torch/hub/aot/ && \
+    echo "✓ AOT R50-DeAOTL checkpoint downloaded (~358MB)"
+
 # ============================================
 # 2DGS INSTALLATION  
 # ============================================

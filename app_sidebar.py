@@ -2728,6 +2728,7 @@ Min Component Ratio: 1% (default)
         video_source, selected_videos, video_uploads,
         iterations, mesh_quality, output_format, output_dir, output_name,
         max_videos, depth_threshold,
+        save_vipe_checkpoint, resume_from_checkpoint,
         endpoint_id, api_key, s3_bucket, s3_region,
         encode_params
     ):
@@ -2806,6 +2807,8 @@ Min Component Ratio: 1% (default)
                     depth_threshold=float(depth_threshold) if depth_threshold else 0.5,
                     s3_bucket=s3_bucket,
                     s3_region=s3_region,
+                    save_vipe_checkpoint=save_vipe_checkpoint,
+                    resume_from_checkpoint=resume_from_checkpoint if resume_from_checkpoint else None,
                 )
                 
                 if job_result.get("status") == "error":
@@ -2818,7 +2821,7 @@ Min Component Ratio: 1% (default)
                 final_status = client.wait_for_completion(
                     job_id=job_id,
                     poll_interval=15,
-                    max_wait=1800,  # 30 minutes for multi-video
+                    max_wait=3600,  # 60 minutes for multi-video (was 30)
                 )
                 
                 if final_status.get("status") == "completed":
@@ -2916,6 +2919,8 @@ Min Component Ratio: 1% (default)
             twodgs_components["output_name"],
             twodgs_components["max_videos"],
             twodgs_components["depth_threshold"],
+            twodgs_components["save_vipe_checkpoint"],
+            twodgs_components["resume_from_checkpoint"],
             settings_2dgs_endpoint,
             settings_2dgs_key,
             gr.State("arkrunr"),  # S3 bucket

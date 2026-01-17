@@ -150,7 +150,36 @@ def backproject_depth(depth, K, R, t, sample_rate=16, max_depth=10.0):
 
 
 def write_ply(filename, points, colors):
-    """Write points to PLY file compatible with 2DGS (includes normals)."""
+    """Write points to PLY file compatible with 2DGS/3DGS (binary format for Open3D compatibility)."""
+    try:
+        # Try using plyfile for better compatibility
+        from plyfile import PlyData, PlyElement
+        
+        # Create structured array for vertices
+        vertex_dtype = [
+            ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
+            ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
+        ]
+        
+        vertices = np.zeros(len(points), dtype=vertex_dtype)
+        vertices['x'] = points[:, 0]
+        vertices['y'] = points[:, 1]
+        vertices['z'] = points[:, 2]
+        vertices['nx'] = 0.0  # Placeholder normals
+        vertices['ny'] = 0.0
+        vertices['nz'] = 0.0
+        vertices['red'] = (colors[:, 0] * 255).astype(np.uint8) if colors.max() <= 1 else colors[:, 0].astype(np.uint8)
+        vertices['green'] = (colors[:, 1] * 255).astype(np.uint8) if colors.max() <= 1 else colors[:, 1].astype(np.uint8)
+        vertices['blue'] = (colors[:, 2] * 255).astype(np.uint8) if colors.max() <= 1 else colors[:, 2].astype(np.uint8)
+        
+        el = PlyElement.describe(vertices, 'vertex')
+        PlyData([el], text=False).write(str(filename))
+        return
+    except ImportError:
+        pass  # Fall back to ASCII format
+    
+    # ASCII fallback
     with open(filename, 'w') as f:
         f.write("ply\n")
         f.write("format ascii 1.0\n")
@@ -308,11 +337,26 @@ def generate_points_from_depth(
         all_colors.append(colors)
     
     if not all_points:
-        raise RuntimeError("No valid depth maps found for point cloud generation")
-    
-    # Combine all points
-    all_points = np.vstack(all_points)
-    all_colors = np.vstack(all_colors)
+        # Fallback: create random points in a unit sphere
+        print("  [Warning] No depth maps found, using random point initialization")
+        n_random = min(max_points, 10000)
+        
+        # Random points in unit sphere
+        theta = np.random.uniform(0, 2*np.pi, n_random)
+        phi = np.random.uniform(0, np.pi, n_random)
+        r = np.random.uniform(0.3, 1.0, n_random)
+        
+        all_points = np.column_stack([
+            r * np.sin(phi) * np.cos(theta),
+            r * np.sin(phi) * np.sin(theta),
+            r * np.cos(phi)
+        ])
+        all_colors = np.random.uniform(0.3, 0.7, (n_random, 3))
+        print(f"  Generated {n_random} random points")
+    else:
+        # Combine all points
+        all_points = np.vstack(all_points)
+        all_colors = np.vstack(all_colors)
     
     print(f"Total points: {len(all_points)}")
     

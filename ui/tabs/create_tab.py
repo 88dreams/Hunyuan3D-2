@@ -157,10 +157,26 @@ def create_2dgs_tab(
                         label="Depth Coverage Threshold",
                         info="Frames below this coverage % are skipped"
                     )
+                
+                with gr.Row():
+                    save_vipe_checkpoint = gr.Checkbox(
+                        label="Save ViPE Checkpoint",
+                        value=True,
+                        info="Save ViPE outputs to S3 for resume capability"
+                    )
+                    resume_from_checkpoint = gr.Textbox(
+                        label="Resume from Checkpoint",
+                        placeholder="s3://arkrunr/MediaContent/2dgs-pipeline/vipe-checkpoints/...",
+                        value="",
+                        info="Paste checkpoint URL to skip ViPE step"
+                    )
+                
                 gr.Markdown("""
                 **Advanced Settings:**
                 - **Max Videos**: More camera angles improve 3D reconstruction quality
                 - **Depth Threshold**: Higher values filter out more low-quality frames
+                - **Save ViPE Checkpoint**: If enabled, saves ViPE outputs to S3. If job fails after ViPE, you can resume using the checkpoint URL
+                - **Resume from Checkpoint**: Paste a checkpoint URL to skip the ~15min ViPE step
                 """)
             
             # GENERATE BUTTON
@@ -295,6 +311,8 @@ def create_2dgs_tab(
         # Advanced options
         "max_videos": max_videos,
         "depth_threshold": depth_threshold,
+        "save_vipe_checkpoint": save_vipe_checkpoint,
+        "resume_from_checkpoint": resume_from_checkpoint,
         
         # Execution
         "generate_btn": generate_btn,

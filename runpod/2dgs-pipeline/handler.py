@@ -18,7 +18,11 @@ Input:
         "iterations": 5000,          # 2DGS training iterations
         "mesh_resolution": 512,      # Mesh extraction resolution
         "output_format": "glb",      # "glb", "obj", or "ply"
-        "depth_threshold": 0.5       # Min depth coverage to keep frame (0.0-1.0)
+        "depth_threshold": 0.5,      # Min depth coverage to keep frame (0.0-1.0)
+        
+        # Checkpoint options (for resuming failed jobs)
+        "save_vipe_checkpoint": true,     # Save ViPE outputs to S3 after completion
+        "resume_from_checkpoint": "s3://bucket/path/to/checkpoint/"  # Resume from saved checkpoint
     }
 
 Output:
@@ -33,7 +37,8 @@ Output:
             "skipped_frames": 15,
             "avg_depth_coverage": 0.78,
             "videos_processed": 4
-        }
+        },
+        "vipe_checkpoint_url": "s3://..."  # If save_vipe_checkpoint=true
     }
 """
 
@@ -54,6 +59,21 @@ from typing import List, Dict, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 import zipfile
 
+# ============================================
+# Use persistent volume for model caches
+# This prevents re-downloading ~1.5GB of models on every cold start
+# ============================================
+RUNPOD_VOLUME = "/runpod-volume"
+if os.path.exists(RUNPOD_VOLUME):
+    os.environ["HF_HOME"] = f"{RUNPOD_VOLUME}/huggingface"
+    os.environ["TORCH_HOME"] = f"{RUNPOD_VOLUME}/torch_cache"
+    os.environ["XDG_CACHE_HOME"] = f"{RUNPOD_VOLUME}/cache"
+    # Ensure directories exist
+    os.makedirs(f"{RUNPOD_VOLUME}/huggingface", exist_ok=True)
+    os.makedirs(f"{RUNPOD_VOLUME}/torch_cache", exist_ok=True)
+    os.makedirs(f"{RUNPOD_VOLUME}/cache", exist_ok=True)
+    print(f"[Cache] Using persistent volume: {RUNPOD_VOLUME}")
+
 # Paths
 VIPE_PATH = os.environ.get("VIPE_PATH", "/opt/vipe")
 TDGS_PATH = os.environ.get("TDGS_PATH", "/opt/2d-gaussian-splatting")
@@ -62,6 +82,186 @@ PIPELINE_PATH = "/opt/pipeline"
 sys.path.insert(0, VIPE_PATH)
 sys.path.insert(0, TDGS_PATH)
 sys.path.insert(0, PIPELINE_PATH)
+
+# S3 client (lazy init)
+_s3_client = None
+
+def get_s3_client():
+    """Get or create S3 client."""
+    global _s3_client
+    if _s3_client is None:
+        import boto3
+        _s3_client = boto3.client("s3")
+    return _s3_client
+
+
+def save_vipe_checkpoint(
+    vipe_outputs_list: List[Dict],
+    quality_stats: Dict,
+    video_urls: List[str],
+    work_dir: Path,
+    s3_bucket: str = "arkrunr",
+    s3_prefix: str = "MediaContent/2dgs-pipeline/vipe-checkpoints"
+) -> str:
+    """
+    Save ViPE outputs to S3 for later resumption.
+    
+    Returns:
+        S3 URI of the checkpoint (s3://bucket/path/)
+    """
+    import uuid
+    from datetime import datetime
+    
+    checkpoint_id = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    checkpoint_prefix = f"{s3_prefix}/{checkpoint_id}"
+    
+    print(f"\n[Checkpoint] Saving ViPE outputs to S3...")
+    print(f"  Checkpoint ID: {checkpoint_id}")
+    
+    s3 = get_s3_client()
+    
+    # Save metadata
+    metadata = {
+        "checkpoint_id": checkpoint_id,
+        "video_urls": video_urls,
+        "quality_stats": quality_stats,
+        "num_videos": len(vipe_outputs_list),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    
+    metadata_key = f"{checkpoint_prefix}/metadata.json"
+    s3.put_object(
+        Bucket=s3_bucket,
+        Key=metadata_key,
+        Body=json.dumps(metadata, indent=2),
+        ContentType="application/json"
+    )
+    print(f"  ✓ Saved metadata")
+    
+    # Save each video's ViPE outputs
+    for idx, vipe_out in enumerate(vipe_outputs_list):
+        video_prefix = f"{checkpoint_prefix}/vipe_{idx:02d}"
+        
+        # Upload pose file
+        if Path(vipe_out["poses"]).exists():
+            s3.upload_file(
+                str(vipe_out["poses"]),
+                s3_bucket,
+                f"{video_prefix}/pose/{Path(vipe_out['poses']).name}"
+            )
+        
+        # Upload intrinsics file
+        if Path(vipe_out["intrinsics"]).exists():
+            s3.upload_file(
+                str(vipe_out["intrinsics"]),
+                s3_bucket,
+                f"{video_prefix}/intrinsics/{Path(vipe_out['intrinsics']).name}"
+            )
+        
+        # Upload depth zip
+        if Path(vipe_out["depth"]).exists():
+            s3.upload_file(
+                str(vipe_out["depth"]),
+                s3_bucket,
+                f"{video_prefix}/depth/{Path(vipe_out['depth']).name}"
+            )
+        
+        # Upload rgb video
+        if Path(vipe_out["rgb"]).exists():
+            s3.upload_file(
+                str(vipe_out["rgb"]),
+                s3_bucket,
+                f"{video_prefix}/rgb/{Path(vipe_out['rgb']).name}"
+            )
+        
+        print(f"  ✓ Saved video {idx+1}/{len(vipe_outputs_list)}")
+    
+    checkpoint_uri = f"s3://{s3_bucket}/{checkpoint_prefix}/"
+    print(f"  Checkpoint saved: {checkpoint_uri}")
+    
+    return checkpoint_uri
+
+
+def restore_vipe_checkpoint(
+    checkpoint_uri: str,
+    work_dir: Path
+) -> Tuple[List[Dict], Dict]:
+    """
+    Restore ViPE outputs from S3 checkpoint.
+    
+    Args:
+        checkpoint_uri: S3 URI like s3://bucket/path/to/checkpoint/
+        work_dir: Local working directory
+        
+    Returns:
+        Tuple of (vipe_outputs_list, quality_stats)
+    """
+    print(f"\n[Checkpoint] Restoring ViPE outputs from S3...")
+    print(f"  URI: {checkpoint_uri}")
+    
+    # Parse S3 URI
+    if not checkpoint_uri.startswith("s3://"):
+        raise ValueError(f"Invalid S3 URI: {checkpoint_uri}")
+    
+    parts = checkpoint_uri[5:].split("/", 1)
+    s3_bucket = parts[0]
+    s3_prefix = parts[1].rstrip("/") if len(parts) > 1 else ""
+    
+    s3 = get_s3_client()
+    
+    # Download metadata
+    metadata_key = f"{s3_prefix}/metadata.json"
+    response = s3.get_object(Bucket=s3_bucket, Key=metadata_key)
+    metadata = json.loads(response["Body"].read().decode("utf-8"))
+    
+    print(f"  Checkpoint ID: {metadata['checkpoint_id']}")
+    print(f"  Videos: {metadata['num_videos']}")
+    print(f"  Created: {metadata['created_at']}")
+    
+    quality_stats = metadata["quality_stats"]
+    num_videos = metadata["num_videos"]
+    
+    vipe_outputs_list = []
+    
+    for idx in range(num_videos):
+        video_prefix = f"{s3_prefix}/vipe_{idx:02d}"
+        local_dir = work_dir / f"vipe_{idx:02d}"
+        
+        # Create local directories
+        (local_dir / "pose").mkdir(parents=True, exist_ok=True)
+        (local_dir / "intrinsics").mkdir(parents=True, exist_ok=True)
+        (local_dir / "depth").mkdir(parents=True, exist_ok=True)
+        (local_dir / "rgb").mkdir(parents=True, exist_ok=True)
+        
+        # List and download files
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=s3_bucket, Prefix=video_prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                rel_path = key[len(video_prefix)+1:]  # Remove prefix
+                local_path = local_dir / rel_path
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                s3.download_file(s3_bucket, key, str(local_path))
+        
+        # Find the actual filenames
+        pose_files = list((local_dir / "pose").glob("*.npz"))
+        intr_files = list((local_dir / "intrinsics").glob("*.npz"))
+        depth_files = list((local_dir / "depth").glob("*.zip"))
+        rgb_files = list((local_dir / "rgb").glob("*.mp4"))
+        
+        vipe_out = {
+            "poses": pose_files[0] if pose_files else None,
+            "intrinsics": intr_files[0] if intr_files else None,
+            "depth": depth_files[0] if depth_files else None,
+            "rgb": rgb_files[0] if rgb_files else None,
+            "video_idx": idx,
+            "valid_frames": list(range(200)),  # Will be recalculated if needed
+        }
+        vipe_outputs_list.append(vipe_out)
+        print(f"  ✓ Restored video {idx+1}/{num_videos}")
+    
+    print(f"  Checkpoint restored successfully")
+    return vipe_outputs_list, quality_stats
 
 
 def download_video(job_input: dict, work_dir: Path) -> Path:
@@ -147,24 +347,34 @@ def filter_frames_by_depth_coverage(
     depth_files = sorted(depth_dir.glob("*.npy"))
     
     if not depth_files:
-        # Try loading from zip
-        zip_path = depth_dir.parent / "depth" / "input.zip"
-        if zip_path.exists():
+        # Try loading from zip - find any .zip file in the depth directory
+        zip_files = list(depth_dir.glob("*.zip"))
+        if zip_files:
+            zip_path = zip_files[0]  # Use first zip found
             with zipfile.ZipFile(zip_path, 'r') as z:
-                depth_files = sorted([n for n in z.namelist() if n.endswith('.npy')])
+                depth_files = sorted([n for n in z.namelist() if n.endswith('.npy') or n.endswith('.exr')])
                 for i, name in enumerate(depth_files):
-                    with z.open(name) as f:
-                        depth = np.load(f)
-                        valid_pixels = np.sum(depth > 0)
-                        total_pixels = depth.size
-                        coverage = valid_pixels / total_pixels
-                        total_coverage += coverage
-                        
-                        if coverage >= threshold:
-                            valid_frames.append(i)
-                        else:
-                            skipped += 1
-                            print(f"    [Quality] Skipping frame {i}: depth coverage {coverage:.1%} < {threshold:.0%}")
+                    try:
+                        with z.open(name) as f:
+                            if name.endswith('.npy'):
+                                depth = np.load(f)
+                            else:
+                                # Skip EXR files for coverage check - just keep all
+                                valid_frames.append(i)
+                                continue
+                            valid_pixels = np.sum(depth > 0)
+                            total_pixels = depth.size
+                            coverage = valid_pixels / total_pixels
+                            total_coverage += coverage
+                            
+                            if coverage >= threshold:
+                                valid_frames.append(i)
+                            else:
+                                skipped += 1
+                                print(f"    [Quality] Skipping frame {i}: depth coverage {coverage:.1%} < {threshold:.0%}")
+                    except Exception as e:
+                        print(f"    [Quality] Warning: Could not process {name}: {e}")
+                        valid_frames.append(i)  # Keep frame on error
         else:
             print(f"    [Quality] Warning: No depth files found in {depth_dir}")
             return list(range(100)), 0.0, 0, 0  # Fallback - keep all frames
@@ -216,15 +426,17 @@ def run_vipe_multi(
         
         # The run_vipe function creates "vipe" subdir, so adjust path
         actual_vipe_dir = vipe_output_dir.parent / "vipe"
+        video_stem = video_path.stem  # e.g., "input_00" from "input_00.mp4"
+        
         if actual_vipe_dir.exists():
             # Rename to indexed directory
             actual_vipe_dir.rename(vipe_output_dir)
-            # Update paths in outputs dict
+            # Update paths in outputs dict using actual video filename
             vipe_outputs = {
-                "poses": vipe_output_dir / "pose" / "input.npz",
-                "intrinsics": vipe_output_dir / "intrinsics" / "input.npz", 
-                "depth": vipe_output_dir / "depth" / "input.zip",
-                "rgb": vipe_output_dir / "rgb" / "input.mp4",
+                "poses": vipe_output_dir / "pose" / f"{video_stem}.npz",
+                "intrinsics": vipe_output_dir / "intrinsics" / f"{video_stem}.npz", 
+                "depth": vipe_output_dir / "depth" / f"{video_stem}.zip",
+                "rgb": vipe_output_dir / "rgb" / f"{video_stem}.mp4",
                 "video_idx": idx
             }
         
@@ -350,9 +562,33 @@ def merge_vipe_outputs(
     for video_idx, (poses, intrinsics) in enumerate(zip(aligned_poses, all_intrinsics)):
         valid_frames = vipe_outputs_list[video_idx].get("valid_frames", list(range(len(poses))))
         
-        # For video 0, use all valid frames
-        # For video 1+, skip frame 0 (already done in align_poses_frame0)
-        start_idx = 0 if video_idx == 0 else 0  # aligned_poses already skips frame 0
+        # Normalize intrinsics to per-frame format
+        # ViPE intrinsics can be: (N, 4) [fx,fy,cx,cy], (N, 3, 3), (3, 3), or (4,)
+        if len(intrinsics.shape) == 1:
+            # Single (4,) vector - expand to all frames
+            intrinsics_per_frame = np.tile(intrinsics, (len(poses), 1))
+        elif len(intrinsics.shape) == 2:
+            if intrinsics.shape[0] == 3 and intrinsics.shape[1] == 3:
+                # Single (3, 3) matrix - flatten to (4,) and expand
+                fx, fy = intrinsics[0, 0], intrinsics[1, 1]
+                cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+                intrinsics_per_frame = np.tile([fx, fy, cx, cy], (len(poses), 1))
+            else:
+                # Already (N, 4) format
+                intrinsics_per_frame = intrinsics
+        elif len(intrinsics.shape) == 3:
+            # (N, 3, 3) - extract fx, fy, cx, cy
+            intrinsics_per_frame = np.zeros((len(intrinsics), 4))
+            for i in range(len(intrinsics)):
+                intrinsics_per_frame[i] = [
+                    intrinsics[i, 0, 0],  # fx
+                    intrinsics[i, 1, 1],  # fy
+                    intrinsics[i, 0, 2],  # cx
+                    intrinsics[i, 1, 2],  # cy
+                ]
+        else:
+            print(f"    [Warning] Unexpected intrinsics shape: {intrinsics.shape}, using identity")
+            intrinsics_per_frame = np.tile([500, 500, 320, 240], (len(poses), 1))
         
         for i, frame_idx in enumerate(valid_frames):
             # Skip frame 0 for videos after the first
@@ -365,17 +601,15 @@ def merge_vipe_outputs(
             if adjusted_idx < len(poses):
                 merged_poses.append(poses[adjusted_idx])
                 
-                # Handle intrinsics (may be per-frame or shared)
-                if len(intrinsics.shape) == 3:
-                    merged_intrinsics.append(intrinsics[frame_idx] if frame_idx < len(intrinsics) else intrinsics[0])
-                else:
-                    merged_intrinsics.append(intrinsics)
+                # Use normalized intrinsics
+                intr_idx = min(frame_idx, len(intrinsics_per_frame) - 1)
+                merged_intrinsics.append(intrinsics_per_frame[intr_idx])
                 
                 frame_mapping.append((video_idx, frame_idx))
     
     # Save merged poses and intrinsics
     merged_poses = np.array(merged_poses)
-    merged_intrinsics = np.array(merged_intrinsics)
+    merged_intrinsics = np.array(merged_intrinsics)  # Now guaranteed (N, 4) shape
     
     pose_dir = merged_dir / "pose"
     pose_dir.mkdir(parents=True, exist_ok=True)
@@ -390,18 +624,110 @@ def merge_vipe_outputs(
     merged_depth_dir.mkdir(parents=True, exist_ok=True)
     
     # Extract and merge depth maps
+    depth_count = 0
+    missing_zips = 0
+    
+    # Debug: Check first depth zip
+    if vipe_outputs_list:
+        first_depth = vipe_outputs_list[0].get("depth")
+        print(f"  [Debug] First depth path: {first_depth}")
+        print(f"  [Debug] Exists: {Path(first_depth).exists() if first_depth else 'N/A'}")
+    
     for merged_idx, (video_idx, frame_idx) in enumerate(frame_mapping):
-        src_zip = vipe_outputs_list[video_idx]["depth"]
+        src_zip = vipe_outputs_list[video_idx].get("depth")
         
+        if not src_zip or not Path(src_zip).exists():
+            missing_zips += 1
+            if missing_zips <= 3:
+                print(f"  [Debug] Missing depth zip for video {video_idx}: {src_zip}")
+            continue
+            
         # Extract specific frame from source zip
-        with zipfile.ZipFile(src_zip, 'r') as z:
-            # ViPE names depth files as 000000.npy, 000001.npy, etc.
-            src_name = f"{frame_idx:06d}.npy"
-            if src_name in z.namelist():
-                depth_data = z.read(src_name)
-                dst_path = merged_depth_dir / f"{merged_idx:06d}.npy"
-                with open(dst_path, 'wb') as f:
-                    f.write(depth_data)
+        try:
+            with zipfile.ZipFile(src_zip, 'r') as z:
+                # Log zip contents for first file only
+                if depth_count == 0 and merged_idx < 5:
+                    all_files = z.namelist()
+                    print(f"  [Debug] Depth zip contains {len(all_files)} files: {all_files[:5]}")
+                
+                # Try both .npy and .exr formats with both 5 and 6 digit naming
+                src_name_npy_6 = f"{frame_idx:06d}.npy"
+                src_name_exr_6 = f"{frame_idx:06d}.exr"
+                src_name_npy_5 = f"{frame_idx:05d}.npy"  # ViPE uses 5 digits!
+                src_name_exr_5 = f"{frame_idx:05d}.exr"  # ViPE uses 5 digits!
+                
+                # Try npy formats first (both 5 and 6 digit)
+                src_name_npy = None
+                for name in [src_name_npy_5, src_name_npy_6]:
+                    if name in z.namelist():
+                        src_name_npy = name
+                        break
+                
+                # Try exr formats (both 5 and 6 digit)
+                src_name_exr = None
+                for name in [src_name_exr_5, src_name_exr_6]:
+                    if name in z.namelist():
+                        src_name_exr = name
+                        break
+                
+                if src_name_npy:
+                    depth_data = z.read(src_name_npy)
+                    dst_path = merged_depth_dir / f"{merged_idx:06d}.npy"
+                    with open(dst_path, 'wb') as f:
+                        f.write(depth_data)
+                    depth_count += 1
+                elif src_name_exr:
+                    # Extract EXR and convert to npy
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.exr', delete=False) as tmp:
+                        tmp.write(z.read(src_name_exr))
+                        tmp_path = tmp.name
+                    try:
+                        # Try to load EXR (requires OpenEXR)
+                        import OpenEXR
+                        import Imath
+                        exr_file = OpenEXR.InputFile(tmp_path)
+                        header = exr_file.header()
+                        dw = header['dataWindow']
+                        size = (dw.max.x - dw.min.x + 1, dw.max.y - dw.min.y + 1)
+                        
+                        # Try different channel names (ViPE may use R, Z, V, Y, or depth)
+                        depth_str = None
+                        available_channels = list(header['channels'].keys())
+                        for channel_name in ['R', 'Z', 'V', 'Y', 'depth', 'Depth']:
+                            if channel_name in available_channels:
+                                depth_str = exr_file.channel(channel_name, Imath.PixelType(Imath.PixelType.FLOAT))
+                                if depth_count == 0:
+                                    print(f"  [Debug] Using EXR channel: {channel_name}")
+                                break
+                        
+                        if depth_str is None and available_channels:
+                            # Use first available channel
+                            channel_name = available_channels[0]
+                            depth_str = exr_file.channel(channel_name, Imath.PixelType(Imath.PixelType.FLOAT))
+                            if depth_count == 0:
+                                print(f"  [Debug] Using first EXR channel: {channel_name}")
+                        
+                        if depth_str:
+                            depth = np.frombuffer(depth_str, dtype=np.float32).reshape(size[1], size[0])
+                            np.save(merged_depth_dir / f"{merged_idx:06d}.npy", depth)
+                            depth_count += 1
+                        else:
+                            if depth_count == 0:
+                                print(f"  [Warning] No valid channel in EXR, available: {available_channels}")
+                    except Exception as e:
+                        if depth_count == 0:
+                            print(f"  [Warning] Could not convert EXR depth: {e}")
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+        except Exception as e:
+            if merged_idx < 3:
+                print(f"  [Warning] Error reading depth zip {src_zip}: {e}")
+    
+    if missing_zips > 0:
+        print(f"  [Warning] {missing_zips} depth zips were missing")
+    print(f"  [Merge] Extracted {depth_count} depth maps")
     
     # Create merged RGB directory
     merged_rgb_dir = merged_dir / "rgb"
@@ -500,12 +826,15 @@ def run_vipe(video_path: Path, output_dir: Path) -> dict:
         for file in files:
             print(f'{subindent}{file}')
     
-    # ViPE saves to subdirectories: pose/input.npz, intrinsics/input.npz, etc.
+    # ViPE saves files using video filename as base (e.g., input_00.npz for input_00.mp4)
+    # Find the actual output files dynamically
+    video_stem = video_path.stem  # e.g., "input_00" from "input_00.mp4"
+    
     outputs = {
-        "poses": vipe_output / "pose" / "input.npz",
-        "intrinsics": vipe_output / "intrinsics" / "input.npz", 
-        "depth": vipe_output / "depth" / "input.zip",
-        "rgb": vipe_output / "rgb" / "input.mp4"
+        "poses": vipe_output / "pose" / f"{video_stem}.npz",
+        "intrinsics": vipe_output / "intrinsics" / f"{video_stem}.npz", 
+        "depth": vipe_output / "depth" / f"{video_stem}.zip",
+        "rgb": vipe_output / "rgb" / f"{video_stem}.mp4"
     }
     
     for name, path in outputs.items():
@@ -807,6 +1136,30 @@ def handler(job):
     
     Video(s) → ViPE → (Optional: Merge + Align) → 2DGS → Mesh
     """
+    # ============================================
+    # CUDA availability check - fail fast if no GPU
+    # ============================================
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            error_msg = (
+                "CUDA GPU not available on this worker. "
+                "This is a RunPod infrastructure issue - the worker was assigned without GPU access. "
+                "Please retry the job to get a different worker."
+            )
+            print(f"\n{'='*60}")
+            print(f"FATAL ERROR: {error_msg}")
+            print(f"{'='*60}")
+            return {"status": "error", "error": error_msg}
+        
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"\n[GPU] {gpu_name} ({gpu_memory:.1f} GB)")
+    except Exception as e:
+        error_msg = f"CUDA initialization failed: {str(e)}. Please retry the job."
+        print(f"\nFATAL ERROR: {error_msg}")
+        return {"status": "error", "error": error_msg}
+    
     job_input = job["input"]
     start_time = time.time()
     
@@ -828,6 +1181,10 @@ def handler(job):
     output_format = job_input.get("output_format", "glb").lower()
     depth_threshold = job_input.get("depth_threshold", 0.5)  # Min depth coverage
     
+    # Checkpoint parameters
+    should_save_checkpoint = job_input.get("save_vipe_checkpoint", False)
+    resume_from_checkpoint = job_input.get("resume_from_checkpoint", None)
+    
     # Advanced mesh extraction parameters (optional overrides)
     depth_trunc = job_input.get("depth_trunc", None)
     voxel_size = job_input.get("voxel_size", None)
@@ -841,6 +1198,10 @@ def handler(job):
     print(f"  - Depth coverage threshold: {depth_threshold}")
     if is_multi_video:
         print(f"  - Videos: {len(video_urls)}")
+    if should_save_checkpoint:
+        print(f"  - Save ViPE checkpoint: Yes")
+    if resume_from_checkpoint:
+        print(f"  - Resuming from checkpoint: {resume_from_checkpoint}")
     
     # Create working directory
     work_dir = Path(tempfile.mkdtemp(prefix="2dgs_pipeline_"))
@@ -848,19 +1209,37 @@ def handler(job):
     
     quality_stats = None
     
+    vipe_checkpoint_url = None
+    
     try:
         if is_multi_video:
             # ============================================
             # MULTI-VIDEO MODE
             # ============================================
             
-            # Step 1: Download all videos
-            video_paths = download_videos(video_urls, work_dir)
-            
-            # Step 2: Run ViPE on all videos with depth filtering
-            vipe_outputs_list, quality_stats = run_vipe_multi(
-                video_paths, work_dir, depth_threshold=depth_threshold
-            )
+            if resume_from_checkpoint:
+                # Resume from saved ViPE checkpoint
+                print("\n[Checkpoint] Resuming from saved ViPE outputs...")
+                vipe_outputs_list, quality_stats = restore_vipe_checkpoint(
+                    resume_from_checkpoint, work_dir
+                )
+            else:
+                # Step 1: Download all videos
+                video_paths = download_videos(video_urls, work_dir)
+                
+                # Step 2: Run ViPE on all videos with depth filtering
+                vipe_outputs_list, quality_stats = run_vipe_multi(
+                    video_paths, work_dir, depth_threshold=depth_threshold
+                )
+                
+                # Save checkpoint if requested
+                if should_save_checkpoint:
+                    try:
+                        vipe_checkpoint_url = save_vipe_checkpoint(
+                            vipe_outputs_list, quality_stats, video_urls, work_dir
+                        )
+                    except Exception as e:
+                        print(f"[Checkpoint] Warning: Failed to save checkpoint: {e}")
             
             # Step 3: Merge ViPE outputs with frame 0 alignment
             vipe_dir, num_frames = merge_vipe_outputs(
@@ -933,11 +1312,15 @@ def handler(job):
             "iterations": iterations,
             "elapsed_seconds": round(elapsed, 1)
         }
-        
+
         # Include quality stats for multi-video mode
         if quality_stats:
             result["quality_stats"] = quality_stats
         
+        # Include checkpoint URL if saved
+        if vipe_checkpoint_url:
+            result["vipe_checkpoint_url"] = vipe_checkpoint_url
+
         return result
         
     except Exception as e:
@@ -954,6 +1337,10 @@ def handler(job):
         
         if quality_stats:
             result["quality_stats"] = quality_stats
+        
+        # Include checkpoint URL even on failure (if saved before error)
+        if vipe_checkpoint_url:
+            result["vipe_checkpoint_url"] = vipe_checkpoint_url
         
         return result
         

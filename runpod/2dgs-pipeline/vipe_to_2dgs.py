@@ -112,10 +112,10 @@ def read_exr_depth(exr_path: str) -> np.ndarray:
     # Read the depth channel (usually 'Y' or 'Z')
     pt = Imath.PixelType(Imath.PixelType.FLOAT)
     
-    # Try different channel names
+    # Try different channel names (R is most common for ViPE depth maps)
     channels = header['channels'].keys()
     depth_channel = None
-    for ch in ['Y', 'Z', 'R', 'depth']:
+    for ch in ['R', 'Z', 'V', 'Y', 'depth', 'Depth']:
         if ch in channels:
             depth_channel = ch
             break
@@ -181,11 +181,23 @@ def convert_vipe_to_2dgs(
     n_output = len(frame_indices)
     print(f"Using {n_output} frames (every {every_n})")
     
-    # Extract RGB images (handle both zip and mp4 formats)
+    # Extract RGB images (handle zip, mp4, or pre-extracted files)
     rgb_zip = vipe_dir / "rgb" / f"{video_name}.zip"
     rgb_mp4 = vipe_dir / "rgb" / f"{video_name}.mp4"
+    rgb_dir = vipe_dir / "rgb"
     
-    if rgb_zip.exists():
+    # Check for pre-extracted image files (from multi-video merge)
+    existing_images = sorted(list(rgb_dir.glob("*.jpg")) + list(rgb_dir.glob("*.png")))
+    
+    if existing_images and len(existing_images) >= n_frames:
+        print(f"Using {len(existing_images)} pre-extracted RGB images...")
+        for new_idx, orig_idx in enumerate(frame_indices):
+            if orig_idx < len(existing_images):
+                src_path = existing_images[orig_idx]
+                dst_name = f"{new_idx:06d}{src_path.suffix}"
+                shutil.copy(src_path, images_dir / dst_name)
+        print(f"  Copied {n_output} images")
+    elif rgb_zip.exists():
         print("Extracting RGB images from zip...")
         with zipfile.ZipFile(rgb_zip, 'r') as z:
             all_files = sorted(z.namelist())
@@ -277,13 +289,25 @@ def convert_vipe_to_2dgs(
     # Extract depth maps
     if not skip_depth:
         depth_zip = vipe_dir / "depth" / f"{video_name}.zip"
-        if depth_zip.exists() and HAS_OPENEXR:
-            print("Extracting depth maps...")
+        depth_dir = vipe_dir / "depth"
+        
+        # Check for pre-extracted .npy files (from multi-video merge)
+        existing_depths = sorted(list(depth_dir.glob("*.npy")))
+        
+        if existing_depths and len(existing_depths) >= n_frames:
+            print(f"Using {len(existing_depths)} pre-extracted depth maps...")
+            for new_idx, orig_idx in enumerate(frame_indices):
+                if orig_idx < len(existing_depths):
+                    src_path = existing_depths[orig_idx]
+                    shutil.copy(src_path, depths_dir / f"{new_idx:06d}.npy")
+            print(f"  Copied {len(list(depths_dir.glob('*.npy')))} depth maps")
+        elif depth_zip.exists() and HAS_OPENEXR:
+            print("Extracting depth maps from zip...")
             import tempfile
             with tempfile.TemporaryDirectory() as tmp_dir:
                 with zipfile.ZipFile(depth_zip, 'r') as z:
                     z.extractall(tmp_dir)
-                    
+
                     all_files = sorted(Path(tmp_dir).glob("*.exr"))
                     for new_idx, orig_idx in enumerate(frame_indices):
                         if orig_idx < len(all_files):
@@ -291,7 +315,19 @@ def convert_vipe_to_2dgs(
                             depth = read_exr_depth(str(exr_path))
                             if depth is not None:
                                 np.save(depths_dir / f"{new_idx:06d}.npy", depth)
-            
+
+            print(f"  Extracted {len(list(depths_dir.glob('*.npy')))} depth maps")
+        elif depth_zip.exists():
+            # Try extracting .npy files directly from zip (ViPE sometimes uses npy format)
+            print("Extracting depth maps from zip (npy format)...")
+            with zipfile.ZipFile(depth_zip, 'r') as z:
+                all_files = sorted([n for n in z.namelist() if n.endswith('.npy')])
+                for new_idx, orig_idx in enumerate(frame_indices):
+                    if orig_idx < len(all_files):
+                        src_name = all_files[orig_idx]
+                        data = z.read(src_name)
+                        with open(depths_dir / f"{new_idx:06d}.npy", 'wb') as f:
+                            f.write(data)
             print(f"  Extracted {len(list(depths_dir.glob('*.npy')))} depth maps")
         else:
             if not depth_zip.exists():
