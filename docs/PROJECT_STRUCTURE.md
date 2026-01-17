@@ -1,6 +1,6 @@
 # ARKRUNR WORLDS - Project Structure
 
-**Last Updated:** January 14, 2026
+**Last Updated:** January 17, 2026
 
 This document describes the structure of the ARKRUNR WORLDS project, a multi-model 3D generation system built on top of Hunyuan3D-2.
 
@@ -17,7 +17,7 @@ Hunyuan3D-2-Fork/
 ├── ui/                     # UI components and tabs
 ├── runpod/                 # RunPod serverless infrastructure
 ├── scripts/                # Utility scripts
-├── utils/                  # Shared utilities
+├── utils/                  # Shared utilities (including TagManager)
 ├── docs/                   # Documentation
 ├── config/                 # Configuration files
 └── outputs/                # Generated output files
@@ -28,15 +28,17 @@ Hunyuan3D-2-Fork/
 ## Core Application Files
 
 ### `app_sidebar.py`
-**Main entry point** - The primary Gradio application with sidebar navigation (~3,150 lines).
+**Main entry point** - The primary Gradio application with sidebar navigation (~3,450 lines).
 
 - **Purpose**: Unified UI for all 3D generation models
 - **Key Features**:
-  - Sidebar navigation with INPUT, CREATE, TOOLS sections
+  - Sidebar navigation with INPUT, CREATE, BROWSE, TOOLS sections
   - Image input with auto-scaling and automatic output naming
   - Model selection (SHARP, Gen3C, Lyra, Trellis, Hunyuan, **LTX-2**, **2DGS**)
+  - **Gallery Tab**: Browse and tag outputs from all models
+  - **Post-Generation Tagging**: Tag results after generation for each model
   - **LTX-2**: 4-video preview grid, multi-motion selection, Play All button
-  - **2DGS**: 4-video preview, sort/filter controls, video highlighting
+  - **2DGS**: 4-video preview, sort/filter controls, tag filtering
   - Settings page for API credentials (RunPod, LTX, AWS)
   - Help documentation
   - Update tracker for model versions
@@ -49,7 +51,7 @@ Hunyuan3D-2-Fork/
   - `ui/styles.py` for CSS and JavaScript
   - `runpod/runpod_client.py` for API calls
   - `scripts/experiment_logger.py` for filename encoding
-  - `utils/*` for system metrics and version tracking
+  - `utils/*` for system metrics, version tracking, and **tagging**
 
 ### `gradio_app.py`
 Legacy Gradio application (older version, kept for reference).
@@ -60,7 +62,7 @@ Legacy Gradio application (older version, kept for reference).
 
 Business logic layer between UI and generators. Extracted from `app_sidebar.py` for maintainability.
 
-### `handlers/generation_handlers.py` (~1,180 lines)
+### `handlers/generation_handlers.py` (~1,240 lines)
 
 | Function | Purpose |
 |----------|---------|
@@ -72,9 +74,114 @@ Business logic layer between UI and generators. Extracted from `app_sidebar.py` 
 | `handle_mesh_extraction()` | PLY to mesh conversion |
 | `handle_mesh_analyze()` | Mesh statistics analysis |
 | `handle_mesh_cleanup()` | Mesh decimation and cleanup |
-| `list_all_videos()` | List videos with sort/filter for 2DGS |
+| `list_all_videos()` | List videos with sort/filter/tag support for 2DGS |
 
 **Note**: LTX-2 and 2DGS multi-video are handled in `app_sidebar.py`.
+
+---
+
+## Utilities (`utils/`)
+
+Shared utility modules for the application.
+
+### `utils/tag_manager.py` (~750 lines) ✅ NEW
+
+**TagManager** - Thread-safe tag storage and management system.
+
+| Feature | Description |
+|---------|-------------|
+| **Storage** | JSON file at `/srv/searidge_share/outputs/tags.json` |
+| **Thread-Safe** | Uses `threading.Lock` for concurrent access |
+| **Predefined Tags** | approved, favorite, best-take, review, bad, delete |
+| **Custom Tags** | User-defined free-form tags |
+| **Delete Handling** | Marks files for deletion, removes from disk |
+
+**Key Methods**:
+```python
+class TagManager:
+    get_tags(file_path) -> List[str]
+    set_tags(file_path, tags, model=None)
+    add_tag(file_path, tag)
+    remove_tag(file_path, tag)
+    clear_tags(file_path)
+    list_files_by_tag(tag) -> List[str]
+    list_files_by_model(model) -> List[str]
+    get_all_tags_flat() -> List[str]
+    is_marked_for_delete(file_path) -> bool
+    clear_tags_for_files(file_paths) -> int
+```
+
+**Usage**:
+```python
+from utils.tag_manager import get_tag_manager
+
+tag_manager = get_tag_manager()
+tag_manager.set_tags("/path/to/video.mp4", ["approved", "favorite"], model="LTX-2")
+tags = tag_manager.get_tags("/path/to/video.mp4")
+```
+
+### `utils/version_tracker.py`
+Tracks model/Docker image versions for update notifications.
+
+### `utils/system_metrics.py`
+System resource monitoring (CPU, memory, GPU).
+
+### `utils/image_utils.py`
+Image processing utilities.
+
+---
+
+## UI Components (`ui/`)
+
+### `ui/tabs/gallery_tab.py` (~695 lines) ✅ NEW
+
+**Gallery Tab** - Browse, filter, and tag render outputs from all models.
+
+| Component | Purpose |
+|-----------|---------|
+| **Model Filter** | Dropdown to filter by model (Gen3C, LTX-2, etc.) |
+| **Tag Filter** | Multi-select dropdown to filter by tags |
+| **File List** | Scrollable radio list of files with tags displayed |
+| **Preview** | Video or 3D model preview (400px height) |
+| **Tag Checkboxes** | Two-column layout: Approved/Favorite/Best-take, Review/Bad/Delete |
+| **Custom Tag** | Text input with checkbox for custom tags |
+| **Clear Tags** | Single file and bulk (all displayed) clear |
+| **Delete Confirmation** | Yes/No dialog before file deletion |
+
+**Key Functions**:
+```python
+def scan_output_files(model_filter, tag_filter, limit, include_deleted) -> List[Dict]
+def format_file_list(files) -> List[Tuple[str, str]]
+def create_gallery_tab() -> Dict[str, Any]
+```
+
+### `ui/tabs/create_tab.py` (~360 lines)
+
+2DGS pipeline UI components.
+
+- 4-video preview grid with filename labels
+- Video list with sort (date/filename/model/tagged first), limit slider
+- **Tag filter dropdown** for filtering videos by tag
+- Play All button
+- Output naming with parameter encoding
+
+### `ui/tabs/__init__.py`
+
+Exports for UI tab modules:
+```python
+from ui.tabs.create_tab import create_2dgs_tab
+from ui.tabs.gallery_tab import create_gallery_tab
+
+__all__ = ["create_2dgs_tab", "create_gallery_tab"]
+```
+
+### `ui/styles.py`
+
+CSS and JavaScript for:
+- Video preview grids
+- Play All button functionality
+- Gallery file list scrolling
+- Responsive layouts
 
 ---
 
@@ -107,7 +214,7 @@ def run_<model>_runpod(...)    # RunPod serverless execution
 
 ### Client Library
 
-#### `runpod/runpod_client.py` (~3,780 lines)
+#### `runpod/runpod_client.py` (~3,800 lines)
 **Primary client** for RunPod API interactions.
 
 - **Classes**:
@@ -127,8 +234,9 @@ def run_<model>_runpod(...)    # RunPod serverless execution
   - Camera motion via prompt descriptions
 
 - **2DGS Pipeline Client Features**:
-  - `submit_multi_video_job()` - Accept array of video URLs
+  - `submit_multi_video_job()` - Accept array of video URLs + output_name
   - `get_status()` with quality_stats (depth coverage, frame counts)
+  - Checkpoint restore support
 
 ### Docker Images
 
@@ -138,22 +246,12 @@ def run_<model>_runpod(...)    # RunPod serverless execution
 |------|---------|
 | `Dockerfile.unified` | Main Docker image (base) |
 | `Dockerfile.patch` | Incremental patch Dockerfile |
-| `Dockerfile.ltx2.diffusers` | LTX-2 diffusers build ⭐ |
+| `Dockerfile.ltx2.diffusers` | LTX-2 diffusers build |
 | `handler_unified.py` | Serverless handler (~2,200 lines) |
 | `start_unified.sh` | Container startup script |
 | `lyra_inference.py` | Lyra-specific inference logic |
 | `sugar_inference.py` | SuGaR mesh extraction logic |
 | `trellis_inference.py` | TRELLIS inference logic |
-
-**Handler Key Functions (LTX-2)**:
-```python
-get_ltx2_checkpoint_dir()      # Runtime path detection
-get_ltx2_camera_lora_path()    # LoRA path lookup
-load_ltx2_model()              # Pipeline with CPU offload
-run_ltx2()                     # Video generation
-handle_ltx2()                  # Job handler
-validate_ltx2()                # Environment validation
-```
 
 #### `runpod/hunyuan/` - Hunyuan3D Image
 | File | Purpose |
@@ -166,8 +264,8 @@ validate_ltx2()                # Environment validation
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Combined ViPE + 2DGS image |
-| `handler.py` | Serverless handler (~970 lines) |
-| `multi_video_merge.py` | Pose alignment + frame merging ✅ |
+| `handler.py` | Serverless handler (~1,370 lines) with checkpointing |
+| `multi_video_merge.py` | Pose alignment + frame merging |
 | `vipe_to_2dgs.py` | ViPE → COLMAP converter |
 | `init_points_from_depth.py` | Point cloud generator |
 | `README.md` | API documentation |
@@ -176,6 +274,8 @@ validate_ltx2()                # Environment validation
 - Accept array of `video_urls` (up to 4)
 - Frame 0 alignment for consistent poses
 - `depth_threshold` parameter for quality filtering
+- `output_name` parameter for custom S3 naming
+- Checkpoint save/restore to S3
 - Returns `quality_stats` in response
 
 #### `runpod/seva/` - SEVA (Blocked)
@@ -184,9 +284,6 @@ validate_ltx2()                # Environment validation
 | `Dockerfile` | SEVA Docker image |
 | `handler_seva.py` | Serverless handler |
 | `start_seva.sh` | Startup script |
-
-#### `runpod/ltx2/` - Standalone LTX-2 (Reference)
-Standalone files kept as fallback if unified handler doesn't work.
 
 ---
 
@@ -238,7 +335,7 @@ Standalone files kept as fallback if unified handler doesn't work.
 ┌─────────────────────────────────────────────────────────────────┐
 │                        app_sidebar.py                           │
 │                     (Gradio UI - Local)                         │
-│   Features: 4-video preview, Play All, auto-naming, encoding    │
+│   Features: Gallery, Tagging, 4-video preview, Play All         │
 └─────────────────────────────────────────────────────────────────┘
                     │                          │
                     ▼                          ▼
@@ -254,7 +351,7 @@ Standalone files kept as fallback if unified handler doesn't work.
 ├─────────────────────────────────────────────────────────────────┤
 │  handler_unified.py  →  Gen3C, SHARP, Lyra, TRELLIS            │
 │  handler_hunyuan.py  →  Hunyuan3D                               │
-│  handler.py (2dgs)   →  ViPE + 2DGS (multi-video support)       │
+│  handler.py (2dgs)   →  ViPE + 2DGS (multi-video + checkpoint)  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -265,7 +362,7 @@ Standalone files kept as fallback if unified handler doesn't work.
 │  MediaContent/outputs/ltx2/  - LTX-2 videos                     │
 │  MediaContent/outputs/gen3c/ - Gen3C videos                     │
 │  MediaContent/outputs/sharp/ - SHARP outputs                    │
-│  MediaContent/outputs/2dgs/  - 2DGS meshes                      │
+│  MediaContent/2dgs-pipeline/ - 2DGS checkpoints + outputs       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -277,18 +374,10 @@ Standalone files kept as fallback if unified handler doesn't work.
 |-------|--------|-----------------|-------|
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2 | **v55g** | Unified handler |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 | Stable |
-| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video→mesh) | **v2** | ✅ Multi-video |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video→mesh) | **v13** | ✅ Checkpointing |
 | `88dreams/seva-runpod` | SEVA (camera control video) | v1 | ⏸️ Blocked (HF access) |
 
 **Note**: LTX-2 uses official API (https://api.ltx.video) - no Docker image needed.
-
-### LTX-2 Integration History
-
-| Approach | Status | Notes |
-|----------|--------|-------|
-| RunPod Native (v55-v55g) | ❌ Deprecated | OOM issues with 19B model |
-| RunPod Diffusers | ❌ Deprecated | 2B model incompatible with 19B LoRAs |
-| **Official LTX API** | ✅ Current | Direct API calls, no local GPU needed |
 
 ---
 
@@ -298,20 +387,9 @@ Standalone files kept as fallback if unified handler doesn't work.
 |---------------|-------|---------|
 | `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2) |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | 2dgs-pipeline:**v2** | Multi-video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | 2dgs-pipeline:**v13** | Multi-video to mesh (ViPE + 2DGS) |
 
 **Note**: LTX-2 uses official Lightricks API - no RunPod endpoint.
-
----
-
-## Git Branches
-
-| Branch | Purpose | Status |
-|--------|---------|--------|
-| `main` | Production code (includes LTX API) | ✅ Stable |
-| `ltx-native` | Native LTX-2 pipeline (archived) | ❌ OOM issues |
-| `ltx-diffuser` | Diffusers LTX-2 pipeline (archived) | ❌ No camera LoRAs |
-| `2dgs` | 2DGS pipeline development | ✅ Merged to main |
 
 ---
 
@@ -323,9 +401,6 @@ Standalone files kept as fallback if unified handler doesn't work.
 /runpod-volume/
 ├── ltx2/                           # LTX-2 (NOT under checkpoints!)
 │   └── loras/                      # Camera control LoRAs (19B model)
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors
-│       ├── LTX-2-19b-LoRA-Camera-Control-Dolly-In.safetensors
-│       └── ...
 ├── huggingface/                    # HuggingFace cache
 │   └── hub/                        # Downloaded models
 ├── Gen3C-Cosmos-7B/                # Gen3C model
@@ -334,17 +409,18 @@ Standalone files kept as fallback if unified handler doesn't work.
 └── lyra/                           # Lyra checkpoint
 ```
 
-**Important**: LTX-2 files are at `/runpod-volume/ltx2/`, NOT `/runpod-volume/checkpoints/ltx2/`
-
 ### Local Output Directory
 
 ```
 /srv/searidge_share/outputs/
 ├── gen3c/      # Gen3C video outputs
 ├── ltx2/       # LTX-2 video outputs
+├── hunyuan/    # Hunyuan3D outputs
+├── trellis/    # Trellis outputs
+├── 2dgs/       # 2DGS mesh outputs
 ├── sharp/      # SHARP PLY outputs
-├── mesh_2dgs/  # 2DGS mesh outputs
-└── logs/       # Experiment CSV logs
+├── logs/       # Experiment CSV logs
+└── tags.json   # Tag database (TagManager) ✅ NEW
 ```
 
 ---
@@ -381,11 +457,21 @@ Or configure in UI Settings page.
 
 ### UI → Handlers → Generators → APIs
 ```
-app_sidebar.py (UI + LTX-2 handler)
+app_sidebar.py (UI + LTX-2 + Gallery)
+    ├── utils/tag_manager.py (TagManager)
+    ├── ui/tabs/gallery_tab.py (Gallery UI)
     └── handlers/generation_handlers.py (other models)
             └── generators/ltx2.py (LTX-2 logic)
                     └── runpod/runpod_client.py (LTXAPIClient)
                             └── LTX API (https://api.ltx.video)
+```
+
+### Tagging Data Flow
+```
+User clicks tag checkbox in Gallery/Post-generation
+    └── gallery_tab.py / app_sidebar.py event handler
+            └── TagManager.set_tags(file_path, tags)
+                    └── /srv/searidge_share/outputs/tags.json
 ```
 
 ### Docker Build Chain
@@ -395,16 +481,6 @@ Dockerfile.unified (base image)
             └── 88dreams/gen3c-runpod:v55g (Docker Hub)
 ```
 
-### LTX-2 API Flow
-```
-User enters prompt in Gradio UI
-    └── app_sidebar.py handler
-            └── generators/ltx2.py run_ltx2_api()
-                    └── LTXAPIClient.generate_video()
-                            └── POST https://api.ltx.video/v1/image-to-video
-                                    └── Returns MP4 video directly
-```
-
 ---
 
-*Last Updated: January 14, 2026 (LTX-2 multi-preview, 2DGS multi-video, UI enhancements)*
+*Last Updated: January 17, 2026 (Tagging system, Gallery tab, 2DGS v13)*

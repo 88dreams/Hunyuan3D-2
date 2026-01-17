@@ -17,7 +17,7 @@ This document summarizes the work completed and provides context for new convers
 | **Lyra** | NVIDIA | 3D/4D Gaussian Splatting | ✅ Working |
 | **TRELLIS.2** | Microsoft | 3D (GLB) | ✅ Working |
 | **Hunyuan3D** | Tencent | 3D Mesh (GLB) | ✅ Working |
-| **2DGS Pipeline** | ViPE + 2DGS | Multi-Video → Mesh (GLB) | ✅ Working (v2) |
+| **2DGS Pipeline** | ViPE + 2DGS | Multi-Video → Mesh (GLB) | ✅ Working (v13) |
 | **LTX-2** | Lightricks | Video (official API) | ✅ Working |
 | **SEVA** | Stability AI | Video (camera control) | ⏸️ Blocked (HF access) |
 
@@ -30,6 +30,84 @@ This document summarizes the work completed and provides context for new convers
 ---
 
 ## Current Work In Progress
+
+### Tagging System (January 17, 2026) ✅ COMPLETE
+
+**Goal**: Unified tagging system for organizing and filtering render results across all models.
+
+#### Features Implemented
+
+| Feature | Description |
+|---------|-------------|
+| **TagManager** | Thread-safe JSON-based tag storage (`utils/tag_manager.py`) |
+| **Gallery Tab** | Browse, filter, and tag outputs from all models |
+| **Post-Generation Tagging** | Tag results directly after Gen3C, LTX-2, Hunyuan, Trellis generation |
+| **2DGS Video Filter** | Filter videos by tag in 2DGS video selection |
+| **Auto-Save** | Tags save automatically on checkbox change |
+| **Delete Tag** | Removes file from disk with confirmation |
+
+#### Predefined Tags
+
+| Column 1 | Column 2 |
+|----------|----------|
+| Approved | Review |
+| Favorite | Bad |
+| Best-take | Delete |
+
+Plus **Custom** tags with free-form text entry.
+
+#### Gallery Tab UI
+
+- **Filters**: Model filter, Tag filter, Max results slider
+- **File List**: Scrollable list showing `[Model] filename [tags] (date)`
+- **Preview**: Video or 3D model preview (400px height)
+- **Tagging**: Two-column checkbox layout + custom tag input
+- **Actions**: Clear Tags, Clear Tags (ALL displayed) with confirmation
+
+#### Files Created/Modified
+
+| File | Purpose |
+|------|---------|
+| `utils/tag_manager.py` | **NEW** - Tag storage and management |
+| `ui/tabs/gallery_tab.py` | **NEW** - Gallery tab UI and logic |
+| `ui/tabs/__init__.py` | Added gallery_tab export |
+| `app_sidebar.py` | Gallery nav, post-generation tagging panels |
+| `handlers/generation_handlers.py` | Tag filtering in `list_all_videos()` |
+| `ui/tabs/create_tab.py` | Tag filter dropdown for 2DGS |
+
+#### Tag Storage
+
+Tags are stored in `/srv/searidge_share/outputs/tags.json`:
+
+```json
+{
+  "files": {
+    "/path/to/file.mp4": {
+      "tags": ["approved", "favorite"],
+      "model": "LTX-2",
+      "added": "2026-01-17T10:30:00",
+      "modified": "2026-01-17T10:35:00"
+    }
+  },
+  "custom_tags": ["my-project", "hero-shot"],
+  "predefined_tags": ["approved", "favorite", "best-take", "review", "bad", "delete"]
+}
+```
+
+---
+
+### 2DGS Pipeline v13 (January 16, 2026) ✅ COMPLETE
+
+**Enhancements**:
+
+1. **Checkpoint Save/Restore**: Intermediate outputs saved to S3 for job resumption
+2. **Output Name Preservation**: Custom `output_name` from UI used for final S3 upload
+3. **CUDA Availability Check**: Validates GPU before ViPE inference
+4. **Depth Handling Fixes**: Improved depth map processing
+
+**Docker Image**: `88dreams/2dgs-pipeline:v13`
+
+---
 
 ### LTX-2 Integration (January 15, 2026) ✅ COMPLETE
 
@@ -72,28 +150,6 @@ Preset prompts are available in the UI dropdown.
 - **Play All button**: Play/pause all previews simultaneously
 - **Parameter encoding**: Filenames encode model, duration, resolution, motion
 
-#### Files Modified
-
-| File | Changes |
-|------|---------|
-| `runpod/runpod_client.py` | Added `LTXAPIClient` class for official API |
-| `generators/ltx2.py` | New `run_ltx2_api()` function, kept legacy RunPod support |
-| `app_sidebar.py` | LTX-2 UI with 4-video previews, Play All, multi-motion selection |
-| `scripts/experiment_logger.py` | Added `ltx2_param_filename()` for parameter encoding |
-
-#### API Configuration
-
-1. Get API key at https://ltx.video
-2. Add to Settings → External APIs → LTX-2
-
-No RunPod endpoint needed - API calls go directly to Lightricks.
-
-#### Key Technical Learnings (Historical)
-
-1. **Model Size Mismatch**: HuggingFace `Lightricks/LTX-Video` (2B) ≠ `LTX-2` (19B)
-2. **FP8 Upcasting**: Native pipeline upcasts FP8 to BF16 during inference
-3. **API is Best**: Official API avoids all local hosting complexity
-
 ---
 
 ### TRELLIS.2 Consolidated into Unified (January 13, 2026)
@@ -121,57 +177,16 @@ No RunPod endpoint needed - API calls go directly to Lightricks.
 
 ---
 
-### 2DGS Pipeline: Multi-Video to Mesh
-
-**Status**: ✅ **WORKING** (v2 - Multi-Video Support)
-
-**Pipeline Flow**:
-1. Accept up to 4 input videos
-2. ViPE extracts camera poses, depth maps, intrinsics per video
-3. **Frame 0 alignment**: First frame (input image) used as anchor to align poses
-4. **Depth coverage filter**: Skip frames with low depth coverage
-5. Converter merges all videos to unified COLMAP format
-6. 2DGS training produces Gaussian splats
-7. Mesh extraction via marching cubes
-8. 180° X-axis rotation correction applied
-
-**Key Enhancement**: Multi-video input provides diverse viewpoints for better 3D reconstruction.
-
-**Docker Image**: `88dreams/2dgs-pipeline:v2`
-**RunPod Endpoint**: `2dgs-serverless`
-
-**UI Features**:
-- 4-video preview grid with filename labels
-- Play All button for simultaneous playback
-- Video list with sort (date/filename/model) and limit (10/20/30/50/All)
-- Single-column video list layout
-- Highlight currently playing video in list
-
----
-
 ## Docker Images
 
 | Image | Models | Current Version |
 |-------|--------|-----------------|
 | `88dreams/gen3c-runpod` | Gen3C, Lyra, SHARP, SuGaR, TRELLIS.2 | **v55g** |
 | `88dreams/hunyuan-runpod` | Hunyuan3D | v10 |
-| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video) | **v2** |
+| `88dreams/2dgs-pipeline` | ViPE + 2DGS (multi-video) | **v13** |
 | `88dreams/seva-runpod` | SEVA (camera control) | v1 (blocked) |
 
 **Note**: LTX-2 uses official API - no Docker image needed.
-
-### Version History (LTX-2 Development)
-
-| Version | Changes |
-|---------|---------|
-| v55 | Initial diffusers implementation |
-| v55a | Auto-detect LoRA paths, HuggingFace cache on network volume |
-| v55b | Set HF_HOME before imports |
-| v55c | Fixed path detection priority |
-| v55d | Runtime path detection |
-| v55e | Forced rebuild with correct paths |
-| v55f | Runtime `get_ltx2_checkpoint_dir()` function |
-| **v55g** | Graceful handling of incompatible LoRAs |
 
 ### Build Commands
 
@@ -181,15 +196,25 @@ cd runpod/gen3c
 docker build --no-cache -f Dockerfile.unified -t 88dreams/gen3c-runpod:v55g .
 docker push 88dreams/gen3c-runpod:v55g
 
-# 2DGS Pipeline (Multi-Video)
+# 2DGS Pipeline (Multi-Video with Checkpointing)
 cd runpod/2dgs-pipeline
-docker build -t 88dreams/2dgs-pipeline:v2 .
-docker push 88dreams/2dgs-pipeline:v2
+docker build -t 88dreams/2dgs-pipeline:v13 .
+docker push 88dreams/2dgs-pipeline:v13
 ```
 
 ---
 
 ## UI Features (January 2026)
+
+### Gallery Tab (NEW)
+
+Navigate via **BROWSE** section in sidebar:
+- Browse all model outputs in one place
+- Filter by model (Gen3C, LTX-2, Hunyuan, Trellis, 2DGS)
+- Filter by tags
+- Preview videos and 3D models
+- Tag/untag files with auto-save
+- Delete files with confirmation
 
 ### Automatic Output Naming
 
@@ -228,13 +253,22 @@ Both LTX-2 and 2DGS pages have:
 |---------------|-------|---------|
 | `gen3c-serverless` | gen3c-runpod:**v55g** | Multi-model (Gen3C, Lyra, SHARP, TRELLIS.2) |
 | `hunyuan-serverless` | hunyuan-runpod:v10 | Hunyuan3D mesh generation |
-| `2dgs-serverless` | 2dgs-pipeline:**v2** | Multi-video to mesh (ViPE + 2DGS) |
+| `2dgs-serverless` | 2dgs-pipeline:**v13** | Multi-video to mesh (ViPE + 2DGS) |
 
 **Note**: LTX-2 uses official Lightricks API at https://api.ltx.video - no RunPod endpoint.
 
 ---
 
 ## Key Files
+
+### Tagging System (NEW)
+
+| File | Purpose |
+|------|---------|
+| `utils/tag_manager.py` | Thread-safe tag storage in JSON |
+| `ui/tabs/gallery_tab.py` | Gallery tab UI for browsing/tagging |
+| `handlers/generation_handlers.py` | `list_all_videos()` with tag filtering |
+| `ui/tabs/create_tab.py` | Tag filter in 2DGS video selection |
 
 ### LTX-2 Integration (API-based)
 
@@ -249,24 +283,11 @@ Both LTX-2 and 2DGS pages have:
 
 | File | Purpose |
 |------|---------|
-| `runpod/2dgs-pipeline/handler.py` | Serverless handler with multi-video support |
+| `runpod/2dgs-pipeline/handler.py` | Serverless handler with checkpointing |
 | `runpod/2dgs-pipeline/multi_video_merge.py` | Pose alignment and frame merging |
 | `runpod/runpod_client.py` | `TwoDGSPipelineClient.submit_multi_video_job()` |
 | `ui/tabs/create_tab.py` | 2DGS UI components |
 | `ui/styles.py` | CSS for video previews, Play All button |
-
-### LTX API Client Functions
-
-```python
-# Main client class
-class LTXAPIClient:
-    def generate_video(image_path, prompt, model, resolution, duration, fps, ...) -> LTX2Result
-    def text_to_video(prompt, model, resolution, duration, fps, ...) -> LTX2Result
-
-# Generator functions
-def run_ltx2_api(image_path, prompt, model, resolution, ...) -> LTX2Result
-def generate_video_for_3d(image_path, camera_motion, ...) -> LTX2Result
-```
 
 ---
 
@@ -288,39 +309,55 @@ export RUNPOD_API_KEY="your_key"
 /srv/searidge_share/outputs/
 ├── gen3c/      # Gen3C video outputs
 ├── ltx2/       # LTX-2 video outputs
+├── hunyuan/    # Hunyuan3D outputs
+├── trellis/    # Trellis outputs
+├── 2dgs/       # 2DGS mesh outputs
 ├── sharp/      # SHARP PLY outputs
-├── mesh_2dgs/  # 2DGS mesh outputs
-└── logs/       # Experiment logs
+├── logs/       # Experiment logs
+└── tags.json   # Tag database (NEW)
 ```
 
 ---
 
 ## Known Issues / Next Steps
 
-### 1. LTX-2 ✅ COMPLETE
+### 1. Tagging System ✅ COMPLETE
+- Gallery tab for browsing all outputs
+- Post-generation tagging for each model
+- Tag filtering in 2DGS video selection
+- Auto-save and delete with confirmation
+
+### 2. LTX-2 ✅ COMPLETE
 - **Solution**: Using official Lightricks API at https://api.ltx.video
 - **Camera Control**: Via prompt descriptions (built-in presets in UI)
 - **Quality**: Up to 4K @ 50fps with Pro model
 - **Multi-video**: Select multiple camera motions, 4-video preview grid
 
-### 2. 2DGS Multi-Video Pipeline ✅ COMPLETE
-- Accepts up to 4 videos for diverse viewpoints
-- Frame 0 alignment ensures consistent pose origin
-- Depth coverage filter improves quality
-- Enhanced UI with sort/filter and Play All
+### 3. 2DGS Pipeline v13 ✅ COMPLETE
+- Checkpoint save/restore for job resumption
+- Custom output naming preserved through pipeline
+- CUDA availability validation
+- Improved depth handling
 
-### 3. SEVA Integration ⏸️ BLOCKED
+### 4. SEVA Integration ⏸️ BLOCKED
 - **Issue**: HuggingFace model access required
 - **Action**: Request access at https://huggingface.co/stabilityai/stable-virtual-camera
 
-### 4. Potential Improvements
+### 5. Potential Improvements
 - LTX API camera pose extraction (asked Lightricks if available)
 - Auto-select best frames based on depth coverage
 - Multi-GPU parallel video generation
+- Tag-based batch processing workflows
 
 ---
 
 ## Debugging Tips
+
+### Tagging System Issues
+
+1. **Tags not saving**: Check write permissions on `/srv/searidge_share/outputs/tags.json`
+2. **Files not appearing in Gallery**: Verify output directories exist and contain files
+3. **Delete not working**: Check file permissions, look for OS errors in console
 
 ### LTX-2 API Issues
 
@@ -337,6 +374,10 @@ export RUNPOD_API_KEY="your_key"
 [LTX-API] Model: ltx-2-pro, Resolution: 1920x1080, Duration: 6s
 [LTX-API] Response status: 200
 [LTX-API] Video saved: X.XX MB
+
+# For tagging:
+[TagManager] Saving tags for: /path/to/file
+[Gallery] Scanning output directories
 ```
 
 ---
@@ -347,8 +388,8 @@ export RUNPOD_API_KEY="your_key"
 - **Docker Hub**: https://hub.docker.com/u/88dreams
 - **S3 Bucket**: arkrunr (us-west-1)
 - **LTX API**: https://docs.ltx.video/welcome
-- **Git Branch**: `main` (LTX API integrated)
+- **Git Branch**: `ltx-API` (main development branch)
 
 ---
 
-*Last Updated: January 14, 2026 (LTX-2 multi-preview, 2DGS multi-video, UI enhancements)*
+*Last Updated: January 17, 2026 (Tagging system, Gallery tab, 2DGS v13)*
