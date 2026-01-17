@@ -18,6 +18,7 @@ Input:
         "iterations": 5000,          # 2DGS training iterations
         "mesh_resolution": 512,      # Mesh extraction resolution
         "output_format": "glb",      # "glb", "obj", or "ply"
+        "output_name": "my_mesh",    # Custom output filename (without extension)
         "depth_threshold": 0.5,      # Min depth coverage to keep frame (0.0-1.0)
         
         # Checkpoint options (for resuming failed jobs)
@@ -1097,6 +1098,8 @@ def upload_result(mesh_path: Path, job_input: dict) -> str:
     """
     Upload mesh to S3 and return presigned URL.
     Falls back to base64 if no S3 config provided.
+    
+    Uses output_name from job_input if provided, otherwise uses the file's own name.
     """
     if "output_s3" in job_input:
         import boto3
@@ -1107,7 +1110,17 @@ def upload_result(mesh_path: Path, job_input: dict) -> str:
         prefix = s3_config.get("prefix", "2dgs-pipeline/")
         region = s3_config.get("region", "us-west-1")  # Default to us-west-1
         
-        key = f"{prefix}{mesh_path.name}"
+        # Use output_name if provided, otherwise use original filename
+        output_name = job_input.get("output_name", "")
+        if output_name:
+            # Use the user-specified name with the file's extension
+            ext = mesh_path.suffix  # e.g., ".glb", ".ply"
+            final_filename = f"{output_name}{ext}"
+        else:
+            final_filename = mesh_path.name
+        
+        key = f"{prefix}{final_filename}"
+        print(f"  [S3] Uploading as: {final_filename}")
         
         # Create S3 client with correct region for presigned URLs
         s3 = boto3.client(
@@ -1179,6 +1192,7 @@ def handler(job):
     mesh_resolution = job_input.get("mesh_resolution", 512)
     mesh_quality = job_input.get("mesh_quality", "high")  # Default to high quality
     output_format = job_input.get("output_format", "glb").lower()
+    output_name = job_input.get("output_name", "")  # Custom output filename
     depth_threshold = job_input.get("depth_threshold", 0.5)  # Min depth coverage
     
     # Checkpoint parameters
@@ -1195,6 +1209,8 @@ def handler(job):
     print(f"  - Mesh quality: {mesh_quality}")
     print(f"  - Mesh resolution: {mesh_resolution}")
     print(f"  - Output format: {output_format}")
+    if output_name:
+        print(f"  - Output name: {output_name}")
     print(f"  - Depth coverage threshold: {depth_threshold}")
     if is_multi_video:
         print(f"  - Videos: {len(video_urls)}")

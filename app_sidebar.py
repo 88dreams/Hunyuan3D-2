@@ -2804,6 +2804,7 @@ Min Component Ratio: 1% (default)
                     iterations=int(iterations),
                     mesh_quality=mesh_quality,
                     output_format=output_format,
+                    output_name=output_name,
                     depth_threshold=float(depth_threshold) if depth_threshold else 0.5,
                     s3_bucket=s3_bucket,
                     s3_region=s3_region,

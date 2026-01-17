@@ -1792,6 +1792,7 @@ class TwoDGSPipelineClient:
         iterations: int = 5000,
         mesh_quality: str = "high",
         output_format: str = "glb",
+        output_name: str = "mesh_output",
         depth_threshold: float = 0.5,
         s3_bucket: str = "arkrunr",
         s3_region: str = "us-west-1",
@@ -1812,6 +1813,7 @@ class TwoDGSPipelineClient:
             iterations: 2DGS training iterations
             mesh_quality: Mesh quality preset (fast, balanced, high, ultra)
             output_format: Output format (glb, obj, ply)
+            output_name: Base name for output file (without extension)
             depth_threshold: Min depth coverage to keep frame (0.0-1.0)
             s3_bucket: S3 bucket for input/output
             s3_region: S3 region
@@ -1887,6 +1889,7 @@ class TwoDGSPipelineClient:
                 "iterations": iterations,
                 "mesh_quality": mesh_quality,
                 "output_format": output_format,
+                "output_name": output_name,
                 "depth_threshold": depth_threshold,
                 "save_vipe_checkpoint": save_vipe_checkpoint,
                 "output_s3": {
