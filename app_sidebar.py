@@ -54,7 +54,9 @@ from ui.tabs import (
     create_mesh_extraction_tab,
     scan_for_ply_files,
     scan_for_lyra_ply_files,
+    create_gallery_tab,
 )
+from utils.tag_manager import TagManager, get_tag_manager
 
 from generators import (
     check_hunyuan_runpod_status,
@@ -297,6 +299,10 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                 nav_create = gr.Button("2DGS", elem_classes=["sidebar-nav"], elem_id="nav-create", scale=1)
                 nav_mesh = gr.Button("Mesh", elem_classes=["sidebar-nav"], elem_id="nav-mesh", scale=1)
             
+            gr.Markdown("<small style='color:#666;margin:4px 0 2px 4px;'>BROWSE</small>", elem_classes=["section-label"])
+            with gr.Row(elem_classes=["button-grid"]):
+                nav_gallery = gr.Button("Gallery", elem_classes=["sidebar-nav"], elem_id="nav-gallery", scale=1)
+            
             # Refine/Monitor Section combined
             gr.HTML('<div class="sidebar-category">TOOLS</div>')
             
@@ -527,6 +533,24 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 autoplay=True,
                                 loop=True,
                             )
+                            
+                            # Tagging panel for Gen3C outputs
+                            with gr.Accordion("Tag Result", open=False, visible=True) as gen3c_tag_accordion:
+                                gen3c_tag_checkboxes = gr.CheckboxGroup(
+                                    choices=get_tag_manager().get_predefined_tags(),
+                                    label="Quick Tags",
+                                    value=[],
+                                )
+                                with gr.Row():
+                                    gen3c_tag_custom = gr.Textbox(
+                                        label="Add Custom Tag",
+                                        placeholder="Enter custom tag...",
+                                        scale=3,
+                                    )
+                                    gen3c_tag_add_btn = gr.Button("Add", size="sm", scale=1)
+                                gen3c_tag_status = gr.Markdown("*Select tags for generated videos*")
+                                gen3c_tag_save_btn = gr.Button("Save Tags", variant="primary", size="sm")
+                                gen3c_tag_file_path = gr.State(value=None)  # Track current file being tagged
                 
                 # PAGE: LTX-2
                 with gr.TabItem("LTX-2", id="ltx2"):
@@ -669,6 +693,24 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                             - `orbit` - 360° rotation (excellent for 3D)
                             - `jib_up` - Top-down perspective
                             """)
+                            
+                            # Tagging panel for LTX-2 outputs
+                            with gr.Accordion("Tag Result", open=False, visible=True) as ltx2_tag_accordion:
+                                ltx2_tag_checkboxes = gr.CheckboxGroup(
+                                    choices=get_tag_manager().get_predefined_tags(),
+                                    label="Quick Tags",
+                                    value=[],
+                                )
+                                with gr.Row():
+                                    ltx2_tag_custom = gr.Textbox(
+                                        label="Add Custom Tag",
+                                        placeholder="Enter custom tag...",
+                                        scale=3,
+                                    )
+                                    ltx2_tag_add_btn = gr.Button("Add", size="sm", scale=1)
+                                ltx2_tag_status = gr.Markdown("*Select tags for generated videos*")
+                                ltx2_tag_save_btn = gr.Button("Save Tags", variant="primary", size="sm")
+                                ltx2_tag_file_paths = gr.State(value=[])  # Track current files being tagged
                 
                 # PAGE: LYRA
                 with gr.TabItem("Lyra", id="lyra"):
@@ -769,6 +811,24 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 height=400,
                                 clear_color=[0.1, 0.1, 0.1, 1.0],
                             )
+                            
+                            # Tagging panel for Trellis outputs
+                            with gr.Accordion("Tag Result", open=False, visible=True) as trellis_tag_accordion:
+                                trellis_tag_checkboxes = gr.CheckboxGroup(
+                                    choices=get_tag_manager().get_predefined_tags(),
+                                    label="Quick Tags",
+                                    value=[],
+                                )
+                                with gr.Row():
+                                    trellis_tag_custom = gr.Textbox(
+                                        label="Add Custom Tag",
+                                        placeholder="Enter custom tag...",
+                                        scale=3,
+                                    )
+                                    trellis_tag_add_btn = gr.Button("Add", size="sm", scale=1)
+                                trellis_tag_status = gr.Markdown("*Select tags for generated 3D model*")
+                                trellis_tag_save_btn = gr.Button("Save Tags", variant="primary", size="sm")
+                                trellis_tag_file_path = gr.State(value=None)  # Track current file being tagged
                 
                 # PAGE: HUNYUAN3D
                 with gr.TabItem("Hunyuan3D", id="hunyuan"):
@@ -818,6 +878,24 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                                 height=400,
                                 clear_color=[0.1, 0.1, 0.1, 1.0],
                             )
+                            
+                            # Tagging panel for Hunyuan outputs
+                            with gr.Accordion("Tag Result", open=False, visible=True) as hunyuan_tag_accordion:
+                                hunyuan_tag_checkboxes = gr.CheckboxGroup(
+                                    choices=get_tag_manager().get_predefined_tags(),
+                                    label="Quick Tags",
+                                    value=[],
+                                )
+                                with gr.Row():
+                                    hunyuan_tag_custom = gr.Textbox(
+                                        label="Add Custom Tag",
+                                        placeholder="Enter custom tag...",
+                                        scale=3,
+                                    )
+                                    hunyuan_tag_add_btn = gr.Button("Add", size="sm", scale=1)
+                                hunyuan_tag_status = gr.Markdown("*Select tags for generated 3D model*")
+                                hunyuan_tag_save_btn = gr.Button("Save Tags", variant="primary", size="sm")
+                                hunyuan_tag_file_path = gr.State(value=None)  # Track current file being tagged
                 
                 # PAGE: MESH EXTRACTION
                 with gr.TabItem("Mesh", id="mesh"):
@@ -988,6 +1066,17 @@ with gr.Blocks(title="3D Generation Studio") as demo:
                         default_endpoint_id="s9txp6edtf2vg4",
                         default_api_key=_runpod_config.get("gen3c_api_key", ""),
                     )
+                
+                # PAGE: GALLERY
+                with gr.TabItem("Gallery", id="gallery"):
+                    gr.HTML("""
+                        <div class="page-header">
+                            <h1>Output Gallery</h1>
+                            <p>Browse and tag render outputs from all models. Filter by model or tags.</p>
+                        </div>
+                    """)
+                    
+                    gallery_components = create_gallery_tab()
                 
                 # PAGE: SETTINGS
                 with gr.TabItem("Settings", id="settings"):
@@ -1649,6 +1738,7 @@ Min Component Ratio: 1% (default)
     nav_hunyuan.click(fn=lambda: gr.Tabs(selected="hunyuan"), outputs=[page_tabs], js=highlight_js % 'nav-hunyuan')
     nav_mesh.click(fn=lambda: gr.Tabs(selected="mesh"), outputs=[page_tabs], js=highlight_js % 'nav-mesh')
     nav_create.click(fn=lambda: gr.Tabs(selected="create"), outputs=[page_tabs], js=highlight_js % 'nav-create')
+    nav_gallery.click(fn=lambda: gr.Tabs(selected="gallery"), outputs=[page_tabs], js=highlight_js % 'nav-gallery')
     nav_settings.click(fn=lambda: gr.Tabs(selected="settings"), outputs=[page_tabs], js=highlight_js % 'nav-settings')
     nav_update.click(fn=lambda: gr.Tabs(selected="update"), outputs=[page_tabs], js=highlight_js % 'nav-update')
     nav_help.click(fn=lambda: gr.Tabs(selected="help"), outputs=[page_tabs], js=highlight_js % 'nav-help')
@@ -2298,23 +2388,7 @@ Min Component Ratio: 1% (default)
                     preview_path = glb_path
         
         return output_path, logs, progress, preview_path
-    
-    trellis_generate_btn.click(
-        fn=trellis_generate_with_preview,
-        inputs=[
-            input_image, image_scale,
-            settings_gen3c_endpoint, settings_gen3c_key,  # Uses unified endpoint
-            trellis_resolution, trellis_guidance, trellis_seed,
-            trellis_output_name, trellis_output_dir, trellis_format,
-            global_log_params, global_encode_params,
-        ],
-        outputs=[output_display, trellis_logs, trellis_progress, trellis_3d_viewer],
-    )
-    
-    # =========================================================================
-    # HUNYUAN EVENT HANDLERS
-    # =========================================================================
-    
+
     def hunyuan_generate_with_preview(*args):
         """Wrapper that returns the GLB path for 3D viewer."""
         result = handle_hunyuan_generation(*args)
@@ -2322,8 +2396,203 @@ Min Component Ratio: 1% (default)
         # Return path for 3D viewer (gr.Model3D accepts file path directly)
         return output_path, logs, progress, output_path
     
+    # =========================================================================
+    # TAGGING EVENT HANDLERS
+    # =========================================================================
+    
+    # Get tag manager instance
+    tag_manager = get_tag_manager()
+    
+    # --- Gen3C Tagging ---
+    def gen3c_save_tags(tags, custom_tag, file_path, video_list):
+        """Save tags for Gen3C generated videos."""
+        if not video_list:
+            return "*No videos to tag*", []
+        
+        all_tags = list(tags)
+        if custom_tag and custom_tag.strip():
+            custom = custom_tag.strip().lower().replace(" ", "-")
+            if custom not in all_tags:
+                all_tags.append(custom)
+                tag_manager.add_custom_tag(custom)
+        
+        if not all_tags:
+            return "*No tags selected*", tags
+        
+        # Tag all generated videos
+        for video_path in video_list:
+            if video_path and os.path.exists(video_path):
+                tag_manager.set_tags(video_path, all_tags, model="Gen3C")
+        
+        return f"✅ Tagged {len(video_list)} video(s) with: {', '.join(all_tags)}", []
+    
+    def gen3c_add_custom_tag(tags, custom_tag):
+        """Add custom tag to the checkbox selection."""
+        if not custom_tag or not custom_tag.strip():
+            return tags, ""
+        custom = custom_tag.strip().lower().replace(" ", "-")
+        new_tags = list(tags)
+        if custom not in new_tags:
+            new_tags.append(custom)
+        return new_tags, ""
+    
+    gen3c_tag_save_btn.click(
+        fn=gen3c_save_tags,
+        inputs=[gen3c_tag_checkboxes, gen3c_tag_custom, gen3c_tag_file_path, gen3c_generated_videos],
+        outputs=[gen3c_tag_status, gen3c_tag_checkboxes],
+    )
+    
+    gen3c_tag_add_btn.click(
+        fn=gen3c_add_custom_tag,
+        inputs=[gen3c_tag_checkboxes, gen3c_tag_custom],
+        outputs=[gen3c_tag_checkboxes, gen3c_tag_custom],
+    )
+    
+    # --- LTX-2 Tagging ---
+    def ltx2_save_tags(tags, custom_tag, video_paths):
+        """Save tags for LTX-2 generated videos."""
+        if not video_paths:
+            return "*No videos to tag*", []
+        
+        all_tags = list(tags)
+        if custom_tag and custom_tag.strip():
+            custom = custom_tag.strip().lower().replace(" ", "-")
+            if custom not in all_tags:
+                all_tags.append(custom)
+                tag_manager.add_custom_tag(custom)
+        
+        if not all_tags:
+            return "*No tags selected*", tags
+        
+        # Tag all generated videos
+        tagged_count = 0
+        for video_path in video_paths:
+            if video_path and os.path.exists(video_path):
+                tag_manager.set_tags(video_path, all_tags, model="LTX-2")
+                tagged_count += 1
+        
+        return f"✅ Tagged {tagged_count} video(s) with: {', '.join(all_tags)}", []
+    
+    def ltx2_add_custom_tag(tags, custom_tag):
+        """Add custom tag to the checkbox selection."""
+        if not custom_tag or not custom_tag.strip():
+            return tags, ""
+        custom = custom_tag.strip().lower().replace(" ", "-")
+        new_tags = list(tags)
+        if custom not in new_tags:
+            new_tags.append(custom)
+        return new_tags, ""
+    
+    ltx2_tag_save_btn.click(
+        fn=ltx2_save_tags,
+        inputs=[ltx2_tag_checkboxes, ltx2_tag_custom, ltx2_generated_videos],
+        outputs=[ltx2_tag_status, ltx2_tag_checkboxes],
+    )
+    
+    ltx2_tag_add_btn.click(
+        fn=ltx2_add_custom_tag,
+        inputs=[ltx2_tag_checkboxes, ltx2_tag_custom],
+        outputs=[ltx2_tag_checkboxes, ltx2_tag_custom],
+    )
+    
+    # --- Trellis Tagging ---
+    def trellis_save_tags(tags, custom_tag, file_path):
+        """Save tags for Trellis generated model."""
+        if not file_path or not os.path.exists(file_path):
+            return "*No model to tag (generate first)*", []
+        
+        all_tags = list(tags)
+        if custom_tag and custom_tag.strip():
+            custom = custom_tag.strip().lower().replace(" ", "-")
+            if custom not in all_tags:
+                all_tags.append(custom)
+                tag_manager.add_custom_tag(custom)
+        
+        if not all_tags:
+            return "*No tags selected*", tags
+        
+        tag_manager.set_tags(file_path, all_tags, model="Trellis")
+        return f"✅ Tagged with: {', '.join(all_tags)}", []
+    
+    def trellis_add_custom_tag(tags, custom_tag):
+        """Add custom tag to the checkbox selection."""
+        if not custom_tag or not custom_tag.strip():
+            return tags, ""
+        custom = custom_tag.strip().lower().replace(" ", "-")
+        new_tags = list(tags)
+        if custom not in new_tags:
+            new_tags.append(custom)
+        return new_tags, ""
+    
+    # Update trellis_tag_file_path when generation completes
+    def trellis_generation_with_tagging(*args):
+        """Wrapper that also tracks file for tagging."""
+        output_path, logs, progress, preview = trellis_generate_with_preview(*args)
+        return output_path, logs, progress, preview, output_path
+    
+    # Re-wire Trellis generate button to also update tag file path
+    trellis_generate_btn.click(
+        fn=trellis_generation_with_tagging,
+        inputs=[
+            input_image, image_scale,
+            settings_gen3c_endpoint, settings_gen3c_key,
+            trellis_resolution, trellis_guidance, trellis_seed,
+            trellis_output_name, trellis_output_dir, trellis_format,
+            global_log_params, global_encode_params,
+        ],
+        outputs=[output_display, trellis_logs, trellis_progress, trellis_3d_viewer, trellis_tag_file_path],
+    )
+    
+    trellis_tag_save_btn.click(
+        fn=trellis_save_tags,
+        inputs=[trellis_tag_checkboxes, trellis_tag_custom, trellis_tag_file_path],
+        outputs=[trellis_tag_status, trellis_tag_checkboxes],
+    )
+    
+    trellis_tag_add_btn.click(
+        fn=trellis_add_custom_tag,
+        inputs=[trellis_tag_checkboxes, trellis_tag_custom],
+        outputs=[trellis_tag_checkboxes, trellis_tag_custom],
+    )
+    
+    # --- Hunyuan Tagging ---
+    def hunyuan_save_tags(tags, custom_tag, file_path):
+        """Save tags for Hunyuan generated model."""
+        if not file_path or not os.path.exists(file_path):
+            return "*No model to tag (generate first)*", []
+        
+        all_tags = list(tags)
+        if custom_tag and custom_tag.strip():
+            custom = custom_tag.strip().lower().replace(" ", "-")
+            if custom not in all_tags:
+                all_tags.append(custom)
+                tag_manager.add_custom_tag(custom)
+        
+        if not all_tags:
+            return "*No tags selected*", tags
+        
+        tag_manager.set_tags(file_path, all_tags, model="Hunyuan")
+        return f"✅ Tagged with: {', '.join(all_tags)}", []
+    
+    def hunyuan_add_custom_tag(tags, custom_tag):
+        """Add custom tag to the checkbox selection."""
+        if not custom_tag or not custom_tag.strip():
+            return tags, ""
+        custom = custom_tag.strip().lower().replace(" ", "-")
+        new_tags = list(tags)
+        if custom not in new_tags:
+            new_tags.append(custom)
+        return new_tags, ""
+    
+    # Update hunyuan_tag_file_path when generation completes
+    def hunyuan_generation_with_tagging(*args):
+        """Wrapper that also tracks file for tagging."""
+        output_path, logs, progress, preview = hunyuan_generate_with_preview(*args)
+        return output_path, logs, progress, preview, output_path
+    
+    # Re-wire Hunyuan generate button to also update tag file path
     hunyuan_generate_btn.click(
-        fn=hunyuan_generate_with_preview,
+        fn=hunyuan_generation_with_tagging,
         inputs=[
             input_image, image_scale, hunyuan_exec_mode,
             settings_hunyuan_endpoint, settings_hunyuan_key,
@@ -2333,7 +2602,19 @@ Min Component Ratio: 1% (default)
             hunyuan_output_name, hunyuan_output_dir,
             global_log_params, global_encode_params,
         ],
-        outputs=[output_display, hunyuan_logs, hunyuan_progress, hunyuan_3d_viewer],
+        outputs=[output_display, hunyuan_logs, hunyuan_progress, hunyuan_3d_viewer, hunyuan_tag_file_path],
+    )
+    
+    hunyuan_tag_save_btn.click(
+        fn=hunyuan_save_tags,
+        inputs=[hunyuan_tag_checkboxes, hunyuan_tag_custom, hunyuan_tag_file_path],
+        outputs=[hunyuan_tag_status, hunyuan_tag_checkboxes],
+    )
+    
+    hunyuan_tag_add_btn.click(
+        fn=hunyuan_add_custom_tag,
+        inputs=[hunyuan_tag_checkboxes, hunyuan_tag_custom],
+        outputs=[hunyuan_tag_checkboxes, hunyuan_tag_custom],
     )
     
     # =========================================================================
@@ -2536,13 +2817,18 @@ Min Component Ratio: 1% (default)
     # Store video paths mapping (display name -> full path)
     _video_paths_cache = {}
 
-    # Refresh video list (Gen3C + LTX-2) with sort and filter
-    def refresh_video_list(sort_by="Date (newest)", limit="10"):
+    # Refresh video list (Gen3C + LTX-2) with sort, limit, and tag filter
+    def refresh_video_list(sort_by="Date (newest)", limit="10", tag_filter=None):
         """Refresh video checkboxes with videos from Gen3C and LTX-2 directories."""
         global _video_paths_cache
         gen3c_dir = "/srv/searidge_share/outputs/gen3c"
         ltx2_dir = "/srv/searidge_share/outputs/ltx2"
-        videos = list_all_videos(gen3c_dir, ltx2_dir, sort_by=sort_by, limit=limit)
+        
+        # Convert empty list to None for tag_filter
+        if tag_filter is not None and len(tag_filter) == 0:
+            tag_filter = None
+        
+        videos = list_all_videos(gen3c_dir, ltx2_dir, sort_by=sort_by, limit=limit, tag_filter=tag_filter)
 
         # Update cache and create choices
         _video_paths_cache = {v[0]: v[1] for v in videos}
@@ -2553,19 +2839,24 @@ Min Component Ratio: 1% (default)
     # Wire refresh button
     twodgs_components["refresh_videos_btn"].click(
         fn=refresh_video_list,
-        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"], twodgs_components["video_tag_filter"]],
         outputs=[twodgs_components["video_checkboxes"]],
     )
     
-    # Auto-refresh when sort or limit changes
+    # Auto-refresh when sort, limit, or tag filter changes
     twodgs_components["video_sort_by"].change(
         fn=refresh_video_list,
-        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"], twodgs_components["video_tag_filter"]],
         outputs=[twodgs_components["video_checkboxes"]],
     )
     twodgs_components["video_limit"].change(
         fn=refresh_video_list,
-        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"]],
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"], twodgs_components["video_tag_filter"]],
+        outputs=[twodgs_components["video_checkboxes"]],
+    )
+    twodgs_components["video_tag_filter"].change(
+        fn=refresh_video_list,
+        inputs=[twodgs_components["video_sort_by"], twodgs_components["video_limit"], twodgs_components["video_tag_filter"]],
         outputs=[twodgs_components["video_checkboxes"]],
     )
 

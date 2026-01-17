@@ -9,6 +9,7 @@ This module provides tab UI components for each model:
 - TRELLIS.2: Image → GLB with PBR (Microsoft)
 - Mesh Extraction: 3DGS → GLB/OBJ (SuGaR)
 - CREATE: Gen3C → ViPE → 2DGS → Mesh (Stage Reconstruction)
+- Gallery: Browse and tag render outputs
 """
 
 from ui.tabs.hunyuan_tab import create_hunyuan_tab
@@ -18,6 +19,7 @@ from ui.tabs.lyra_tab import create_lyra_tab, scan_for_lyra_ply_files
 from ui.tabs.trellis_tab import create_trellis_tab
 from ui.tabs.mesh_extraction_tab import create_mesh_extraction_tab, scan_for_ply_files
 from ui.tabs.create_tab import create_create_tab
+from ui.tabs.gallery_tab import create_gallery_tab
 
 __all__ = [
     "create_hunyuan_tab",
@@ -29,5 +31,6 @@ __all__ = [
     "create_mesh_extraction_tab",
     "scan_for_ply_files",
     "create_create_tab",
+    "create_gallery_tab",
 ]
 

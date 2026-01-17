@@ -72,7 +72,7 @@ def create_2dgs_tab(
                     # Sort and filter controls
                     with gr.Row():
                         video_sort_by = gr.Dropdown(
-                            choices=["Date (newest)", "Date (oldest)", "Filename (A-Z)", "Filename (Z-A)", "Model (Gen3C first)", "Model (LTX-2 first)"],
+                            choices=["Date (newest)", "Date (oldest)", "Filename (A-Z)", "Filename (Z-A)", "Model (Gen3C first)", "Model (LTX-2 first)", "Tagged first"],
                             value="Date (newest)",
                             label="Sort by",
                             scale=2,
@@ -84,6 +84,21 @@ def create_2dgs_tab(
                             scale=1,
                         )
                         refresh_videos_btn = gr.Button("🔄", size="sm", scale=0, min_width=40)
+                    
+                    # Tag filter
+                    try:
+                        from utils.tag_manager import get_tag_manager
+                        _tag_choices = get_tag_manager().get_all_tags_flat()
+                    except ImportError:
+                        _tag_choices = []
+                    
+                    video_tag_filter = gr.Dropdown(
+                        choices=_tag_choices,
+                        value=[],
+                        label="Filter by Tags",
+                        multiselect=True,
+                        info="Show only videos with selected tags",
+                    )
                     
                     # Single-column video list with custom CSS
                     video_checkboxes = gr.CheckboxGroup(
@@ -284,6 +299,7 @@ def create_2dgs_tab(
         "video_checkboxes": video_checkboxes,
         "video_sort_by": video_sort_by,
         "video_limit": video_limit,
+        "video_tag_filter": video_tag_filter,
         "refresh_videos_btn": refresh_videos_btn,
         "selected_count": selected_count,
         "upload_group": upload_group,

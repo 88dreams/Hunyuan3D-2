@@ -1092,7 +1092,8 @@ def list_all_videos(
     gen3c_dir: str = "/srv/searidge_share/outputs/gen3c",
     ltx2_dir: str = "/srv/searidge_share/outputs/ltx2",
     sort_by: str = "Date (newest)",
-    limit: str = "10"
+    limit: str = "10",
+    tag_filter: list = None
 ) -> list:
     """List MP4 videos from both Gen3C and LTX-2 output directories.
 
@@ -1102,11 +1103,19 @@ def list_all_videos(
         sort_by: Sort method - "Date (newest)", "Date (oldest)", "Filename (A-Z)", 
                  "Filename (Z-A)", "Model (Gen3C first)", "Model (LTX-2 first)"
         limit: Number of videos to return - "10", "20", "30", "50", "All"
+        tag_filter: Optional list of tags to filter by (videos must have at least one)
 
     Returns:
         List of tuples: (display_name, full_path, model, mtime)
     """
     from pathlib import Path
+    
+    # Import tag manager for tag filtering
+    try:
+        from utils.tag_manager import get_tag_manager
+        tag_manager = get_tag_manager()
+    except ImportError:
+        tag_manager = None
 
     videos = []
 
@@ -1116,7 +1125,25 @@ def list_all_videos(
         for v in gen3c_path.glob("*.mp4"):
             try:
                 mtime = v.stat().st_mtime
-                videos.append((f"[Gen3C] {v.name}", str(v), "Gen3C", mtime))
+                file_path = str(v)
+                
+                # Get tags for this file
+                file_tags = tag_manager.get_tags(file_path) if tag_manager else []
+                
+                # Skip files marked for deletion
+                if "delete" in file_tags:
+                    continue
+                
+                # Apply tag filter
+                if tag_filter:
+                    if not any(t in file_tags for t in tag_filter):
+                        continue
+                
+                # Format display name with tags
+                tag_suffix = f" [{', '.join(file_tags)}]" if file_tags else ""
+                display_name = f"[Gen3C] {v.name}{tag_suffix}"
+                
+                videos.append((display_name, file_path, "Gen3C", mtime, file_tags))
             except OSError:
                 pass
 
@@ -1126,7 +1153,25 @@ def list_all_videos(
         for v in ltx2_path.glob("*.mp4"):
             try:
                 mtime = v.stat().st_mtime
-                videos.append((f"[LTX-2] {v.name}", str(v), "LTX-2", mtime))
+                file_path = str(v)
+                
+                # Get tags for this file
+                file_tags = tag_manager.get_tags(file_path) if tag_manager else []
+                
+                # Skip files marked for deletion
+                if "delete" in file_tags:
+                    continue
+                
+                # Apply tag filter
+                if tag_filter:
+                    if not any(t in file_tags for t in tag_filter):
+                        continue
+                
+                # Format display name with tags
+                tag_suffix = f" [{', '.join(file_tags)}]" if file_tags else ""
+                display_name = f"[LTX-2] {v.name}{tag_suffix}"
+                
+                videos.append((display_name, file_path, "LTX-2", mtime, file_tags))
             except OSError:
                 pass
 
@@ -1143,6 +1188,9 @@ def list_all_videos(
         videos.sort(key=lambda x: (0 if x[2] == "Gen3C" else 1, -x[3]))
     elif sort_by == "Model (LTX-2 first)":
         videos.sort(key=lambda x: (0 if x[2] == "LTX-2" else 1, -x[3]))
+    elif sort_by == "Tagged first":
+        # Sort by has-tags (True first), then by date
+        videos.sort(key=lambda x: (0 if x[4] else 1, -x[3]))
 
     # Apply limit
     if limit != "All":
